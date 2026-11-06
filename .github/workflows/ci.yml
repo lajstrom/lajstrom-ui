@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Build, lint and test jobs are added with the first code (lajstrom/lajstrom#70).
+  dco:
+    name: dco
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check Signed-off-by on every commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # One line per commit: sha, parent count, signed-off (true/false), subject.
+          gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/commits" \
+            --jq '.[] | [.sha[0:12], (.parents | length), (.commit.message | split("\n") | any(test("^Signed-off-by: .+ <.+>\\s*$"))), (.commit.message | split("\n")[0])] | @tsv' \
+            > commits.tsv
+          missing=0
+          while IFS=$'\t' read -r sha parents signed subject; do
+            if [ "${parents}" -gt 1 ]; then
+              echo "skip  ${sha} (merge commit) ${subject}"
+            elif [ "${signed}" = "true" ]; then
+              echo "ok    ${sha} ${subject}"
+            else
+              echo "::error::Commit ${sha} has no Signed-off-by line: ${subject}"
+              missing=$((missing + 1))
+            fi
+          done < commits.tsv
+          if [ "${missing}" -gt 0 ]; then
+            echo "${missing} commit(s) are not signed off. Use 'git commit -s'; to fix existing commits run 'git rebase --signoff main' and push again. See CONTRIBUTING.md of lajstrom/lajstrom."
+            exit 1
+          fi
