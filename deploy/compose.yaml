@@ -1,0 +1,19 @@
+# The UI alone, on mock data: docker compose -f deploy/compose.yaml up --build
+# Then open http://localhost:8081/ui/
+#
+# Against a running Lajstrom instead (make run in lajstrom/lajstrom serves :8080): set
+# LAJSTROM_UI_MOCK=false and LAJSTROM_API_UPSTREAM=http://host.docker.internal:8080; this nginx
+# then forwards /api/ and /-/ to it, so the browser still sees one origin.
+services:
+  lajstrom-ui:
+    build: ..
+    image: ghcr.io/lajstrom/lajstrom-ui:dev
+    ports:
+      - "8081:8080"
+    environment:
+      LAJSTROM_UI_MOCK: "true"
+      LAJSTROM_UI_TITLE: "Lajstrom (dev)"
+      # LAJSTROM_API_UPSTREAM: "http://host.docker.internal:8080"
+    read_only: true
+    tmpfs:
+      - /tmp

@@ -1,0 +1,125 @@
+# Lajstrom UI on Kubernetes: its own Deployment and Service; one Ingress host sends /ui to the
+# UI and everything else to the Lajstrom server, so the browser sees one origin (no CORS).
+#
+#   kubectl apply -n lajstrom -f deploy/k8s/lajstrom-ui.yaml
+#
+# Assumptions to adjust: the image tag, the host, the ingress class, and the name and port of the
+# Lajstrom server's Service (lajstrom:8080). Until the server serves /api/v1, keep
+# LAJSTROM_UI_MOCK=true: the UI then runs on generated data and needs no backend.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lajstrom-ui
+  labels:
+    app.kubernetes.io/name: lajstrom-ui
+    app.kubernetes.io/part-of: lajstrom
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: lajstrom-ui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: lajstrom-ui
+        app.kubernetes.io/part-of: lajstrom
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ui
+          image: ghcr.io/lajstrom/lajstrom-ui:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: LAJSTROM_UI_MOCK
+              value: "true"
+            - name: LAJSTROM_UI_TITLE
+              value: "Lajstrom"
+            # Empty: the API is on the same origin, routed by the Ingress below.
+            - name: LAJSTROM_UI_API_URL
+              value: ""
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lajstrom-ui
+  labels:
+    app.kubernetes.io/name: lajstrom-ui
+    app.kubernetes.io/part-of: lajstrom
+spec:
+  selector:
+    app.kubernetes.io/name: lajstrom-ui
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: lajstrom
+  labels:
+    app.kubernetes.io/part-of: lajstrom
+  annotations:
+    # Artifacts can be large: no body size limit at the edge (ingress-nginx); Lajstrom enforces
+    # the per-repo maxFileSize itself.
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: art.example.com
+      http:
+        paths:
+          # The UI, in its own pods.
+          - path: /ui
+            pathType: Prefix
+            backend:
+              service:
+                name: lajstrom-ui
+                port:
+                  name: http
+          # Everything else: protocol frontends (/raw, /pypi, /apt, /maven), the OCI facade (/v2),
+          # the API (/api/v1) and system endpoints (/-/). Comment this out while there is no server.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: lajstrom
+                port:
+                  number: 8080
