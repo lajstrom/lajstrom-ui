@@ -51,9 +51,11 @@ server's specs. The read endpoints the UI needs are proposed in
 
 The demo is the whole UI on generated data: a mock of `/api/v1` answers in the browser (a
 service worker, MSW), and what you change there, such as tokens, is kept in this browser's
-`localStorage`. Nothing reaches a server. It starts signed in as `admin`; the user menu switches
-to `alice`, `bob` or `carol` to see how the UI follows their bindings, and the sign-in page takes
-any of them with any password.
+`localStorage`. Nothing reaches a server. It opens at the sign-in page, like the tool behind
+its login will: the accounts are `admin` / `admin`, `alice` / `alice`, `bob` / `bob` and
+`carol` / `carol` (the password is the name), each with the bindings of the demo's data, so
+signing in as another one shows how the UI follows them. The sign-in page lists them; a click
+fills the form.
 
 - Next to a server, "Open the demo" on the sign-in page, "See it in the demo" where the server
   has no endpoint yet, or `/ui/?demo=1` enter it; "Exit demo" or `?demo=0` go back. The real

@@ -1,6 +1,7 @@
 // Authentication and tokens of the mock, after the server's docs/auth.md and docs/api.md:
 // Basic with a password or a personal access token, Bearer with a personal access token,
-// refused credentials answered 401. The mock takes any password of a user that is not disabled.
+// refused credentials answered 401. In the demo a user's password is the user's name: admin /
+// admin, alice / alice; a disabled user is refused whatever the password.
 
 import type { CreatedToken, Token, TokenRequest, TokenScope } from "@/api/types";
 import { sha256Hex } from "@/lib/sha256";
@@ -89,7 +90,7 @@ export function authenticate(request: Request): Authn {
       used(t);
       return { principal: creds.user };
     }
-    if (creds.secret.startsWith("ljs_dep_") || creds.secret.length === 0) return { refused: true };
+    if (creds.secret !== creds.user) return { refused: true };
     return { principal: creds.user };
   }
   return { principal: "anonymous" };

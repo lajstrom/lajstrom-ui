@@ -5,7 +5,7 @@ import { useId, useState, type FormEvent } from "react";
 
 import { SESSION_LIFETIME, SignInError, signInWithPassword, signInWithToken } from "@/api/auth";
 import { config } from "@/app/config";
-import { demoMode, enterDemo } from "@/app/demo";
+import { demoMode, demoUsers, enterDemo } from "@/app/demo";
 import { useSession } from "@/app/session";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
@@ -46,6 +46,14 @@ export function SignInPage() {
     signIn.mutate();
   };
 
+  // A demo account fills the form; signing in stays a click on the button.
+  const fill = (name: string) => {
+    signIn.reset();
+    setUser(name);
+    setPassword(name);
+    if (method === "token") void navigate({ to: "/sign-in", search: (prev: Search) => ({ ...prev, method: undefined }), replace: true });
+  };
+
   return (
     <div className="mx-auto mt-8 max-w-sm">
       <h1 className="mb-1 text-xl font-semibold tracking-tight">Sign in to {config().title}</h1>
@@ -54,6 +62,8 @@ export function SignInPage() {
           <>
             You are signed in as <span className="font-mono text-foreground">{session.user}</span>; signing in again replaces the session.
           </>
+        ) : demoMode().active ? (
+          "This is the demo: sign in with one of the accounts below."
         ) : (
           "Public repositories are readable without signing in."
         )}
@@ -136,13 +146,28 @@ export function SignInPage() {
       </Card>
 
       {demoMode().active ? (
-        <p className="mt-4 flex items-start gap-2 text-xs text-muted-foreground">
-          <FlaskConical className="mt-0.5 size-3.5 shrink-0" />
-          <span>
-            Demo: sign in as <span className="font-mono">admin</span> (every repo), <span className="font-mono">alice</span>,{" "}
-            <span className="font-mono">bob</span> or <span className="font-mono">carol</span>, with any password.
-          </span>
-        </p>
+        <div className="mt-4 rounded-lg border border-border px-3 py-3">
+          <div className="mb-2 flex items-center gap-2 px-1 text-xs font-medium">
+            <FlaskConical className="size-3.5 text-muted-foreground" />
+            Demo accounts: the password is the name
+          </div>
+          <ul>
+            {demoUsers.map((u) => (
+              <li key={u.name}>
+                <button
+                  type="button"
+                  onClick={() => fill(u.name)}
+                  className="flex w-full cursor-pointer items-baseline gap-2 rounded-md px-1 py-1 text-left text-xs transition-colors hover:bg-muted"
+                >
+                  <span className="w-28 shrink-0 font-mono text-foreground">
+                    {u.name} / {u.name}
+                  </span>
+                  <span className="text-muted-foreground">{u.description}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : demoMode().offered ? (
         <div className="mt-4 flex items-center gap-3 rounded-lg border border-border px-4 py-3">
           <FlaskConical className="size-4 shrink-0 text-muted-foreground" />

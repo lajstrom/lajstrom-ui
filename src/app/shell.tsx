@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { Link, Navigate, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { Boxes, Braces, Check, FlaskConical, History, KeyRound, LogIn, LogOut, Monitor, Moon, Search, Server, Sun, User, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { signInWithPassword, signOut } from "@/api/auth";
+import { signOut } from "@/api/auth";
 import { infoQuery, whoamiQuery } from "@/api/queries";
 import { RelativeTime } from "@/components/common";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +15,7 @@ import { cn } from "@/lib/cn";
 
 import { CommandPalette } from "./command-palette";
 import { config } from "./config";
-import { demoMode, demoUsers, exitDemo, resetDemo } from "./demo";
+import { demoMode, exitDemo, resetDemo } from "./demo";
 import { useSession } from "./session";
 import { setTheme, useTheme, type Theme } from "./theme";
 
@@ -99,11 +99,6 @@ function UserMenu() {
     await signOut();
     void navigate({ to: "/" });
   };
-  // The demo signs in as any of its users with any password: one click to see their view.
-  const viewAs = async (name: string) => {
-    await signOut();
-    await signInWithPassword(name, "demo");
-  };
   return (
     <Menu>
       <MenuTrigger asChild>
@@ -134,25 +129,6 @@ function UserMenu() {
           </div>
         ) : null}
         <MenuSeparator />
-        {demoMode().active ? (
-          <>
-            <MenuLabel className="flex items-center gap-1.5">
-              <FlaskConical className="size-3.5" />
-              Demo: view as
-            </MenuLabel>
-            {demoUsers.map((u) => (
-              <MenuItem
-                key={u.name}
-                onSelect={() => void viewAs(u.name)}
-                hint={u.name === me.name ? <Check className="size-3.5" /> : null}
-              >
-                <span className="font-mono">{u.name}</span>
-                <span className="block text-xs text-muted-foreground">{u.description}</span>
-              </MenuItem>
-            ))}
-            <MenuSeparator />
-          </>
-        ) : null}
         <MenuItem icon={<KeyRound />} onSelect={() => void navigate({ to: "/tokens" })}>
           Personal access tokens
         </MenuItem>
@@ -191,6 +167,12 @@ export function AppShell() {
   const who = useQuery(whoamiQuery);
   const info = useQuery(infoQuery);
   const demo = demoMode();
+  const session = useSession();
+  const location = useRouterState({ select: (s) => s.location });
+  // The demo opens at its sign-in page, like the tool behind a login will; signed out, every
+  // page leads there and back after signing in.
+  const signedOutDemo = demo.active && !session;
+  const walled = signedOutDemo && location.pathname !== "/sign-in";
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -230,7 +212,7 @@ export function AppShell() {
               </Badge>
             </Tooltip>
           ) : null}
-          <nav className="ml-2 flex items-center gap-0.5">
+          <nav className={cn("ml-2 flex items-center gap-0.5", signedOutDemo && "hidden")}>
             <NavLink to="/" icon={<Boxes />}>
               Repositories
             </NavLink>
@@ -257,7 +239,10 @@ export function AppShell() {
             <button
               type="button"
               onClick={() => setPaletteOpen(true)}
-              className="flex h-8 w-9 cursor-pointer items-center gap-2 rounded-md border border-border bg-surface px-2.5 text-sm text-muted-foreground shadow-card transition-colors hover:text-foreground sm:w-64"
+              className={cn(
+                "flex h-8 w-9 cursor-pointer items-center gap-2 rounded-md border border-border bg-surface px-2.5 text-sm text-muted-foreground shadow-card transition-colors hover:text-foreground sm:w-64",
+                signedOutDemo && "hidden",
+              )}
             >
               <Search className="size-4 shrink-0" />
               <span className="hidden flex-1 text-left sm:inline">Search packages…</span>
@@ -267,14 +252,14 @@ export function AppShell() {
               </span>
             </button>
             <ThemeMenu />
-            <UserMenu />
+            {signedOutDemo ? null : <UserMenu />}
           </div>
         </div>
         {demo.active ? <DemoBar forced={demo.forced} /> : null}
       </header>
 
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6">
-        <Outlet />
+        {walled ? <Navigate to="/sign-in" search={{ redirect: location.href }} replace /> : <Outlet />}
       </main>
 
       <footer className="border-t border-border">
