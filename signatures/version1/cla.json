@@ -1,3 +1,12 @@
 {
-   "signedContributors": []
+  "signedContributors": [
+    {
+      "name": "megative",
+      "id": 29413909,
+      "comment_id": 6726103083,
+      "created_at": "2026-11-08T19:34:06Z",
+      "repoId": 1448719820,
+      "pullRequestNo": 1
+    }
+  ]
 }
