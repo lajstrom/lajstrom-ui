@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:pages": "sh scripts/build-pages.sh",
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "lint": "eslint .",
