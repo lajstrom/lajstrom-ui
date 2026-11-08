@@ -94,6 +94,17 @@ LAJSTROM_UI_MOCK=false LAJSTROM_API_UPSTREAM=http://localhost:8080 npm run dev
 The dev server forwards `/api` and `/-` to the server, so the browser sees one origin: the server
 does not answer cross-origin requests. `LAJSTROM_UI_DEMO=false` hides the demo.
 
+## The demo on GitHub Pages
+
+The demo is a static site: no server, nothing to run. `npm run build:pages` builds it into
+`dist/pages`, below `LAJSTROM_UI_BASE` (default `/lajstrom-ui/`, the path of the project site
+`https://<owner>.github.io/lajstrom-ui/`), with `config.json` set to the demo only, a
+`404.html` so that links into the app open, and `.nojekyll`. Any static hosting with HTTPS takes
+the same files; over HTTPS the service worker runs, so the requests show in the Network panel.
+
+[.github/workflows/pages.yml](.github/workflows/pages.yml) publishes it on every push to `main`
+(or by hand); the repository needs Settings → Pages → Source: GitHub Actions, once.
+
 ## Container image
 
 ```sh
