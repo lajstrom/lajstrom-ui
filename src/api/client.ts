@@ -7,13 +7,22 @@ import type { ApiErrorBody } from "./types";
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
+  /** The answer was Lajstrom's error envelope; false for a network failure or a proxy's page. */
+  readonly fromServer: boolean;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, fromServer = true) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.fromServer = fromServer;
   }
+}
+
+/** Whether no Lajstrom server answered: the network failed, or a proxy in front of the server
+ * (nginx, the dev server) answered 5xx with a page of its own. */
+export function isUnreachable(err: unknown): boolean {
+  return err instanceof ApiError && (err.status === 0 || (err.status >= 500 && !err.fromServer));
 }
 
 /**
@@ -76,21 +85,23 @@ async function request(method: string, path: string, opts: RequestOptions = {}):
     });
   } catch (err) {
     if ((err as Error).name === "AbortError") throw err;
-    throw new ApiError(0, "UNAVAILABLE", "The Lajstrom API cannot be reached.");
+    throw new ApiError(0, "UNAVAILABLE", "The Lajstrom API cannot be reached.", false);
   }
   if (!res.ok) {
     let code = "UNAVAILABLE";
-    let message = `${res.status} ${res.statusText}`;
+    let message = `${res.status} ${res.statusText}`.trim();
+    let fromServer = false;
     try {
       const body = (await res.json()) as ApiErrorBody;
       code = body.error.code;
       message = body.error.message;
+      fromServer = true;
     } catch {
       // Not the error envelope: a proxy error page, for example.
     }
     // The session's token was refused: revoked, expired, or its user disabled. Signed out.
     if (res.status === 401 && session && getSession()?.token === session.token) setSession(null);
-    throw new ApiError(res.status, code, message);
+    throw new ApiError(res.status, code, message, fromServer);
   }
   return res;
 }

@@ -108,15 +108,22 @@ scripts, `X-Frame-Options: DENY` and `nosniff`.
 
 `docker run -p 8081:8080 …` listens on every interface, so a phone or a laptop on the same
 network opens `http://<ip-of-this-machine>:8081/ui/` (macOS: `ipconfig getifaddr en0`, or the
-Bonjour name `http://<LocalHostName>.local:8081/ui/`). For the dev server with hot reload:
-`npm run dev -- --host`, then port 5173.
+Bonjour name `http://<LocalHostName>.local:8081/ui/`). With a server running on the same machine,
+let the image proxy the API, so that the browser sees one origin:
+
+```sh
+docker run -d -p 8081:8080 -e LAJSTROM_API_UPSTREAM=http://host.docker.internal:8080 ghcr.io/lajstrom/lajstrom-ui:dev
+```
+
+For the dev server with hot reload: `npm run dev -- --host` (with `LAJSTROM_UI_MOCK=false` and
+`LAJSTROM_API_UPSTREAM` for a real server), then port 5173; it answers the `.local` name too.
 
 On macOS 15 and later the app that serves (Docker Desktop, or the terminal running the dev
 server) needs the **Local Network** permission (System Settings → Privacy & Security → Local
 Network); without it other devices get `ERR_ADDRESS_UNREACHABLE` or a request that hangs.
 
 Plain `http://` to an IP is not a secure context: browsers offer neither service workers nor the
-Clipboard API there. The mock still works, because MSW falls back to intercepting `fetch` in the
+Clipboard API there. The demo still works, because MSW falls back to intercepting `fetch` in the
 page, and copy buttons fall back to a hidden textarea. Each device generates its own demo data;
 what is done in the demo and the theme are kept per browser.
 

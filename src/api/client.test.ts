@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ApiError, basicAuth, isUnavailable } from "./client";
+import { ApiError, basicAuth, isUnavailable, isUnreachable } from "./client";
 
 /** base64 of the UTF-8 bytes, computed independently of basicAuth. */
 const b64 = (s: string) => btoa(Array.from(new TextEncoder().encode(s), (b) => String.fromCharCode(b)).join(""));
@@ -28,5 +28,19 @@ describe("isUnavailable", () => {
     expect(isUnavailable(new ApiError(403, "FORBIDDEN", "not in this version"))).toBe(false);
     expect(isUnavailable(new Error("GET /api/v1/x is not in this version"))).toBe(false);
     expect(isUnavailable(null)).toBe(false);
+  });
+});
+
+describe("isUnreachable", () => {
+  it("is true when no Lajstrom server answered", () => {
+    expect(isUnreachable(new ApiError(0, "UNAVAILABLE", "cannot be reached", false))).toBe(true);
+    expect(isUnreachable(new ApiError(502, "UNAVAILABLE", "502 Bad Gateway", false))).toBe(true);
+    expect(isUnreachable(new ApiError(500, "UNAVAILABLE", "500 Internal Server Error", false))).toBe(true);
+  });
+
+  it("is false for an answer of the server itself", () => {
+    expect(isUnreachable(new ApiError(500, "INTERNAL", "Internal Server Error"))).toBe(false);
+    expect(isUnreachable(new ApiError(501, "UNAVAILABLE", "comes later"))).toBe(false);
+    expect(isUnreachable(new ApiError(404, "NOT_FOUND", "x", false))).toBe(false);
   });
 });
