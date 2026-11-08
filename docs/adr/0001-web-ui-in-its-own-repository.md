@@ -6,7 +6,7 @@
 
 ## Context
 
-The server's plan has a read-only web UI after the MVP (lajstrom/lajstrom P-07, #70): "SPA
+The server's plan has a read-only web UI after the MVP: "SPA
 served at `/ui`, backed by `/api/v1`; search; per-format usage snippets; later: management
 screens". `/ui` is a reserved first segment of the one-host layout (lajstrom ADR 0004,
 `docs/spec/http-routing.md` §1).

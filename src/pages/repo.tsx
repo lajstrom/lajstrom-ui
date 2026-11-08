@@ -14,6 +14,7 @@ import { SearchInput } from "@/components/ui/input";
 import { EmptyState, Segmented, Skeleton } from "@/components/ui/misc";
 import { SortableTH, TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Tooltip } from "@/components/ui/tooltip";
+import { can } from "@/lib/access";
 import { cn } from "@/lib/cn";
 import { cursorStart } from "@/lib/cursor";
 import { formatBytes, formatNumber, pluralize, shortDigest } from "@/lib/format";
@@ -68,7 +69,7 @@ export function RepoPage() {
   }
 
   const r = repo.data;
-  const canManage = r?.permissions.includes("manage") ?? false;
+  const canManage = r ? can(r, "manage") : false;
   const tabs: { id: NonNullable<RepoSearch["tab"]>; label: string; show: boolean }[] = [
     { id: "packages", label: spec.noun.many[0]!.toUpperCase() + spec.noun.many.slice(1), show: true },
     { id: "connect", label: "Connect", show: true },
@@ -94,9 +95,19 @@ export function RepoPage() {
         description={
           r ? (
             <span className="tabular">
-              {pluralize(r.stats.packages, spec.noun.one, spec.noun.many)} · {pluralize(r.stats.versions, "version")} ·{" "}
-              {formatBytes(r.stats.size)} · stored in <span className="font-mono text-foreground">{r.registry}</span> · last publish{" "}
-              <RelativeTime iso={r.stats.lastPushAt} />
+              {r.stats ? (
+                <>
+                  {pluralize(r.stats.packages, spec.noun.one, spec.noun.many)} · {pluralize(r.stats.versions, "version")} ·{" "}
+                  {formatBytes(r.stats.size)} ·{" "}
+                </>
+              ) : null}
+              stored in <span className="font-mono text-foreground">{r.registry}</span>
+              {r.stats ? (
+                <>
+                  {" "}
+                  · last publish <RelativeTime iso={r.stats.lastPushAt} />
+                </>
+              ) : null}
             </span>
           ) : (
             <Skeleton className="h-4 w-96" />
@@ -271,7 +282,7 @@ function PackagesTab({ repo, spec, search, setSearch }: PackagesTabProps) {
 
   return (
     <>
-      {repo.stats.packages > 0 ? <QuickConnect repo={repo} spec={spec} facets={data?.facets} /> : null}
+      {(repo.stats?.packages ?? 0) > 0 ? <QuickConnect repo={repo} spec={spec} facets={data?.facets} /> : null}
       <Card>
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
           <SearchInput

@@ -13,7 +13,15 @@ import { EmptyState, Segmented, Skeleton } from "@/components/ui/misc";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Tooltip } from "@/components/ui/tooltip";
 import { formatBytes, formatNumber } from "@/lib/format";
-import { formatOrder, formats } from "@/lib/formats";
+import { formatOrder, formatSpec, formats } from "@/lib/formats";
+
+/** Roadmap order; formats without pages (oci) last. */
+const rank = (f: string) => {
+  const i = formatOrder.indexOf(f as FormatName);
+  return i < 0 ? formatOrder.length : i;
+};
+
+const NO_COUNTS = "This server version does not report counts yet";
 
 type Search = { format?: string; q?: string };
 
@@ -50,17 +58,26 @@ export function ReposPage() {
       all
         .filter((r) => format === "all" || r.format === format)
         .filter((r) => !q || r.prefix.includes(q.toLowerCase()))
-        .sort((a, b) => formatOrder.indexOf(a.format) - formatOrder.indexOf(b.format) || a.name.localeCompare(b.name)),
+        .sort((a, b) => rank(a.format) - rank(b.format) || a.name.localeCompare(b.name)),
     [all, format, q],
   );
 
   const totals = useMemo(() => {
-    const t = { packages: 0, versions: 0, size: 0, last: null as string | null, registries: new Set<string>() };
+    const t = {
+      packages: 0,
+      versions: 0,
+      size: 0,
+      last: null as string | null,
+      registries: new Set<string>(),
+      // Counts only when the server reports them for every repo (api-proposal.md §3.2).
+      counted: all.every((r) => r.stats),
+    };
     for (const r of all) {
+      t.registries.add(r.registry);
+      if (!r.stats) continue;
       t.packages += r.stats.packages;
       t.versions += r.stats.versions;
       t.size += r.stats.size;
-      t.registries.add(r.registry);
       if (r.stats.lastPushAt && (!t.last || r.stats.lastPushAt > t.last)) t.last = r.stats.lastPushAt;
     }
     return t;
@@ -81,9 +98,24 @@ export function ReposPage() {
         ) : (
           <>
             <Stat icon={<Boxes />} label="Repositories" value={all.length} hint={`${totals.registries.size} backend registries`} />
-            <Stat icon={<Package />} label="Packages" value={formatNumber(totals.packages)} hint={`${formatNumber(totals.versions)} versions`} />
-            <Stat icon={<HardDrive />} label="Stored in registries" value={formatBytes(totals.size)} hint="Sum of file layers; blobs are deduplicated by the registry" />
-            <Stat icon={<Upload />} label="Last publish" value={<RelativeTime iso={totals.last} />} />
+            <Stat
+              icon={<Package />}
+              label="Packages"
+              value={totals.counted ? formatNumber(totals.packages) : "—"}
+              hint={totals.counted ? `${formatNumber(totals.versions)} versions` : NO_COUNTS}
+            />
+            <Stat
+              icon={<HardDrive />}
+              label="Stored in registries"
+              value={totals.counted ? formatBytes(totals.size) : "—"}
+              hint={totals.counted ? "Sum of file layers; blobs are deduplicated by the registry" : NO_COUNTS}
+            />
+            <Stat
+              icon={<Upload />}
+              label="Last publish"
+              value={totals.counted ? <RelativeTime iso={totals.last} /> : "—"}
+              hint={totals.counted ? undefined : NO_COUNTS}
+            />
           </>
         )}
       </div>
@@ -148,7 +180,8 @@ export function ReposPage() {
 
 function RepoRow({ repo, showWrite }: { repo: Repo; showWrite: boolean }) {
   const navigate = useNavigate();
-  const spec = formats[repo.format];
+  const spec = formatSpec(repo.format);
+  const stats = repo.stats;
   return (
     <TR
       className="cursor-pointer transition-colors hover:bg-surface"
@@ -169,7 +202,7 @@ function RepoRow({ repo, showWrite }: { repo: Repo; showWrite: boolean }) {
             {repo.name}
           </Link>
           {repo.kind !== "hosted" ? <Badge tone="outline">{repo.kind}</Badge> : null}
-          {showWrite && repo.permissions.includes("write") ? (
+          {showWrite && repo.permissions?.includes("write") ? (
             <Tooltip content={`You can publish here (${repo.permissions.join(", ")})`}>
               <Badge tone="primary">can publish</Badge>
             </Tooltip>
@@ -177,25 +210,25 @@ function RepoRow({ repo, showWrite }: { repo: Repo; showWrite: boolean }) {
         </div>
       </TD>
       <TD className="text-right tabular">
-        <Tooltip content={`${repo.stats.packages} ${repo.stats.packages === 1 ? spec.noun.one : spec.noun.many}`}>
-          <span>{formatNumber(repo.stats.packages)}</span>
+        <Tooltip content={stats ? `${stats.packages} ${stats.packages === 1 ? spec.noun.one : spec.noun.many}` : NO_COUNTS}>
+          <span>{stats ? formatNumber(stats.packages) : "—"}</span>
         </Tooltip>
       </TD>
       <TD className="text-right tabular">
-        <Tooltip content={`${repo.stats.manifests} manifests (one per version and ${spec.variantLabel?.toLowerCase() ?? "version"})`}>
-          <span>{formatNumber(repo.stats.versions)}</span>
+        <Tooltip
+          content={stats ? `${stats.manifests} manifests (one per version and ${spec.variantLabel?.toLowerCase() ?? "version"})` : NO_COUNTS}
+        >
+          <span>{stats ? formatNumber(stats.versions) : "—"}</span>
         </Tooltip>
       </TD>
-      <TD className="text-right tabular whitespace-nowrap">{formatBytes(repo.stats.size)}</TD>
+      <TD className="text-right tabular whitespace-nowrap">{stats ? formatBytes(stats.size) : "—"}</TD>
       <TD>
         <span className="font-mono text-xs text-muted-foreground">{repo.registry}</span>
       </TD>
       <TD>
         <AccessBadge repo={repo} />
       </TD>
-      <TD className="text-muted-foreground">
-        <RelativeTime iso={repo.stats.lastPushAt} />
-      </TD>
+      <TD className="text-muted-foreground">{stats ? <RelativeTime iso={stats.lastPushAt} /> : "—"}</TD>
     </TR>
   );
 }

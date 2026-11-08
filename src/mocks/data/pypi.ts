@@ -20,7 +20,7 @@ type Release = {
   at: string;
   by: string;
   referrers?: ReferrerSpec[];
-  /** Not PEP 440: accepted and flagged lajstrom.pypi.nonstandard=true (M1-08). */
+  /** Not PEP 440: accepted and flagged lajstrom.pypi.nonstandard=true. */
   nonstandard?: boolean;
   /** Metadata layer unreadable: reindex keeps the row, flagged (manifest-profile.md §2). */
   degraded?: boolean;

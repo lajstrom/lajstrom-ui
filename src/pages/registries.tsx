@@ -167,7 +167,7 @@ export function RegistriesPage() {
         </div>
       )}
       <p className="mt-4 text-xs text-muted-foreground">
-        Capabilities come from the spikes of M0-11…M0-15 (docs/registries/); registries are configured in lajstrom.yaml, not through the API.
+        Capabilities come from the registry comparison in the server's docs/registries/; registries are configured in lajstrom.yaml, not through the API.
       </p>
     </>
   );

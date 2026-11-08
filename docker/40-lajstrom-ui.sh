@@ -2,13 +2,14 @@
 # Writes the runtime configuration of the Lajstrom UI from environment variables, before nginx
 # starts (the nginx image runs /docker-entrypoint.d/*.sh). Everything goes to /tmp/lajstrom-ui:
 #
-#   config.json       read by the browser: API base URL, mock mode, title
+#   config.json       read by the browser: API base URL, demo and mock modes, title
 #   headers           security headers, included in every location
 #   api-proxy.conf    forwards /api/ and /-/ to LAJSTROM_API_UPSTREAM, or nothing
 #
 # Variables:
 #   LAJSTROM_UI_API_URL     base URL of the Lajstrom API as the browser sees it; empty = same origin
-#   LAJSTROM_UI_MOCK        true: serve generated data from a service worker, no API needed
+#   LAJSTROM_UI_MOCK        true: the demo only, on generated data from a service worker, no API needed
+#   LAJSTROM_UI_DEMO        false: do not offer the demo next to the API (default true)
 #   LAJSTROM_UI_TITLE       instance name in the header and the page title
 #   LAJSTROM_API_UPSTREAM   http://lajstrom:8080 to let this nginx proxy the API (no Ingress)
 set -eu
@@ -18,6 +19,7 @@ mkdir -p "$out"
 
 api_url="${LAJSTROM_UI_API_URL:-}"
 mock="${LAJSTROM_UI_MOCK:-false}"
+demo="${LAJSTROM_UI_DEMO:-true}"
 title="${LAJSTROM_UI_TITLE:-Lajstrom}"
 upstream="${LAJSTROM_API_UPSTREAM:-}"
 
@@ -25,6 +27,14 @@ case "$mock" in
   true | false) ;;
   *)
     echo "40-lajstrom-ui.sh: LAJSTROM_UI_MOCK must be true or false, not '$mock'" >&2
+    exit 1
+    ;;
+esac
+
+case "$demo" in
+  true | false) ;;
+  *)
+    echo "40-lajstrom-ui.sh: LAJSTROM_UI_DEMO must be true or false, not '$demo'" >&2
     exit 1
     ;;
 esac
@@ -50,8 +60,8 @@ json_escape() {
   printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
 
-printf '{"apiBaseUrl":"%s","mock":%s,"title":"%s"}\n' \
-  "$(json_escape "$api_url")" "$mock" "$(json_escape "$title")" >"$out/config.json"
+printf '{"apiBaseUrl":"%s","mock":%s,"demo":%s,"title":"%s"}\n' \
+  "$(json_escape "$api_url")" "$mock" "$demo" "$(json_escape "$title")" >"$out/config.json"
 
 # The browser may talk to the API's origin when it is not the UI's own.
 connect_src="'self'"

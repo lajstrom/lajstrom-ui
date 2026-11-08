@@ -1,8 +1,9 @@
 import { Link } from "@tanstack/react-router";
-import { AlertTriangle, ChevronRight, Globe, KeyRound, Lock, RefreshCw, ShieldCheck, User, UserX } from "lucide-react";
+import { AlertTriangle, ChevronRight, Construction, FlaskConical, Globe, KeyRound, Lock, RefreshCw, ShieldCheck, User, UserX } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { ApiError } from "@/api/client";
+import { ApiError, isUnavailable } from "@/api/client";
+import { demoMode, enterDemo } from "@/app/demo";
 import type { FormatName, Repo } from "@/api/types";
 import { cn } from "@/lib/cn";
 import { formatDateTime, formatRelative } from "@/lib/format";
@@ -143,6 +144,22 @@ export function PageHeader({ crumbs, title, icon, badges, description, actions }
 
 export function ErrorState({ error, onRetry, className }: { error: unknown; onRetry?: () => void; className?: string }) {
   const api = error instanceof ApiError ? error : null;
+  // The demo shows what the server does not have yet, or what cannot be reached right now.
+  const demo = demoMode();
+  const tryDemo =
+    demo.offered && !demo.active ? (
+      <Button onClick={enterDemo}>
+        <FlaskConical />
+        See it in the demo
+      </Button>
+    ) : null;
+  if (api && isUnavailable(api)) {
+    return (
+      <EmptyState className={className} icon={<Construction />} title="Not in this server version yet" action={tryDemo}>
+        The server you are connected to does not offer this yet.
+      </EmptyState>
+    );
+  }
   if (api?.status === 404) {
     return (
       <EmptyState className={className} icon={<AlertTriangle />} title="Not found">
@@ -163,11 +180,16 @@ export function ErrorState({ error, onRetry, className }: { error: unknown; onRe
       icon={<AlertTriangle />}
       title="Something went wrong"
       action={
-        onRetry ? (
-          <Button onClick={onRetry}>
-            <RefreshCw />
-            Try again
-          </Button>
+        onRetry || (api?.status === 0 && tryDemo) ? (
+          <div className="flex flex-wrap justify-center gap-2">
+            {onRetry ? (
+              <Button onClick={onRetry}>
+                <RefreshCw />
+                Try again
+              </Button>
+            ) : null}
+            {api?.status === 0 ? tryDemo : null}
+          </div>
         ) : null
       }
     >

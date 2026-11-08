@@ -5,13 +5,15 @@
 export type UiConfig = {
   /** Base URL of the Lajstrom API; empty means the same origin (Ingress routes /api to it). */
   apiBaseUrl: string;
-  /** Serve fake data from a service worker instead of calling the API. */
+  /** The demo only: generated data from a service worker, no server (src/app/demo.ts). */
   mock: boolean;
+  /** Offer the demo next to the server: "Open the demo" and ?demo=1. */
+  demo: boolean;
   /** Instance name shown in the header and the page title. */
   title: string;
 };
 
-const defaults: UiConfig = { apiBaseUrl: "", mock: false, title: "Lajstrom" };
+const defaults: UiConfig = { apiBaseUrl: "", mock: false, demo: true, title: "Lajstrom" };
 
 let current: UiConfig = defaults;
 
@@ -23,6 +25,7 @@ export async function loadConfig(): Promise<UiConfig> {
       current = {
         apiBaseUrl: typeof body.apiBaseUrl === "string" ? body.apiBaseUrl.replace(/\/+$/, "") : "",
         mock: body.mock === true || (body.mock as unknown) === "true",
+        demo: body.demo !== false && (body.demo as unknown) !== "false",
         title: typeof body.title === "string" && body.title ? body.title : defaults.title,
       };
     }

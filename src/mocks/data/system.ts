@@ -18,7 +18,7 @@ export const serverInfo: ServerInfo = {
 };
 
 // Capabilities follow the matrix of docs/architecture.md §5; cells marked "verify" there are
-// filled with the answer the spikes (M0-11…M0-15) are expected to give.
+// filled with the answer the registry spikes are expected to give.
 export const registries: Omit<Registry, "repos">[] = [
   {
     name: "zot",
@@ -175,17 +175,17 @@ export const users: User[] = [
 // Deploy tokens are bound to exactly one repo (rbac.md §1); uploads in the seed use only the
 // tokens bound to their repo, and users only where a binding lets them write.
 export const tokens: Token[] = [
-  { id: 3, kind: "pat", name: "laptop", user: "alice", repo: null, scopes: [], expiresAt: ahead(61), lastUsedAt: before(0, 1), createdAt: ago(29), revokedAt: null },
-  { id: 4, kind: "pat", name: "ci-local", user: "bob", repo: null, scopes: ["read"], expiresAt: ahead(20), lastUsedAt: before(1, 2), createdAt: ago(70), revokedAt: null },
-  { id: 7, kind: "pat", name: "old laptop", user: "alice", repo: null, scopes: [], expiresAt: ahead(5), lastUsedAt: before(40), createdAt: ago(85), revokedAt: ago(10, 4) },
-  { id: 9, kind: "pat", name: "notebook", user: "carol", repo: null, scopes: ["read", "write"], expiresAt: ahead(3, 4), lastUsedAt: before(2), createdAt: ago(87), revokedAt: null },
-  { id: 11, kind: "pat", name: "release scripts", user: "admin", repo: null, scopes: [], expiresAt: ahead(300), lastUsedAt: before(0, 5), createdAt: ago(65), revokedAt: null },
-  { id: 12, kind: "deploy", name: "github-actions payments-api", user: null, repo: "maven/payments", scopes: ["read", "write"], expiresAt: null, lastUsedAt: before(0, 0, 4), createdAt: ago(78), revokedAt: null },
-  { id: 15, kind: "deploy", name: "github-actions acme-agent (apt)", user: null, repo: "apt/ubuntu-internal", scopes: ["read", "write"], expiresAt: ahead(180), lastUsedAt: before(1, 3), createdAt: ago(120), revokedAt: null },
-  { id: 16, kind: "deploy", name: "github-actions acme-agent (raw)", user: null, repo: "raw/assets", scopes: ["write"], expiresAt: ahead(180), lastUsedAt: before(9, 2), createdAt: ago(90), revokedAt: null },
-  { id: 18, kind: "deploy", name: "jupyterhub", user: null, repo: "pypi/internal", scopes: ["read"], expiresAt: null, lastUsedAt: before(0, 0, 12), createdAt: ago(200), revokedAt: null },
-  { id: 21, kind: "deploy", name: "billing CI", user: null, repo: "pypi/internal", scopes: ["read", "write"], expiresAt: ahead(45), lastUsedAt: before(4, 2), createdAt: ago(100), revokedAt: null },
-  { id: 22, kind: "deploy", name: "payments CI (pypi)", user: null, repo: "pypi/payments", scopes: ["write"], expiresAt: ahead(140), lastUsedAt: before(6, 3), createdAt: ago(60), revokedAt: null },
+  { id: 3, kind: "pat", name: "laptop", user: "alice", scopes: [], expiresAt: ahead(61), lastUsedAt: before(0, 1), createdAt: ago(29), revokedAt: null, hashPrefix: "019931d4" },
+  { id: 4, kind: "pat", name: "ci-local", user: "bob", scopes: ["read"], expiresAt: ahead(20), lastUsedAt: before(1, 2), createdAt: ago(70), revokedAt: null, hashPrefix: "daa0b8d4" },
+  { id: 7, kind: "pat", name: "old laptop", user: "alice", scopes: [], expiresAt: ahead(5), lastUsedAt: before(40), createdAt: ago(85), revokedAt: ago(10, 4), hashPrefix: "5363e7f2" },
+  { id: 9, kind: "pat", name: "notebook", user: "carol", scopes: ["read", "write"], expiresAt: ahead(3, 4), lastUsedAt: before(2), createdAt: ago(87), revokedAt: null, hashPrefix: "a2fd807c" },
+  { id: 11, kind: "pat", name: "release scripts", user: "admin", scopes: [], expiresAt: ahead(300), lastUsedAt: before(0, 5), createdAt: ago(65), revokedAt: null, hashPrefix: "1b3d0235" },
+  { id: 12, kind: "deploy", name: "github-actions payments-api", repo: "maven/payments", scopes: ["read", "write"], expiresAt: null, lastUsedAt: before(0, 0, 4), createdAt: ago(78), revokedAt: null, hashPrefix: "3281d82f" },
+  { id: 15, kind: "deploy", name: "github-actions acme-agent (apt)", repo: "apt/ubuntu-internal", scopes: ["read", "write"], expiresAt: ahead(180), lastUsedAt: before(1, 3), createdAt: ago(120), revokedAt: null, hashPrefix: "e19cb71b" },
+  { id: 16, kind: "deploy", name: "github-actions acme-agent (raw)", repo: "raw/assets", scopes: ["write"], expiresAt: ahead(180), lastUsedAt: before(9, 2), createdAt: ago(90), revokedAt: null, hashPrefix: "3234bb55" },
+  { id: 18, kind: "deploy", name: "jupyterhub", repo: "pypi/internal", scopes: ["read"], expiresAt: null, lastUsedAt: before(0, 0, 12), createdAt: ago(200), revokedAt: null, hashPrefix: "10df33fe" },
+  { id: 21, kind: "deploy", name: "billing CI", repo: "pypi/internal", scopes: ["read", "write"], expiresAt: ahead(45), lastUsedAt: before(4, 2), createdAt: ago(100), revokedAt: null, hashPrefix: "82a21d7c" },
+  { id: 22, kind: "deploy", name: "payments CI (pypi)", repo: "pypi/payments", scopes: ["write"], expiresAt: ahead(140), lastUsedAt: before(6, 3), createdAt: ago(60), revokedAt: null, hashPrefix: "9ab0bbe6" },
 ];
 
 export const bindings: Binding[] = [

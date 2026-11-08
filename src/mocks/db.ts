@@ -30,6 +30,9 @@ import { getPersona, type Persona } from "./persona";
 
 type Action = "read" | "write" | "delete" | "manage";
 
+/** The mock answers the proposed fields of api-proposal.md §3.2 too, so its repos have them all. */
+export type MockRepo = Repo & Required<Pick<Repo, "stats" | "permissions" | "reindex">>;
+
 type Row = BuiltVersion & { repoKey: string; format: string };
 
 const allVersions: Row[] = [...rawVersions(), ...pypiVersions(), ...aptVersions(), ...mavenVersions()].map((spec) => ({
@@ -92,7 +95,7 @@ export function whoami(persona = getPersona()): WhoAmI {
 
 // --- Repos ----------------------------------------------------------------------------------
 
-function repoOf(seed: RepoSeed, persona: Persona): Repo {
+function repoOf(seed: RepoSeed, persona: Persona): MockRepo {
   const pkgs = byRepo.get(keyOf(seed)) ?? new Map();
   const manifests = [...pkgs.values()].flat();
   const versions = new Set(manifests.map((v) => `${v.packageName}\0${v.version}`));
@@ -128,12 +131,12 @@ function repoOf(seed: RepoSeed, persona: Persona): Repo {
   };
 }
 
-export function listRepos(persona = getPersona()): Repo[] {
+export function listRepos(persona = getPersona()): MockRepo[] {
   return repoSeeds.map((s) => repoOf(s, persona)).filter((r) => r.permissions.includes("read"));
 }
 
 /** A repo the caller may read, or null: missing and forbidden look the same (rbac.md §3). */
-export function getRepo(format: string, name: string, persona = getPersona()): Repo | null {
+export function getRepo(format: string, name: string, persona = getPersona()): MockRepo | null {
   const seed = repoSeeds.find((s) => s.format === format && s.name === name);
   if (!seed) return null;
   const repo = repoOf(seed, persona);
@@ -400,7 +403,7 @@ export function listSessions(repo: Repo): PublishSession[] {
   return sessions.filter((s) => s.repo === repo.prefix).map(({ repo: _r, ...s }) => s);
 }
 
-export function reindexReport(repo: Repo): ReindexReport {
+export function reindexReport(repo: MockRepo): ReindexReport {
   const pkgs = byRepo.get(repo.prefix) ?? new Map<string, Row[]>();
   const manifests = [...pkgs.values()].flat();
   const foreign: ReindexReport["foreign"] = [];
