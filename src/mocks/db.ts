@@ -27,6 +27,7 @@ import { rawVersions } from "./data/raw";
 import { bindings, registries, repoSeeds, roleActions, serverInfo, tokens, users, type RepoSeed } from "./data/system";
 import { ago, ahead, before, HOST } from "./data/time";
 import { getPersona, type Persona } from "./persona";
+import { keep, persist } from "./state";
 
 type Action = "read" | "write" | "delete" | "manage";
 
@@ -110,7 +111,7 @@ function repoOf(seed: RepoSeed, persona: Persona): MockRepo {
     anonymousRead: seed.anonymousRead,
     policy: seed.policy,
     createdAt: seed.createdAt,
-    updatedAt: seed.format === "maven" && seed.name === "payments" ? ago(12, 3) : seed.createdAt,
+    updatedAt: seed.updatedAt ?? (seed.format === "maven" && seed.name === "payments" ? ago(12, 3) : seed.createdAt),
     stats: {
       packages: pkgs.size,
       versions: versions.size,
@@ -500,16 +501,19 @@ function auditLog(): AuditEvent[] {
     { at: ago(1, 1), principal: "user:bob", action: "delete", repo: "raw/scratch", subject: "tmp/build-4702.log@3b0c4f1a9e2d7c55", digest: `sha256:${sha256Hex("deleted:build-4702")}`, ip: ipOf["user:bob"]!, details: { versions: 1 } },
     { at: ago(2, 6), principal: "user:admin", action: "repo.reindex", repo: "raw/scratch", subject: "raw/scratch", digest: null, ip: ipOf["user:admin"]!, details: { removed: 1, foreign: 1 } },
   );
+  events.push(...demoEvents);
   events.sort((a, b) => b.at.localeCompare(a.at));
   return events.map((e, i) => ({ id: events.length - i, ...e }));
 }
 
-const audit = auditLog();
+/** The audit log, computed again after a change in the demo. */
+let auditCache: AuditEvent[] | null = null;
+const audit = () => (auditCache ??= auditLog());
 
 export type AuditQuery = { repo?: string; principal?: string; action?: string; since?: string; until?: string; limit?: number; cursor?: string };
 
 export function listAudit(q: AuditQuery) {
-  let rows = audit;
+  let rows = audit();
   if (q.repo) rows = rows.filter((e) => e.repo === q.repo);
   if (q.principal) rows = rows.filter((e) => e.principal === q.principal);
   if (q.action) rows = rows.filter((e) => e.action === q.action);
@@ -519,9 +523,156 @@ export function listAudit(q: AuditQuery) {
   return { events: page, ...info };
 }
 
-export const auditFacets = {
-  actions: [...new Set(audit.map((e) => e.action))].sort(),
-  principals: [...new Set(audit.map((e) => e.principal))].sort(),
-};
+
+// --- Changes made in the demo ---------------------------------------------------------------
+// What the API lets a caller of the demo change in repos: create, change and delete them, with
+// the server's rules (docs/api.md, Repos). The UI is read-only and offers none of it; the API
+// docs of the demo can. Every change is an audit event and is kept by src/mocks/state.ts, so
+// that a reload replays it.
+
+/** Repos of the seed deleted in the demo: their seeded versions go when it reloads. */
+const deletedRepos = new Set<string>();
+/** Audit events of changes the data does not show by itself: updates and deletes. */
+const demoEvents: Omit<AuditEvent, "id">[] = [];
+
+const DEMO_IP = "192.0.2.10";
+
+function changed(event?: Omit<AuditEvent, "id">): void {
+  if (event) demoEvents.push(event);
+  auditCache = null;
+  persist();
+}
+
+function removeRows(match: (v: Row) => boolean): number {
+  let n = 0;
+  for (let i = allVersions.length - 1; i >= 0; i--) {
+    if (match(allVersions[i]!)) {
+      allVersions.splice(i, 1);
+      n++;
+    }
+  }
+  return n;
+}
+
+function dropRepoData(repoKey: string): number {
+  byRepo.delete(repoKey);
+  return removeRows((v) => v.repoKey === repoKey);
+}
+
+keep("db", {
+  save: () => ({ repos: repoSeeds, deletedRepos: [...deletedRepos], events: demoEvents }),
+  load: (data) => {
+    const d = data as { repos?: RepoSeed[]; deletedRepos?: string[]; events?: Omit<AuditEvent, "id">[] };
+    if (!Array.isArray(d.repos)) return;
+    repoSeeds.splice(0, repoSeeds.length, ...d.repos);
+    for (const k of d.deletedRepos ?? []) {
+      deletedRepos.add(k);
+      dropRepoData(k);
+    }
+    demoEvents.push(...(d.events ?? []));
+    auditCache = null;
+  },
+});
+
+/** A refusal the handler answers: the status, and the message of the server's error. */
+export type Refusal = { status: number; code: string; message: string };
+
+const invalid = (message: string): Refusal => ({ status: 400, code: "INVALID", message });
+
+/** Repo names: lowercase letters and digits separated by single '.', '_' or '-' (manifest-profile.md §4.1). */
+const REPO_NAME = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
+const FORMATS = ["raw", "pypi", "apt", "maven", "oci"] as const;
+const POLICY_KEYS = ["maxFileSize", "blobRedirect", "maven.sessionTimeout", "maven.sessionExpiry"];
+
+function checkPolicy(policy: unknown): Refusal | null {
+  if (policy === null || policy === undefined) return null;
+  if (typeof policy !== "object" || Array.isArray(policy)) return invalid("policy: a JSON object or null");
+  const unknown = Object.keys(policy).find((k) => !POLICY_KEYS.includes(k));
+  return unknown ? invalid(`policy: ${unknown} is not a policy key`) : null;
+}
+
+export function versionCount(repoKey: string): number {
+  return [...(byRepo.get(repoKey)?.values() ?? [])].reduce((n, list) => n + list.length, 0);
+}
+
+/** POST /api/v1/repos: the admin creates a repo (docs/api.md, Repos). */
+export function createRepo(body: unknown, by: string): MockRepo | Refusal {
+  if (typeof body !== "object" || body === null) return invalid("the body must be a JSON object");
+  const b = body as Record<string, unknown>;
+  const known = ["format", "name", "registry", "kind", "anonymousRead", "policy"];
+  const unknown = Object.keys(b).find((k) => !known.includes(k));
+  if (unknown) return invalid(`${unknown}: not a field of a repo`);
+  if (!FORMATS.includes(b.format as (typeof FORMATS)[number])) return invalid(`format: one of ${FORMATS.join(", ")}`);
+  if (typeof b.name !== "string" || b.name.length > 64 || !REPO_NAME.test(b.name)) {
+    return invalid(`name: "${String(b.name ?? "")}" must be lowercase letters and digits separated by single '.', '_' or '-', at most 64 characters`);
+  }
+  if (typeof b.registry !== "string" || !registries.some((r) => r.name === b.registry)) {
+    return invalid(`registry: one of ${registries.map((r) => r.name).join(", ")}`);
+  }
+  if (b.kind !== undefined && b.kind !== "hosted") return invalid("kind: hosted, the only kind in this version");
+  if (b.anonymousRead !== undefined && typeof b.anonymousRead !== "boolean") return invalid("anonymousRead: true or false");
+  const policyError = checkPolicy(b.policy);
+  if (policyError) return policyError;
+  const key = `${b.format}/${b.name}`;
+  if (repoSeeds.some((s) => keyOf(s) === key)) return { status: 409, code: "CONFLICT", message: `repo ${key} exists` };
+
+  const now = new Date().toISOString();
+  const seed: RepoSeed = {
+    format: b.format as RepoSeed["format"],
+    name: b.name,
+    registry: b.registry,
+    anonymousRead: b.anonymousRead === true,
+    policy: (b.policy as RepoSeed["policy"]) ?? null,
+    createdAt: now,
+    updatedAt: now,
+    reindex: "idle",
+  };
+  repoSeeds.push(seed);
+  // A new repo starts empty, even where one of the same name was deleted.
+  dropRepoData(key);
+  changed();
+  return repoOf(seed, by.replace(/^user:/, ""));
+}
+
+/** PATCH /api/v1/repos/{format}/{repo}: anonymousRead and policy; the rest cannot change. */
+export function updateRepo(repo: MockRepo, body: unknown, by: string): MockRepo | Refusal {
+  if (typeof body !== "object" || body === null) return invalid("the body must be a JSON object");
+  const b = body as Record<string, unknown>;
+  for (const k of Object.keys(b)) {
+    if (["format", "name", "registry", "kind"].includes(k)) return invalid(`${k}: cannot change`);
+    if (k !== "anonymousRead" && k !== "policy") return invalid(`${k}: not a field of a repo`);
+  }
+  if (b.anonymousRead !== undefined && typeof b.anonymousRead !== "boolean") return invalid("anonymousRead: true or false");
+  const policyError = checkPolicy(b.policy);
+  if (policyError) return policyError;
+  const seed = repoSeeds.find((s) => keyOf(s) === repo.prefix)!;
+  const before = { anonymousRead: seed.anonymousRead, policy: seed.policy };
+  const after = {
+    anonymousRead: b.anonymousRead === undefined ? seed.anonymousRead : (b.anonymousRead as boolean),
+    policy: b.policy === undefined ? seed.policy : ((b.policy as RepoSeed["policy"]) ?? null),
+  };
+  // A body that changes nothing changes nothing, not even updatedAt.
+  if (JSON.stringify(before) !== JSON.stringify(after)) {
+    seed.anonymousRead = after.anonymousRead;
+    seed.policy = after.policy;
+    seed.updatedAt = new Date().toISOString();
+    changed({ at: seed.updatedAt, principal: by, action: "repo.update", repo: repo.prefix, subject: repo.prefix, digest: null, ip: DEMO_IP, details: { from: before, to: after, source: "api" } });
+  }
+  return repoOf(seed, by.replace(/^user:/, ""));
+}
+
+/** DELETE /api/v1/repos/{format}/{repo}[?force=true]: refused with versions unless forced. */
+export function deleteRepo(repo: MockRepo, force: boolean, by: string): Refusal | null {
+  const versions = versionCount(repo.prefix);
+  if (versions > 0 && !force) {
+    return { status: 409, code: "CONFLICT", message: `repo ${repo.prefix} has ${versions} versions; delete them or pass force=true` };
+  }
+  repoSeeds.splice(repoSeeds.findIndex((s) => keyOf(s) === repo.prefix), 1);
+  dropRepoData(repo.prefix);
+  deletedRepos.add(repo.prefix);
+  for (let i = tokens.length - 1; i >= 0; i--) if (tokens[i]!.repo === repo.prefix) tokens.splice(i, 1);
+  changed({ at: new Date().toISOString(), principal: by, action: "repo.delete", repo: repo.prefix, subject: repo.prefix, digest: null, ip: DEMO_IP, details: { versions, source: "api" } });
+  return null;
+}
 
 export { bindings, tokens, users, serverInfo };

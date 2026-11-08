@@ -3,10 +3,10 @@
 // refused credentials answered 401. The mock takes any password of a user that is not disabled.
 
 import type { CreatedToken, Token, TokenRequest, TokenScope } from "@/api/types";
-import { DEMO_STATE } from "@/app/demo";
 import { sha256Hex } from "@/lib/sha256";
 
 import { tokens, users } from "./data/system";
+import { keep, persist } from "./state";
 
 /** The principal of a request: a user name or "anonymous"; or the reason it is refused. */
 export type Authn = { principal: string } | { refused: true };
@@ -16,36 +16,19 @@ const secrets = new Map<string, number>();
 
 let nextId = Math.max(...tokens.map((t) => t.id)) + 1;
 
-/** What the demo keeps between visits: the tokens as they are now and the secrets of the ones
- * created in it. Only in this browser's localStorage, like everything of the demo. */
-type DemoState = { version: 1; tokens: Token[]; secrets: [string, number][]; nextId: number };
-
-function persist(): void {
-  if (typeof window === "undefined") return; // tests: no browser, nothing to keep
-  const state: DemoState = { version: 1, tokens, secrets: [...secrets], nextId };
-  try {
-    localStorage.setItem(DEMO_STATE, JSON.stringify(state));
-  } catch {
-    // Storage full or disabled: the changes last until the page is reloaded.
-  }
-}
-
-/** Puts back what the demo kept; called once when the mock starts. */
-export function restoreDemoState(): void {
-  if (typeof window === "undefined") return;
-  let state: DemoState | null;
-  try {
-    const raw = localStorage.getItem(DEMO_STATE);
-    state = raw ? (JSON.parse(raw) as DemoState) : null;
-  } catch {
-    state = null;
-  }
-  if (state?.version !== 1 || !Array.isArray(state.tokens) || !Array.isArray(state.secrets)) return;
-  tokens.splice(0, tokens.length, ...state.tokens);
-  secrets.clear();
-  for (const [secret, id] of state.secrets) secrets.set(secret, id);
-  nextId = state.nextId;
-}
+// The tokens as they are now and the secrets of the ones created in the demo, kept between
+// visits (src/mocks/state.ts).
+keep("tokens", {
+  save: () => ({ tokens, secrets: [...secrets], nextId }),
+  load: (data) => {
+    const d = data as { tokens?: unknown; secrets?: unknown; nextId?: unknown };
+    if (!Array.isArray(d.tokens) || !Array.isArray(d.secrets) || typeof d.nextId !== "number") return;
+    tokens.splice(0, tokens.length, ...(d.tokens as Token[]));
+    secrets.clear();
+    for (const [secret, id] of d.secrets as [string, number][]) secrets.set(secret, id);
+    nextId = d.nextId;
+  },
+});
 
 function live(t: Token, now = Date.now()): boolean {
   return t.revokedAt === null && (t.expiresAt === null || Date.parse(t.expiresAt) > now);

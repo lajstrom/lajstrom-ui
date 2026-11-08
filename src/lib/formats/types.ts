@@ -1,4 +1,4 @@
-import type { FormatName, PackageSummary, Repo, VersionDetail, VersionSummary } from "@/api/types";
+import type { PackageSummary, Repo, RepoFormat, VersionDetail, VersionSummary } from "@/api/types";
 
 /** What snippets need to know about where and how the client talks to Lajstrom. */
 export type SnippetContext = {
@@ -30,7 +30,7 @@ export type SnippetGroup = { title: string; description?: string; snippets: Snip
 export type MetadataRow = { label: string; value: string | string[]; mono?: boolean; href?: string };
 
 export type FormatSpec = {
-  name: FormatName;
+  name: RepoFormat;
   /** Display name of the format: "PyPI", "APT", "Maven", "Raw". */
   label: string;
   /** Short mark for the format badge. */

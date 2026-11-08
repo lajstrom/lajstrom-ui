@@ -1,5 +1,5 @@
-// The mock /api/v1. Paths and status codes follow docs/api-proposal.md; errors use the
-// envelope of docs/spec/http-routing.md §4.
+// The mock of the server's /api/v1: the paths and status codes of docs/api.md and
+// docs/api-proposal.md, and the error envelope of docs/spec/http-routing.md §4.
 
 import { delay, http, HttpResponse, type PathParams } from "msw";
 
@@ -13,12 +13,23 @@ function fail(status: number, code: ApiErrorBody["error"]["code"], message: stri
   return HttpResponse.json<ApiErrorBody>({ error: { code, message } }, { status });
 }
 
-/** 401 with the Basic challenge, as the server answers it on /api/ (docs/auth.md). */
-function unauthorized(message: string) {
-  return HttpResponse.json<ApiErrorBody>(
-    { error: { code: "FORBIDDEN", message } },
-    { status: 401, headers: { "WWW-Authenticate": 'Basic realm="lajstrom"' } },
-  );
+/** 401 with the Basic challenge, as the server answers it: the envelope on /api/, plain text
+ * on the frontends (docs/auth.md). */
+function unauthorized(message: string, api = true) {
+  const challenge = { "WWW-Authenticate": 'Basic realm="lajstrom"' };
+  return api
+    ? HttpResponse.json<ApiErrorBody>({ error: { code: "FORBIDDEN", message } }, { status: 401, headers: challenge })
+    : text(401, message, challenge);
+}
+
+/** An error of a protocol frontend: plain text, like the server's. */
+function text(status: number, message: string, headers: Record<string, string> = {}) {
+  return new HttpResponse(`${message}\n`, { status, headers: { "Content-Type": "text/plain; charset=utf-8", ...headers } });
+}
+
+/** A repo as the server answers it: without prefix, which the UI derives (src/api/queries.ts). */
+function repoJson({ prefix: _prefix, ...repo }: db.MockRepo) {
+  return repo;
 }
 
 function refusal(r: Refusal) {
@@ -34,7 +45,9 @@ function answered(resolver: Resolver): Resolver {
   return async (info) => {
     await latency();
     const authn = authenticate(info.request);
-    if ("refused" in authn) return unauthorized("credentials are needed: the ones sent were refused");
+    if ("refused" in authn) {
+      return unauthorized("credentials are needed: the ones sent were refused", new URL(info.request.url).pathname.startsWith("/api/"));
+    }
     setPersona(authn.principal);
     return resolver(info);
   };
@@ -43,6 +56,7 @@ function answered(resolver: Resolver): Resolver {
 const get = (path: string, resolver: Resolver) => http.get(path, answered(resolver));
 const post = (path: string, resolver: Resolver) => http.post(path, answered(resolver));
 const del = (path: string, resolver: Resolver) => http.delete(path, answered(resolver));
+const patch = (path: string, resolver: Resolver) => http.patch(path, answered(resolver));
 
 /** The JSON body, or a 400 like the server's for a body that is not JSON. */
 async function body(request: Request): Promise<unknown> {
@@ -84,6 +98,16 @@ function adminOr403(): Response | null {
   return db.isAdmin() ? null : fail(403, "FORBIDDEN", "this needs the admin role (system resource, rbac.md §2)");
 }
 
+/** A repo the caller may act on through the API: 404 when it may not read it, 403 when it may
+ * read it but lacks the action (rbac.md §3). */
+function repoFor(params: PathParams, action: "write" | "delete" | "manage"): db.MockRepo | Response {
+  const repo = repoOr404(params);
+  if (repo instanceof Response) return repo;
+  return repo.permissions.includes(action) ? repo : fail(403, "FORBIDDEN", `this needs ${action} on ${repo.prefix}`);
+}
+
+
+
 const num = (v: string | null, fallback: number) => {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? Math.min(n, 200) : fallback;
@@ -107,12 +131,12 @@ export const handlers = [
   get("*/api/v1/repos", async ({ request }) => {
     const format = new URL(request.url).searchParams.get("format");
     const repos = db.listRepos().filter((r) => !format || r.format === format);
-    return HttpResponse.json({ repos });
+    return HttpResponse.json({ repos: repos.map(repoJson) });
   }),
 
   get("*/api/v1/repos/:format/:repo", async ({ params }) => {
     const repo = repoOr404(params);
-    return repo instanceof Response ? repo : HttpResponse.json(repo);
+    return repo instanceof Response ? repo : HttpResponse.json(repoJson(repo));
   }),
 
   get("*/api/v1/repos/:format/:repo/packages", async ({ params, request }) => {
@@ -257,6 +281,36 @@ export const handlers = [
     return revokeToken({ repo: repo.prefix }, Number(decode(params.id)))
       ? new HttpResponse(null, { status: 204 })
       : fail(404, "NOT_FOUND", `${repo.prefix} has no deploy token ${decode(params.id)}`);
+  }),
+
+  post("*/api/v1/repos", async ({ request }) => {
+    const me = getPersona();
+    if (me === "anonymous") return unauthorized("credentials are needed");
+    if (!db.isAdmin(me)) return fail(403, "FORBIDDEN", "creating a repo needs the admin role");
+    const created = db.createRepo(await body(request), `user:${me}`);
+    if ("status" in created) return refusal(created);
+    return HttpResponse.json(repoJson(created), { status: 201, headers: { Location: `/api/v1/repos/${created.prefix}` } });
+  }),
+
+  post("*/api/v1/repos/:format/:repo/reindex", async ({ params }) => {
+    const repo = repoOr404(params);
+    // Like the server, which has no reindex yet.
+    return repo instanceof Response ? repo : fail(501, "UNAVAILABLE", "reindex is not in this version");
+  }),
+
+  patch("*/api/v1/repos/:format/:repo", async ({ params, request }) => {
+    const me = getPersona();
+    const repo = repoFor(params, "manage");
+    if (repo instanceof Response) return repo;
+    const updated = db.updateRepo(repo, await body(request), `user:${me}`);
+    return "status" in updated ? refusal(updated) : HttpResponse.json(repoJson(updated));
+  }),
+
+  del("*/api/v1/repos/:format/:repo", async ({ params, request }) => {
+    const repo = repoFor(params, "manage");
+    if (repo instanceof Response) return repo;
+    const refused = db.deleteRepo(repo, new URL(request.url).searchParams.get("force") === "true", `user:${getPersona()}`);
+    return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
   }),
 
   get("*/api/v1/*", async () => {

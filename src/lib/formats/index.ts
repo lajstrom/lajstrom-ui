@@ -2,6 +2,7 @@ import type { FormatName, Repo, ServerInfo } from "@/api/types";
 
 import { apt } from "./apt";
 import { maven } from "./maven";
+import { oci } from "./oci";
 import { pypi } from "./pypi";
 import { raw } from "./raw";
 import type { FormatSpec, SnippetContext } from "./types";
@@ -12,6 +13,7 @@ export const formats: Record<FormatName, FormatSpec> = { raw, pypi, apt, maven }
 export const formatOrder: FormatName[] = ["raw", "pypi", "apt", "maven"];
 
 export function formatSpec(name: string): FormatSpec {
+  if (name === "oci") return oci;
   return formats[name as FormatName] ?? raw;
 }
 
