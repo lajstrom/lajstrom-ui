@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { Boxes, Check, FlaskConical, History, KeyRound, LogIn, LogOut, Monitor, Moon, Search, Server, Sun, User, Users } from "lucide-react";
+import { Boxes, Braces, Check, FlaskConical, History, KeyRound, LogIn, LogOut, Monitor, Moon, Search, Server, Sun, User, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { signInWithPassword, signOut } from "@/api/auth";
@@ -234,6 +234,11 @@ export function AppShell() {
             <NavLink to="/" icon={<Boxes />}>
               Repositories
             </NavLink>
+            {demo.active ? (
+              <NavLink to="/api-docs" icon={<Braces />}>
+                API
+              </NavLink>
+            ) : null}
             {who.data?.admin ? (
               <>
                 <NavLink to="/registries" icon={<Server />}>

@@ -2,9 +2,9 @@ import { useMutation } from "@tanstack/react-query";
 import { AlertTriangle, KeyRound, Plus } from "lucide-react";
 import { useId, useState, type FormEvent } from "react";
 
-import { ApiError } from "@/api/client";
 import type { CreatedToken, Token, TokenRequest, TokenScope } from "@/api/types";
 import { cn } from "@/lib/cn";
+import { errorText } from "@/lib/errors";
 import { formatDateTime } from "@/lib/format";
 import { tokenState } from "@/lib/tokens";
 
@@ -46,12 +46,6 @@ export function TokenScopes({ token }: { token: Token }) {
       ))}
     </span>
   );
-}
-
-function errorText(err: unknown): string | null {
-  if (!err) return null;
-  if (err instanceof ApiError) return err.status === 403 ? `Not allowed: ${err.message}.` : `${err.message}.`;
-  return err instanceof Error ? err.message : "The request failed.";
 }
 
 type TokenTableProps = {

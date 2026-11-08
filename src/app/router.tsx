@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { createRootRouteWithContext, createRoute, createRouter } from "@tanstack/react-router";
 
 import { AccessPage } from "@/pages/access";
+import { ApiDocsPage } from "@/pages/api-docs";
 import { AuditPage } from "@/pages/audit";
 import { NotFound } from "@/pages/not-found";
 import { PackageRoute } from "@/pages/package";
@@ -35,6 +36,7 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/access", component: AccessPage, validateSearch: strings }),
   createRoute({ getParentRoute: () => rootRoute, path: "/sign-in", component: SignInPage, validateSearch: strings }),
   createRoute({ getParentRoute: () => rootRoute, path: "/tokens", component: TokensPage, validateSearch: strings }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/api-docs", component: ApiDocsPage }),
   repoLayout.addChildren([
     createRoute({ getParentRoute: () => repoLayout, path: "/", component: RepoPage, validateSearch: strings }),
     createRoute({ getParentRoute: () => repoLayout, path: "$", component: PackageRoute, validateSearch: strings }),

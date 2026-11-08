@@ -1,0 +1,981 @@
+openapi: 3.1.0
+info:
+  title: Lajstrom management API
+  version: v1
+  description: |
+    The `/api/v1` the web UI talks to. Two kinds of operations:
+
+    - **server**: what the server answers today (`docs/api.md` in lajstrom/lajstrom);
+    - **proposed**: what the UI needs to read and the server does not have yet
+      (`docs/api-proposal.md` of the UI), marked `x-lajstrom-status: proposed`.
+
+    In the demo of the UI, "Try it out" is answered in the browser by its mock, on generated
+    data, as the signed-in demo user; nothing reaches a server. The requests show in the browser's
+    developer tools like any other.
+
+    Errors are one envelope: `{"error": {"code": "…", "message": "…"}}`, the message naming the
+    field when a request breaks a rule.
+servers:
+  - url: /
+    description: The origin of the UI (the demo answers in the browser)
+security:
+  - bearerAuth: []
+  - basicAuth: []
+tags:
+  - name: Who am I
+  - name: Repositories
+  - name: Tokens
+    description: Personal access tokens of a user and deploy tokens of a repository. The secret is in the answer of a creation only.
+  - name: Packages (proposed)
+    description: What is in a repository, from the index. Not in the server yet.
+  - name: Search (proposed)
+  - name: System (proposed)
+    description: Server information, registries, the audit log, users and role bindings. Admin only, but for `info`.
+  - name: System
+paths:
+  /-/version:
+    get:
+      tags: [System]
+      summary: Version of the server
+      operationId: version
+      security: []
+      responses:
+        "200":
+          description: Build information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version: { type: string }
+                  commit: { type: string }
+                  date: { type: string }
+              example: { version: "0.1.0-dev", commit: "b9b19e6", date: "2026-11-07T18:20:00Z" }
+
+  /api/v1/whoami:
+    get:
+      tags: [Who am I]
+      summary: The principal of the request
+      description: Every principal may ask; without credentials it is 401 with the Basic challenge.
+      operationId: whoami
+      responses:
+        "200":
+          description: The caller
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WhoAmI" }
+              examples:
+                user: { value: { principal: "user:alice", kind: user, name: alice } }
+                deployToken: { value: { principal: "token:3", kind: token, name: "3" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/repos:
+    get:
+      tags: [Repositories]
+      summary: The repos the caller may read
+      description: Ordered by format and name. The demo also answers the proposed fields (stats, permissions, reindex).
+      operationId: listRepos
+      parameters:
+        - name: format
+          in: query
+          description: Keep one format; a format the server does not have is 400.
+          schema: { $ref: "#/components/schemas/Format" }
+      responses:
+        "200":
+          description: The repos
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [repos]
+                properties:
+                  repos: { type: array, items: { $ref: "#/components/schemas/Repo" } }
+              example:
+                repos:
+                  - { format: raw, name: assets, registry: zot, kind: hosted, anonymousRead: true, policy: null, createdAt: "2026-02-10T09:00:00Z", updatedAt: "2026-02-10T09:00:00Z" }
+        "400": { $ref: "#/components/responses/Invalid" }
+    post:
+      tags: [Repositories]
+      summary: Create a repo
+      description: Admin only. There is no auto-creation on push; a repo exists before anything is pushed to it.
+      operationId: createRepo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RepoRequest" }
+            example: { format: raw, name: scratch-2, registry: zot, anonymousRead: false }
+      responses:
+        "201":
+          description: Created; Location names the repo
+          headers:
+            Location: { schema: { type: string }, example: /api/v1/repos/raw/scratch-2 }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Repo" }
+        "400": { $ref: "#/components/responses/Invalid" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/repos/{format}/{repo}:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+    get:
+      tags: [Repositories]
+      summary: One repo
+      operationId: getRepo
+      responses:
+        "200":
+          description: The repo
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Repo" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Repositories]
+      summary: Change anonymousRead or the policy
+      description: A field left out stays as it is; "policy" null removes the policy. format, name, registry and kind cannot change (400). A body that changes nothing changes nothing, not even updatedAt.
+      operationId: updateRepo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                anonymousRead: { type: boolean }
+                policy: { oneOf: [{ $ref: "#/components/schemas/RepoPolicy" }, { type: "null" }] }
+            example: { anonymousRead: true, policy: { maxFileSize: 104857600 } }
+      responses:
+        "200":
+          description: The repo as it is now
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Repo" }
+        "400": { $ref: "#/components/responses/Invalid" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Repositories]
+      summary: Delete a repo
+      description: A repo with versions is refused with 409 and their number, unless force=true. The artifacts stay in the registry.
+      operationId: deleteRepo
+      parameters:
+        - name: force
+          in: query
+          schema: { type: boolean }
+      responses:
+        "204": { description: Deleted }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/repos/{format}/{repo}/deploy-tokens:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+    get:
+      tags: [Tokens]
+      summary: The deploy tokens of a repo
+      description: In the order of their creation, revoked and expired ones included; never a secret. Needs manage on the repo.
+      operationId: listDeployTokens
+      responses:
+        "200":
+          description: The tokens
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenList" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Tokens]
+      summary: Create a deploy token
+      description: scopes are required, read and/or write; a deploy token never deletes or manages, and may live without expiry.
+      operationId: createDeployToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TokenRequest" }
+            example: { name: ci, scopes: [write] }
+      responses:
+        "201":
+          description: Created; the only answer with the secret
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreatedToken" }
+              example: { id: 8, kind: deploy, repo: raw/assets, name: ci, scopes: [write], expiresAt: null, lastUsedAt: null, createdAt: "2026-11-07T12:00:00Z", revokedAt: null, hashPrefix: "876f72f1", secret: "ljs_dep_…" }
+        "400": { $ref: "#/components/responses/Invalid" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/repos/{format}/{repo}/deploy-tokens/{id}:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/tokenId"
+    delete:
+      tags: [Tokens]
+      summary: Revoke a deploy token
+      description: Refused from the next request on, on every replica. Revoking a revoked token is 204 again.
+      operationId: revokeDeployToken
+      responses:
+        "204": { description: Revoked }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/users/{name}/tokens:
+    parameters:
+      - $ref: "#/components/parameters/user"
+    get:
+      tags: [Tokens]
+      summary: The personal access tokens of a user
+      description: A user's own, or anyone's for the admin. A token with scopes never manages tokens (403).
+      operationId: listUserTokens
+      responses:
+        "200":
+          description: The tokens
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenList" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Tokens]
+      summary: Create a personal access token
+      description: No scopes is the user's full rights. It always expires, at most 365 days ahead, 90 days when the request gives no expiry. The web UI signs in this way, with Basic credentials and a 12-hour token.
+      operationId: createUserToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TokenRequest" }
+            example: { name: laptop, scopes: [read], expiresIn: 30d }
+      responses:
+        "201":
+          description: Created; the only answer with the secret
+          headers:
+            Location: { schema: { type: string }, example: /api/v1/users/alice/tokens/7 }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreatedToken" }
+        "400": { $ref: "#/components/responses/Invalid" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/users/{name}/tokens/{id}:
+    parameters:
+      - $ref: "#/components/parameters/user"
+      - $ref: "#/components/parameters/tokenId"
+    delete:
+      tags: [Tokens]
+      summary: Revoke a personal access token
+      operationId: revokeUserToken
+      responses:
+        "204": { description: Revoked }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/info:
+    get:
+      tags: [System (proposed)]
+      summary: What the UI needs to know about the server
+      operationId: info
+      x-lajstrom-status: proposed
+      responses:
+        "200":
+          description: Server information
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerInfo" }
+
+  /api/v1/repos/{format}/{repo}/packages:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+    get:
+      tags: [Packages (proposed)]
+      summary: The packages of a repo
+      description: Raw repos with dir list one directory, its files and subdirectories, like a file tree.
+      operationId: listPackages
+      x-lajstrom-status: proposed
+      parameters:
+        - { name: q, in: query, description: Substring of the name, schema: { type: string } }
+        - name: attr
+          in: query
+          description: "Filter by an attribute, key:value (deb.suite:jammy); repeatable"
+          schema: { type: array, items: { type: string } }
+          style: form
+          explode: true
+        - { name: sort, in: query, schema: { type: string, enum: [name, updated, size, versions] } }
+        - { name: order, in: query, schema: { type: string, enum: [asc, desc] } }
+        - { name: dir, in: query, description: Raw only, the directory to list, schema: { type: string } }
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: A page of packages
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PackageList" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/repos/{format}/{repo}/packages/{name}:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/package"
+    get:
+      tags: [Packages (proposed)]
+      summary: One package
+      operationId: getPackage
+      x-lajstrom-status: proposed
+      responses:
+        "200":
+          description: The package
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PackageDetail" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/repos/{format}/{repo}/packages/{name}/versions:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/package"
+    get:
+      tags: [Packages (proposed)]
+      summary: The versions of a package, one row per manifest
+      operationId: listVersions
+      x-lajstrom-status: proposed
+      responses:
+        "200":
+          description: The versions, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versions: { type: array, items: { $ref: "#/components/schemas/VersionSummary" } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/repos/{format}/{repo}/packages/{name}/versions/{digest}:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/package"
+      - { name: digest, in: path, required: true, description: The manifest digest, schema: { type: string, example: "sha256:…" } }
+    get:
+      tags: [Packages (proposed)]
+      summary: One manifest in full
+      description: Files with their download paths, the metadata layer, the annotations, the OCI manifest and its referrers.
+      operationId: getVersion
+      x-lajstrom-status: proposed
+      responses:
+        "200":
+          description: The version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VersionDetail" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/repos/{format}/{repo}/reindex:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+    post:
+      tags: [Repositories]
+      summary: Rebuild the repo's index from the registry
+      description: The server answers 501 until reindex comes, or 404 when there is no such repo.
+      operationId: reindexRepo
+      responses:
+        "501":
+          description: Not in this server version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: { code: UNAVAILABLE, message: "reindex is not in this version" } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    get:
+      tags: [Packages (proposed)]
+      summary: The report of the last reindex
+      operationId: getReindexReport
+      x-lajstrom-status: proposed
+      responses:
+        "200":
+          description: The report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReindexReport" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/repos/{format}/{repo}/sessions:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+    get:
+      tags: [Packages (proposed)]
+      summary: Open publication sessions (maven deploys)
+      operationId: listSessions
+      x-lajstrom-status: proposed
+      responses:
+        "200":
+          description: The sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions: { type: array, items: { $ref: "#/components/schemas/PublishSession" } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/search:
+    get:
+      tags: [Search (proposed)]
+      summary: Packages and repos by name, manifests and files by digest
+      operationId: search
+      x-lajstrom-status: proposed
+      parameters:
+        - { name: q, in: query, required: true, description: "A name, or a sha256 digest (sha256: optional, 8 hex digits at least)", schema: { type: string } }
+        - { name: format, in: query, schema: { $ref: "#/components/schemas/Format" } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 200 } }
+      responses:
+        "200":
+          description: The hits
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SearchResult" }
+
+  /api/v1/registries:
+    get:
+      tags: [System (proposed)]
+      summary: The backend registries, their capabilities and health
+      operationId: listRegistries
+      x-lajstrom-status: proposed
+      responses:
+        "200":
+          description: The registries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  registries: { type: array, items: { $ref: "#/components/schemas/Registry" } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/audit:
+    get:
+      tags: [System (proposed)]
+      summary: The audit log, newest first
+      operationId: listAudit
+      x-lajstrom-status: proposed
+      parameters:
+        - { name: repo, in: query, description: "<format>/<repo>", schema: { type: string } }
+        - { name: principal, in: query, schema: { type: string, example: "user:alice" } }
+        - { name: action, in: query, schema: { type: string, example: push } }
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+        - { name: until, in: query, schema: { type: string, format: date-time } }
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: A page of events
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditPage" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/users:
+    get:
+      tags: [System (proposed)]
+      summary: The users
+      operationId: listUsers
+      x-lajstrom-status: proposed
+      responses:
+        "200":
+          description: The users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users: { type: array, items: { $ref: "#/components/schemas/User" } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/bindings:
+    get:
+      tags: [System (proposed)]
+      summary: The role bindings
+      operationId: listBindings
+      x-lajstrom-status: proposed
+      responses:
+        "200":
+          description: The bindings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bindings: { type: array, items: { $ref: "#/components/schemas/Binding" } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/tokens:
+    get:
+      tags: [System (proposed)]
+      summary: Every token, of every user and repo
+      operationId: listAllTokens
+      x-lajstrom-status: proposed
+      responses:
+        "200":
+          description: The tokens
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenList" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: A personal access token, ljs_pat_…. The demo's API page sends the signed-in demo user's own.
+    basicAuth:
+      type: http
+      scheme: basic
+      description: A user and a password or a personal access token; deploy:<token> for a deploy token.
+
+  parameters:
+    format:
+      name: format
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Format" }
+    repo:
+      name: repo
+      in: path
+      required: true
+      schema: { type: string, example: assets }
+    package:
+      name: name
+      in: path
+      required: true
+      description: The package name in the format's spelling, percent-encoded as one segment (a raw path keeps its slashes encoded as %2F).
+      schema: { type: string, example: nginx }
+    user:
+      name: name
+      in: path
+      required: true
+      schema: { type: string, example: alice }
+    tokenId:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, example: 7 }
+    limit:
+      name: limit
+      in: query
+      schema: { type: integer, default: 50, maximum: 200 }
+    cursor:
+      name: cursor
+      in: query
+      description: The next or prev of the page before, opaque
+      schema: { type: string }
+
+  responses:
+    Invalid:
+      description: The request breaks a rule; the message starts with the field it is about
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: INVALID, message: "name: \"Scratch\" must be lowercase letters and digits separated by single '.', '_' or '-', at most 64 characters" } }
+    Unauthorized:
+      description: Credentials are needed, or the ones sent were refused
+      headers:
+        WWW-Authenticate: { schema: { type: string }, example: Basic realm="lajstrom" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: FORBIDDEN, message: credentials are needed } }
+    Forbidden:
+      description: The caller may read the resource but lacks the action
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: FORBIDDEN, message: deploy tokens need manage on the repo } }
+    NotFound:
+      description: No such repo, user, token or endpoint; or no access at all, which looks the same
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: NOT_FOUND, message: repo raw/nope not found } }
+    Conflict:
+      description: Exists already, or has versions and the delete is not forced
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: CONFLICT, message: "repo raw/scratch has 3 versions; delete them or pass force=true" } }
+
+  schemas:
+    Format:
+      type: string
+      enum: [raw, pypi, apt, maven, oci]
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, enum: [INVALID, FORBIDDEN, NOT_FOUND, CONFLICT, UNAVAILABLE, INTERNAL] }
+            message: { type: string }
+    WhoAmI:
+      type: object
+      required: [principal, kind, name]
+      properties:
+        principal: { type: string, example: "user:alice" }
+        kind: { type: string, enum: [user, token, anonymous] }
+        name: { type: string }
+        admin: { type: boolean, description: "Proposed: whether the principal has the admin role" }
+        bindings: { type: array, items: { $ref: "#/components/schemas/Binding" }, description: "Proposed: the principal's role bindings" }
+    RepoPolicy:
+      type: object
+      additionalProperties: false
+      properties:
+        maxFileSize: { type: integer, description: Bytes; an upload above it is 413 }
+        blobRedirect: { type: string, enum: [auto, never], description: "auto: 307 to the registry's storage when it supports it" }
+        maven.sessionTimeout: { type: string, example: 30m }
+        maven.sessionExpiry: { type: string, enum: [seal, abort] }
+    RepoRequest:
+      type: object
+      additionalProperties: false
+      required: [format, name, registry]
+      properties:
+        format: { $ref: "#/components/schemas/Format" }
+        name: { type: string, pattern: "^[a-z0-9]+([._-][a-z0-9]+)*$", maxLength: 64 }
+        registry: { type: string, description: "One of registries[].name of the configuration" }
+        kind: { type: string, enum: [hosted] }
+        anonymousRead: { type: boolean, default: false }
+        policy: { oneOf: [{ $ref: "#/components/schemas/RepoPolicy" }, { type: "null" }] }
+    Repo:
+      type: object
+      required: [format, name, registry, kind, anonymousRead, policy, createdAt, updatedAt]
+      properties:
+        format: { $ref: "#/components/schemas/Format" }
+        name: { type: string }
+        registry: { type: string }
+        kind: { type: string, enum: [hosted] }
+        anonymousRead: { type: boolean }
+        policy: { oneOf: [{ $ref: "#/components/schemas/RepoPolicy" }, { type: "null" }] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        stats:
+          description: "Proposed: derived counts"
+          type: object
+          properties:
+            packages: { type: integer }
+            versions: { type: integer }
+            manifests: { type: integer }
+            files: { type: integer }
+            size: { type: integer }
+            lastPushAt: { type: [string, "null"], format: date-time }
+        permissions:
+          description: "Proposed: what the caller may do on the repo"
+          type: array
+          items: { type: string, enum: [read, write, delete, manage] }
+        reindex:
+          description: "Proposed: reindex and reconcile status"
+          type: object
+          properties:
+            state: { type: string, enum: [idle, running, failed] }
+            startedAt: { type: [string, "null"], format: date-time }
+            finishedAt: { type: [string, "null"], format: date-time }
+            errors: { type: integer }
+            nextReconcileAt: { type: [string, "null"], format: date-time }
+    TokenRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64, description: "Unique among the owner's live tokens" }
+        scopes: { type: array, items: { type: string, enum: [read, write] } }
+        expiresIn: { type: string, description: "A number of days, 30d, or a duration, 12h", example: 30d }
+        expiresAt: { type: string, format: date-time }
+    Token:
+      type: object
+      required: [id, kind, name, scopes, expiresAt, lastUsedAt, createdAt, revokedAt, hashPrefix]
+      properties:
+        id: { type: integer }
+        kind: { type: string, enum: [pat, deploy] }
+        user: { type: string, description: The owner of a personal access token }
+        repo: { type: string, description: "<format>/<repo> of a deploy token" }
+        name: { type: string }
+        scopes: { type: array, items: { type: string, enum: [read, write] } }
+        expiresAt: { type: [string, "null"], format: date-time }
+        lastUsedAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        revokedAt: { type: [string, "null"], format: date-time }
+        hashPrefix: { type: string, description: The first 8 hexadecimal characters of the sha256 of the secret }
+    CreatedToken:
+      allOf:
+        - $ref: "#/components/schemas/Token"
+        - type: object
+          required: [secret]
+          properties:
+            secret: { type: string, description: "ljs_pat_… or ljs_dep_…; shown this one time" }
+    TokenList:
+      type: object
+      properties:
+        tokens: { type: array, items: { $ref: "#/components/schemas/Token" } }
+    ServerInfo:
+      type: object
+      properties:
+        version: { type: string }
+        commit: { type: string }
+        date: { type: string }
+        externalURL: { type: string, description: The base of every absolute URL; snippets are built from it }
+        anonymousRead: { type: boolean, description: The server-wide switch auth.anonymousRead }
+        formats:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              artifactType: { type: string }
+    PackageSummary:
+      type: object
+      properties:
+        name: { type: string, description: "The format's spelling: nginx, Requests, com.example:lib-core, docs/readme.md" }
+        nameOci: { type: string, description: The escaped package path }
+        latestVersion: { type: [string, "null"] }
+        versions: { type: integer, description: Distinct versions }
+        manifests: { type: integer, description: Versions times variants }
+        latestVariants: { type: array, items: { type: string } }
+        size: { type: integer }
+        summary: { type: [string, "null"] }
+        attrs: { type: object, additionalProperties: { type: string } }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    PackageList:
+      allOf:
+        - $ref: "#/components/schemas/Page"
+        - type: object
+          properties:
+            packages: { type: array, items: { $ref: "#/components/schemas/PackageSummary" } }
+            facets:
+              type: object
+              description: Filter values over the whole repo, by attribute key
+              additionalProperties:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    value: { type: string }
+                    count: { type: integer }
+            directories:
+              type: array
+              description: Raw with dir only
+              items:
+                type: object
+                properties:
+                  name: { type: string }
+                  path: { type: string }
+                  files: { type: integer }
+                  size: { type: integer }
+                  updatedAt: { type: string, format: date-time }
+    PackageDetail:
+      allOf:
+        - $ref: "#/components/schemas/PackageSummary"
+        - type: object
+          properties:
+            ociRepository: { type: string }
+            latestMetadata: { type: [object, "null"] }
+    VersionSummary:
+      type: object
+      properties:
+        degraded: { type: boolean }
+        version: { type: string }
+        variant: { type: string }
+        tag: { type: string }
+        digest: { type: string }
+        artifactType: { type: string }
+        attrs: { type: object, additionalProperties: { type: string } }
+        createdAt: { type: string, format: date-time }
+        indexedAt: { type: string, format: date-time }
+        size: { type: integer }
+        fileCount: { type: integer }
+        uploadedBy: { type: [string, "null"] }
+        referrers:
+          type: object
+          properties:
+            signatures: { type: integer }
+            sboms: { type: integer }
+            attestations: { type: integer }
+    VersionDetail:
+      allOf:
+        - $ref: "#/components/schemas/VersionSummary"
+        - type: object
+          properties:
+            files:
+              type: array
+              items:
+                type: object
+                properties:
+                  name: { type: string }
+                  mediaType: { type: string }
+                  digest: { type: string }
+                  size: { type: integer }
+                  attrs: { type: object, additionalProperties: { type: string } }
+                  path: { type: string, description: The protocol path to download it }
+            metadata: { type: [object, "null"] }
+            annotations: { type: object, additionalProperties: { type: string } }
+            manifest: { type: object, description: The OCI image manifest }
+            referrerList:
+              type: array
+              items:
+                type: object
+                properties:
+                  digest: { type: string }
+                  artifactType: { type: string }
+                  kind: { type: string, enum: [signature, sbom, attestation, other] }
+                  tool: { type: [string, "null"] }
+                  size: { type: integer }
+                  createdAt: { type: [string, "null"], format: date-time }
+                  annotations: { type: object, additionalProperties: { type: string } }
+            ociReference: { type: string }
+    SearchResult:
+      type: object
+      properties:
+        total: { type: integer }
+        hits:
+          type: array
+          items:
+            type: object
+            description: A package (kind package) or a manifest or file found by digest (kind version)
+            properties:
+              kind: { type: string, enum: [package, version] }
+              format: { type: string }
+              repo: { type: string }
+              name: { type: string }
+              latestVersion: { type: [string, "null"] }
+              summary: { type: [string, "null"] }
+              updatedAt: { type: string, format: date-time }
+              version: { type: string }
+              variant: { type: string }
+              digest: { type: string }
+              matched: { type: string, description: "manifest, or the file whose layer matched" }
+    Registry:
+      type: object
+      properties:
+        name: { type: string }
+        type: { type: string, enum: [generic, ecr] }
+        product: { type: string }
+        url: { type: string }
+        prefix: { type: string }
+        support: { type: string, enum: [ci, manual, untested] }
+        capabilities:
+          type: object
+          properties:
+            createOnPush: { type: boolean }
+            referrers: { type: boolean }
+            catalog: { type: boolean }
+            deleteManifest: { type: boolean }
+            immutableTags: { type: boolean }
+            blobRedirect: { type: boolean }
+            maxBlobSize: { type: integer }
+        status:
+          type: object
+          properties:
+            state: { type: string, enum: [ok, degraded, down] }
+            checkedAt: { type: string, format: date-time }
+            latencyMs: { type: [integer, "null"] }
+            message: { type: [string, "null"] }
+        repos: { type: array, items: { type: string } }
+    Page:
+      type: object
+      properties:
+        total: { type: integer }
+        limit: { type: integer }
+        next: { type: [string, "null"] }
+        prev: { type: [string, "null"] }
+    AuditPage:
+      allOf:
+        - $ref: "#/components/schemas/Page"
+        - type: object
+          properties:
+            events:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: integer }
+                  at: { type: string, format: date-time }
+                  principal: { type: string }
+                  action: { type: string, example: push }
+                  repo: { type: string }
+                  subject: { type: string }
+                  digest: { type: [string, "null"] }
+                  ip: { type: string }
+                  details: { type: object }
+    User:
+      type: object
+      properties:
+        name: { type: string }
+        kind: { type: string, enum: [local, oidc] }
+        disabled: { type: boolean }
+        admin: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        lastSeenAt: { type: [string, "null"], format: date-time }
+    Binding:
+      type: object
+      properties:
+        id: { type: integer }
+        principal: { type: string, example: "user:alice" }
+        role: { type: string, enum: [reader, writer, maintainer, admin] }
+        repoMask: { type: string, example: "*/payments" }
+        createdAt: { type: string, format: date-time }
+    PublishSession:
+      type: object
+      properties:
+        id: { type: integer }
+        key: { type: string, description: "groupId:artifactId:version" }
+        principal: { type: string }
+        state: { type: string, enum: [open, committed, aborted, expired] }
+        files:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              size: { type: integer }
+              digest: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+    ReindexReport:
+      type: object
+      properties:
+        repo: { type: string }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        ociRepositories: { type: integer }
+        manifests: { type: integer }
+        added: { type: integer }
+        updated: { type: integer }
+        removed: { type: integer }
+        degraded: { type: integer }
+        foreign:
+          type: array
+          items:
+            type: object
+            properties:
+              path: { type: string }
+              tag: { type: string }
+              digest: { type: string }
+              reason: { type: string }

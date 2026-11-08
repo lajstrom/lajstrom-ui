@@ -82,12 +82,14 @@ export const registries: Omit<Registry, "repos">[] = [
 ];
 
 export type RepoSeed = {
-  format: "raw" | "pypi" | "apt" | "maven";
+  format: "raw" | "pypi" | "apt" | "maven" | "oci";
   name: string;
   registry: string;
   anonymousRead: boolean;
-  policy: RepoPolicy;
+  policy: RepoPolicy | null;
   createdAt: string;
+  /** Set by a change in the demo; the seed's repos were last changed when created. */
+  updatedAt?: string;
   reindex: "idle" | "running" | "failed";
   signingKeys?: SigningKey[];
 };

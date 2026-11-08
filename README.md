@@ -59,6 +59,17 @@ any of them with any password.
   has no endpoint yet, or `/ui/?demo=1` enter it; "Exit demo" or `?demo=0` go back. The real
   session is kept apart and is still there afterwards.
 - "Reset data" starts the demo over.
+- **API** in the header: `/api/v1` in Swagger UI, from [public/openapi.yaml](public/openapi.yaml):
+  what the server has and, marked `proposed`, what the UI needs from it. "Try it out" is
+  answered by the demo as the signed-in user, errors included (try deleting `raw/scratch`).
+  `src/mocks/openapi.test.ts` keeps the description and the mock's routes the same, both ways.
+- **Seeing the requests.** The mock answers through a service worker, so every request of the
+  UI and of Swagger shows in the Network panel of the developer tools, with its answer, and each
+  one is also logged in the console. Over plain `http://` to an IP or a `.local` name browsers
+  allow no service worker; the mock then answers inside the page, and the requests show in the
+  console only. For the Network panel there too, open the UI as `http://localhost` (for example
+  `ssh -L 8081:localhost:8081 <machine>`), or add the origin to Chrome's
+  `chrome://flags/#unsafely-treat-insecure-origin-as-secure`.
 - `"mock": true` in `config.json` (`LAJSTROM_UI_MOCK=true`) makes the demo the only mode, for a
   deployment without a server; `"demo": false` (`LAJSTROM_UI_DEMO=false`) stops offering it.
 
@@ -151,6 +162,7 @@ src/
 docker/         nginx.conf and the start script of the image
 deploy/         Kubernetes and compose examples
 docs/           the API proposal and the ADRs of the UI
+public/         config.json of the dev server, openapi.yaml, the mock's service worker
 ```
 
 ## Relation to the server repository
@@ -184,9 +196,8 @@ the snippet scan has nothing to match.
 
 - **Images per environment**: dev, test and prod images are a requirement; one image configured
   by environment variables exists today. What differs between them is still open.
-- **Repository management**: the server has the endpoints to create a repository, change its
-  anonymous read and policy, and delete it; the forms are not written yet.
-- **Users and bindings**: managed with `lajstrom admin` until the server has their API.
+- **Management screens** (repositories, users, bindings): after the read-only UI. The server's
+  repo endpoints can be tried on the API page of the demo meanwhile.
 - Code splitting per page (the main chunk is about 190 KiB gzipped).
 
 ## Contributing and license
