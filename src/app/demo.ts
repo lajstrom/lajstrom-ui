@@ -56,11 +56,6 @@ export function demoMode(): DemoMode {
   return mode;
 }
 
-/** Whether the demo starts from scratch: never entered in this browser, or reset. */
-export function demoIsFresh(): boolean {
-  return !storage()?.getItem(DEMO_STATE);
-}
-
 function reload(): void {
   window.location.assign(import.meta.env.BASE_URL);
 }
@@ -82,7 +77,7 @@ export function resetDemo(): void {
   reload();
 }
 
-/** The users of the demo's data, to view the UI as each of them (src/mocks/data/system.ts). */
+/** The accounts of the demo (src/mocks/data/system.ts); each one's password is its name. */
 export const demoUsers: { name: string; description: string }[] = [
   { name: "admin", description: "admin on every repository" },
   { name: "alice", description: "reads everything, publishes to */payments" },

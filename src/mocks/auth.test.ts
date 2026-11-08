@@ -12,10 +12,12 @@ describe("authenticate (docs/auth.md)", () => {
     expect(authenticate(req())).toEqual({ principal: "anonymous" });
   });
 
-  it("takes any password of a user that is not disabled", () => {
-    expect(authenticate(req(basic("alice", "anything")))).toEqual({ principal: "alice" });
-    expect(authenticate(req(basic("dave", "anything")))).toEqual({ refused: true });
-    expect(authenticate(req(basic("nobody", "anything")))).toEqual({ refused: true });
+  it("takes the user's name as the password, of a user that is not disabled", () => {
+    expect(authenticate(req(basic("alice", "alice")))).toEqual({ principal: "alice" });
+    expect(authenticate(req(basic("alice", "wrong")))).toEqual({ refused: true });
+    expect(authenticate(req(basic("alice", "")))).toEqual({ refused: true });
+    expect(authenticate(req(basic("dave", "dave")))).toEqual({ refused: true });
+    expect(authenticate(req(basic("nobody", "nobody")))).toEqual({ refused: true });
   });
 
   it("refuses a bearer it does not know, and a deploy token as bearer", () => {
