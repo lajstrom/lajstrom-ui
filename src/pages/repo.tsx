@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { infoQuery, packagesQuery, repoQuery, whoamiQuery } from "@/api/queries";
 import type { PackageList, PackageSummary, Repo } from "@/api/types";
 import { AccessBadge, ErrorState, FormatMark, PageHeader, Pagination, RelativeTime } from "@/components/common";
-import { SnippetTabs } from "@/components/snippets";
+import { DemoCommandsNote, SnippetTabs } from "@/components/snippets";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -173,11 +173,12 @@ function ConnectTab({ repo, spec }: { repo: Repo; spec: FormatSpec }) {
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
       <div className="space-y-4">
+        <DemoCommandsNote host={ctx.host} />
         {spec.connect(ctx).map((g) => (
           <Card key={g.title}>
             <CardHeader title={g.title} description={g.description} />
             <CardBody>
-              <SnippetTabs snippets={g.snippets} />
+              <SnippetTabs snippets={g.snippets} noDemoLine />
             </CardBody>
           </Card>
         ))}
