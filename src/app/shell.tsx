@@ -1,19 +1,22 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { Boxes, Check, FlaskConical, History, LogIn, Monitor, Moon, Search, Server, Sun, User, Users } from "lucide-react";
+import { Boxes, Check, FlaskConical, History, KeyRound, LogIn, LogOut, Monitor, Moon, Search, Server, Sun, User, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { signInWithPassword, signOut } from "@/api/auth";
 import { infoQuery, whoamiQuery } from "@/api/queries";
+import { RelativeTime } from "@/components/common";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Menu, MenuContent, MenuItem, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
+import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
 import { Kbd } from "@/components/ui/misc";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
-import { getPersona, personas, setPersona, type Persona } from "@/mocks/persona";
 
 import { CommandPalette } from "./command-palette";
 import { config } from "./config";
+import { demoMode, demoUsers, exitDemo, resetDemo } from "./demo";
+import { useSession } from "./session";
 import { setTheme, useTheme, type Theme } from "./theme";
 
 function Logo() {
@@ -75,65 +78,111 @@ function ThemeMenu() {
 
 function UserMenu() {
   const who = useQuery(whoamiQuery);
-  const queryClient = useQueryClient();
+  const session = useSession();
   const navigate = useNavigate();
-  const [persona, setLocal] = useState<Persona>(getPersona());
-  const mock = config().mock;
+  const here = useRouterState({ select: (s) => s.location.href });
 
-  const switchTo = (p: Persona) => {
-    setPersona(p);
-    setLocal(p);
-    queryClient.clear();
+  if (who.isPending) return <span className="h-8 w-20 animate-pulse rounded-md bg-muted" aria-hidden />;
+  if (!who.data || who.data.kind === "anonymous") {
+    return (
+      <Button asChild variant="secondary">
+        <Link to="/sign-in" search={here.startsWith("/sign-in") ? {} : { redirect: here }}>
+          <LogIn />
+          Sign in
+        </Link>
+      </Button>
+    );
+  }
+
+  const me = who.data;
+  const out = async () => {
+    await signOut();
     void navigate({ to: "/" });
   };
-
-  const name = who.data ? (who.data.kind === "anonymous" ? "anonymous" : who.data.name) : "…";
+  // The demo signs in as any of its users with any password: one click to see their view.
+  const viewAs = async (name: string) => {
+    await signOut();
+    await signInWithPassword(name, "demo");
+  };
   return (
     <Menu>
       <MenuTrigger asChild>
         <Button variant="ghost" className="gap-2 px-2">
           <span className="flex size-6 items-center justify-center rounded-full bg-primary-soft text-xs font-semibold text-primary-soft-foreground uppercase">
-            {who.data?.kind === "anonymous" ? <User className="size-3.5" /> : name.slice(0, 1)}
+            {me.name.slice(0, 1) || <User className="size-3.5" />}
           </span>
-          <span className="hidden text-sm lg:inline">{name}</span>
+          <span className="hidden text-sm lg:inline">{me.name}</span>
         </Button>
       </MenuTrigger>
       <MenuContent className="w-72">
         <MenuLabel>
-          {who.data?.kind === "anonymous" ? "Not signed in" : <>Signed in as <span className="font-mono text-foreground">{who.data?.principal}</span></>}
-          {who.data?.admin ? <Badge tone="primary" className="ml-1.5">admin</Badge> : null}
+          Signed in as <span className="font-mono text-foreground">{me.principal}</span>
+          {me.admin ? <Badge tone="primary" className="ml-1.5">admin</Badge> : null}
         </MenuLabel>
-        {who.data && who.data.bindings.length > 0 ? (
+        {me.bindings?.length ? (
           <div className="px-2 pb-1.5 text-xs text-muted-foreground">
-            {who.data.bindings.map((b) => (
+            {me.bindings.map((b) => (
               <div key={b.id} className="font-mono">
                 {b.role} on {b.repoMask}
               </div>
             ))}
           </div>
         ) : null}
+        {session?.expiresAt ? (
+          <div className="px-2 pb-1.5 text-xs text-muted-foreground">
+            Session ends <RelativeTime iso={session.expiresAt} />
+          </div>
+        ) : null}
         <MenuSeparator />
-        {mock ? (
+        {demoMode().active ? (
           <>
             <MenuLabel className="flex items-center gap-1.5">
               <FlaskConical className="size-3.5" />
-              Mock: view as
+              Demo: view as
             </MenuLabel>
-            <MenuRadioGroup value={persona} onValueChange={(v) => switchTo(v as Persona)}>
-              {personas.map((p) => (
-                <MenuRadioItem key={p.id} value={p.id} description={p.description}>
-                  {p.label}
-                </MenuRadioItem>
-              ))}
-            </MenuRadioGroup>
+            {demoUsers.map((u) => (
+              <MenuItem
+                key={u.name}
+                onSelect={() => void viewAs(u.name)}
+                hint={u.name === me.name ? <Check className="size-3.5" /> : null}
+              >
+                <span className="font-mono">{u.name}</span>
+                <span className="block text-xs text-muted-foreground">{u.description}</span>
+              </MenuItem>
+            ))}
+            <MenuSeparator />
           </>
-        ) : (
-          <MenuItem icon={<LogIn />} disabled>
-            Sign in (browser session: stage 2)
-          </MenuItem>
-        )}
+        ) : null}
+        <MenuItem icon={<KeyRound />} onSelect={() => void navigate({ to: "/tokens" })}>
+          Personal access tokens
+        </MenuItem>
+        <MenuItem icon={<LogOut />} onSelect={() => void out()}>
+          Sign out
+        </MenuItem>
       </MenuContent>
     </Menu>
+  );
+}
+
+/** Says that this is the demo, and how to start it over or leave it. */
+function DemoBar({ forced }: { forced: boolean }) {
+  return (
+    <div className="border-t border-warning/25 bg-warning-soft">
+      <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-3 gap-y-1 px-4 py-1 text-xs sm:px-6">
+        <FlaskConical className="size-3.5 shrink-0 text-warning" />
+        <span className="min-w-0 flex-1">
+          Demo: the data is generated and kept in this browser. Nothing you do here reaches a server.
+        </span>
+        <Button size="sm" variant="ghost" onClick={resetDemo}>
+          Reset data
+        </Button>
+        {forced ? null : (
+          <Button size="sm" onClick={exitDemo}>
+            Exit demo
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -141,7 +190,7 @@ export function AppShell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const who = useQuery(whoamiQuery);
   const info = useQuery(infoQuery);
-  const mock = config().mock;
+  const demo = demoMode();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -173,11 +222,11 @@ export function AppShell() {
             <Logo />
             <span className="text-[15px] font-semibold tracking-tight">{config().title}</span>
           </Link>
-          {mock ? (
-            <Tooltip content="This UI runs on a mock of /api/v1 (MSW). Data is generated in the browser.">
+          {demo.active ? (
+            <Tooltip content="Demo: the API is answered in this browser on generated data; nothing reaches a server.">
               <Badge tone="warning" shape="square" className="hidden sm:inline-flex">
                 <FlaskConical />
-                mock data
+                demo
               </Badge>
             </Tooltip>
           ) : null}
@@ -216,6 +265,7 @@ export function AppShell() {
             <UserMenu />
           </div>
         </div>
+        {demo.active ? <DemoBar forced={demo.forced} /> : null}
       </header>
 
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6">
@@ -229,7 +279,7 @@ export function AppShell() {
             {info.data?.commit ? ` · ${info.data.commit}` : ""}
           </span>
           <span>·</span>
-          <span>UI prototype{mock ? " on mock data" : ""}</span>
+          <span>UI prototype{demo.active ? " · demo data" : ""}</span>
           <span className="ml-auto">
             Press <Kbd>/</Kbd> to search
           </span>

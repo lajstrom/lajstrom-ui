@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { AlertTriangle, CheckCircle2, Clock, KeyRound, Loader2, RefreshCw, ShieldCheck, Upload } from "lucide-react";
 
-import { deployTokensQuery, infoQuery, registriesQuery, reindexQuery, sessionsQuery, whoamiQuery } from "@/api/queries";
+import { infoQuery, registriesQuery, reindexQuery, sessionsQuery, whoamiQuery } from "@/api/queries";
 import type { Repo } from "@/api/types";
 import { ErrorState, Principal, RelativeTime } from "@/components/common";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +15,9 @@ import { formatBytes, formatDateTime, formatNumber, shortDigest } from "@/lib/fo
 import { formatSpec, snippetContext } from "@/lib/formats";
 
 import { AuditTable } from "./audit";
-import { TokenStatus } from "./access";
+import { DeployTokens } from "./deploy-tokens";
+
+const NOT_REPORTED = <span className="text-muted-foreground">not reported by this server version</span>;
 
 export function RepoDetails({ repo }: { repo: Repo }) {
   const info = useQuery(infoQuery);
@@ -24,7 +26,7 @@ export function RepoDetails({ repo }: { repo: Repo }) {
   const registry = regs.data?.find((r) => r.name === repo.registry);
   const spec = formatSpec(repo.format);
   const ctx = snippetContext(info.data, repo);
-  const p = repo.policy;
+  const p = repo.policy ?? {};
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -54,16 +56,20 @@ export function RepoDetails({ repo }: { repo: Repo }) {
               />
             </Property>
             <Property label="Anonymous read">
-              {repo.anonymousRead ? (info.data?.anonymousRead ? "on" : "on, but off server-wide (auth.anonymousRead)") : "off"}
+              {repo.anonymousRead ? (info.data?.anonymousRead === false ? "on, but off server-wide (auth.anonymousRead)" : "on") : "off"}
             </Property>
             <Property label="Your access">
-              <span className="flex flex-wrap gap-1">
-                {repo.permissions.map((a) => (
-                  <Badge key={a} tone="outline">
-                    {a}
-                  </Badge>
-                ))}
-              </span>
+              {repo.permissions ? (
+                <span className="flex flex-wrap gap-1">
+                  {repo.permissions.map((a) => (
+                    <Badge key={a} tone="outline">
+                      {a}
+                    </Badge>
+                  ))}
+                </span>
+              ) : (
+                NOT_REPORTED
+              )}
             </Property>
             <Property label="Created">{formatDateTime(repo.createdAt)}</Property>
             <Property label="Updated">{formatDateTime(repo.updatedAt)}</Property>
@@ -130,14 +136,12 @@ export function RepoDetails({ repo }: { repo: Repo }) {
             <Property label="State">
               <ReindexState repo={repo} />
             </Property>
-            <Property label="Last reconcile">
-              <RelativeTime iso={repo.reindex.finishedAt} />
-            </Property>
+            <Property label="Last reconcile">{repo.reindex ? <RelativeTime iso={repo.reindex.finishedAt} /> : NOT_REPORTED}</Property>
             <Property label="Next reconcile">
-              {repo.reindex.nextReconcileAt ? <RelativeTime iso={repo.reindex.nextReconcileAt} /> : "—"}
+              {repo.reindex ? repo.reindex.nextReconcileAt ? <RelativeTime iso={repo.reindex.nextReconcileAt} /> : "—" : NOT_REPORTED}
             </Property>
             <Property label="Contents">
-              {formatNumber(repo.stats.manifests)} manifests, {formatNumber(repo.stats.files)} files
+              {repo.stats ? `${formatNumber(repo.stats.manifests)} manifests, ${formatNumber(repo.stats.files)} files` : NOT_REPORTED}
             </Property>
           </Properties>
         </CardBody>
@@ -192,19 +196,20 @@ export function RepoDetails({ repo }: { repo: Repo }) {
 }
 
 export function ReindexState({ repo }: { repo: Repo }) {
-  const s = repo.reindex.state;
-  if (s === "running")
+  const r = repo.reindex;
+  if (!r) return NOT_REPORTED;
+  if (r.state === "running")
     return (
       <span className="inline-flex items-center gap-1.5 text-sm text-primary">
         <Loader2 className="size-3.5 animate-spin" />
-        reindex running since <RelativeTime iso={repo.reindex.startedAt} />
+        reindex running since <RelativeTime iso={r.startedAt} />
       </span>
     );
-  if (s === "failed")
+  if (r.state === "failed")
     return (
       <span className="inline-flex items-center gap-1.5 text-sm text-danger">
         <AlertTriangle className="size-3.5" />
-        failed with {repo.reindex.errors} errors
+        failed with {r.errors} errors
       </span>
     );
   return (
@@ -218,7 +223,6 @@ export function ReindexState({ repo }: { repo: Repo }) {
 export function RepoMaintenance({ repo }: { repo: Repo }) {
   const report = useQuery(reindexQuery(repo.format, repo.name));
   const sessions = useQuery({ ...sessionsQuery(repo.format, repo.name), enabled: repo.format === "maven" });
-  const tokens = useQuery(deployTokensQuery(repo.format, repo.name));
 
   return (
     <div className="space-y-4">
@@ -361,57 +365,7 @@ export function RepoMaintenance({ repo }: { repo: Repo }) {
         </Card>
       ) : null}
 
-      <Card>
-        <CardHeader
-          icon={<KeyRound />}
-          title="Deploy tokens"
-          description="Bound to this repo only; scopes read and/or write, never delete or manage"
-        />
-        {tokens.isError ? (
-          <ErrorState error={tokens.error} />
-        ) : tokens.data && tokens.data.length === 0 ? (
-          <EmptyState title="No deploy tokens" className="py-6">
-            CI jobs get a deploy token per repo (POST /api/v1/repos/{repo.prefix}/deploy-tokens).
-          </EmptyState>
-        ) : (
-          <Table>
-            <THead>
-              <TR>
-                <TH>Name</TH>
-                <TH>Principal</TH>
-                <TH>Scopes</TH>
-                <TH>Last used</TH>
-                <TH>Expires</TH>
-                <TH>Status</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {tokens.data?.map((t) => (
-                <TR key={t.id}>
-                  <TD className="font-medium">{t.name}</TD>
-                  <TD className="font-mono text-xs">token:{t.id}</TD>
-                  <TD>
-                    <span className="flex gap-1">
-                      {t.scopes.map((s) => (
-                        <Badge key={s} tone="outline">
-                          {s}
-                        </Badge>
-                      ))}
-                    </span>
-                  </TD>
-                  <TD>
-                    <RelativeTime iso={t.lastUsedAt} />
-                  </TD>
-                  <TD>{t.expiresAt ? <RelativeTime iso={t.expiresAt} /> : <span className="text-muted-foreground">never</span>}</TD>
-                  <TD>
-                    <TokenStatus token={t} />
-                  </TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
-        )}
-      </Card>
+      <DeployTokens repo={repo} />
     </div>
   );
 }

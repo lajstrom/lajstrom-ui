@@ -4,12 +4,12 @@
   [`docs/spec/http-routing.md`](https://github.com/lajstrom/lajstrom/blob/main/docs/spec/http-routing.md) §4).
 - Implemented by: the mock in [`src/mocks/`](../src/mocks/) (MSW handlers and data);
   TypeScript shapes in [`src/api/types.ts`](../src/api/types.ts).
-- Related: [ADR 0001](adr/0001-web-ui-in-its-own-repository.md), lajstrom/lajstrom P-07 (#70), M2-09 (#47).
+- Related: [ADR 0001](adr/0001-web-ui-in-its-own-repository.md); the server's plan for the web UI and the management API.
 
 ## 1. Why
 
 `http-routing.md` §4 lists the management resources (repos, users, tokens, bindings, audit,
-whoami) and leaves their shapes to M2-09. A browser UI needs to *read* what is in a repository,
+whoami) and leaves their shapes to the management API. A browser UI needs to *read* what is in a repository,
 and nothing in the plan serves that: no listing of packages, versions, files or referrers, no
 search, no server information. The protocol frontends serve that data, but each in its own
 format (apt `Packages`, pypi simple pages, `maven-metadata.xml`); the UI should not parse them.
@@ -23,7 +23,7 @@ and the referrers of one version (§3.7).
   own spelling (pypi core metadata is snake_case, deb control fields are `Installed-Size`).
 - Times RFC 3339 UTC; digests `sha256:<hex>`; sizes in bytes.
 - Errors: the envelope of §4, `{"error": {"code": "NOT_FOUND|CONFLICT|FORBIDDEN|INVALID|UNAVAILABLE", "message": "…"}}`.
-- Lists: `limit` (default 50, at most 200) and an opaque `cursor`, as M2-09 says; responses carry
+- Lists: `limit` (default 50, at most 200) and an opaque `cursor`, as the plan for the management API says; responses carry
   `total`, `limit`, `next` and `prev` (cursors or `null`). `total` lets the UI say "51–100 of 312".
 - Path segments are percent-encoded by the client. A raw package name is a path
   (`installers/acme-agent/2.5.0/SHA256SUMS` → `installers%2Facme-agent%2F2.5.0%2FSHA256SUMS`);
@@ -46,7 +46,7 @@ and the referrers of one version (§3.7).
 | `GET /api/v1/repos/{format}/{repo}/packages/{name}` | new | read | `PackageDetail` |
 | `GET /api/v1/repos/{format}/{repo}/packages/{name}/versions` | new | read | `{versions: VersionSummary[]}` |
 | `GET /api/v1/repos/{format}/{repo}/packages/{name}/versions/{digest}` | new | read | `VersionDetail` |
-| `GET /api/v1/repos/{format}/{repo}/reindex` | new (M1-06 "poll with GET") | manage | `ReindexReport` |
+| `GET /api/v1/repos/{format}/{repo}/reindex` | new (reindex: "poll with GET") | manage | `ReindexReport` |
 | `GET /api/v1/repos/{format}/{repo}/sessions` | new | read | `{sessions: PublishSession[]}` |
 | `GET /api/v1/repos/{format}/{repo}/deploy-tokens` | in §4 | manage | `{tokens: Token[]}` |
 | `GET /api/v1/search?q=&format=&limit=` | new | read (filters) | `SearchResult` |
@@ -73,8 +73,8 @@ server-wide anonymous-read switch, and the enabled formats.
 
 The `repos` row plus what the list and the header of a repo page show, so the UI makes one call
 per page: `stats` (aggregates over the derived tables), `permissions` (the caller's actions on
-this repo, from the RBAC evaluator), `reindex` (M1-06/M1-07 status) and, for apt, the signing
-keys (M2-03; public fingerprints only).
+this repo, from the RBAC evaluator), `reindex` (reindex and reconcile status) and, for apt, the signing
+keys (public fingerprints only).
 
 ```json
 {
@@ -144,21 +144,25 @@ The mock fills these with plausible values; the real shapes are open:
 - the key of the maven session expiry policy (`maven.sessionExpiry`: `seal` or `abort`);
 - the fields of the reindex report (`ociRepositories`, `manifests`, `added`, `updated`,
   `removed`, `degraded`, `foreign[]`);
-- registry `status` and `support` (the M1-12 tiers: `ci`, `manual`, `untested`).
+- registry `status` and `support` (the support tiers: `ci`, `manual`, `untested`).
 
-## 5. Browser session (needed before management screens)
+## 5. Browser session
 
-The API takes Basic or a PAT bearer. A browser should not keep a token in JavaScript. Proposal:
-`POST /api/v1/session` with a user and password (or a PAT) sets an `HttpOnly; Secure;
-SameSite=Strict` cookie with a short lifetime; `DELETE /api/v1/session` ends it; mutations with
-the cookie also require a custom header (`X-Lajstrom-Client: ui`) as CSRF protection. OIDC login
-(P-06) later replaces the password form, not the cookie.
+Settled: the UI talks to `/api/v1` with bearer tokens, never cookies, and needs no endpoint of its
+own. Signing in with a password creates a personal access token for the browser
+(`POST /api/v1/users/{name}/tokens` with Basic credentials, 12 hours), which the UI sends as
+`Authorization: Bearer` from then on; signing out revokes it (`DELETE …/tokens/{id}`). A user can
+also sign in with a personal access token they already have; signing out then forgets it without
+revoking it. The token is kept in `localStorage`, shared by the UI's tabs; the image's
+Content-Security-Policy allows no inline or foreign scripts. Requests go out with
+`credentials: "omit"`, so a `401` with the Basic challenge never opens the browser's own login
+dialog. OIDC login later replaces the password form, not the token.
 
 ## 6. Open questions for the lead
 
-1. M2-07 says every `/api/v1` call needs `manage` or `admin`, rbac.md §2 says `read` covers
+1. The plan for RBAC says every `/api/v1` call needs `manage` or `admin`, rbac.md §2 says `read` covers
    "list in `/api/v1/repos`". This proposal takes rbac.md's side for the read endpoints.
-2. Cursor pagination (M2-09) against `AuditFilter`'s `Limit`/`Offset` in the code: the cursor
+2. Cursor pagination (the plan for the management API) against `AuditFilter`'s `Limit`/`Offset` in the code: the cursor
    can encode an offset, as the mock does.
 3. Should `VersionDetail` embed the manifest (one registry call per detail view) or should it be
    a separate `…/versions/{digest}/manifest`?

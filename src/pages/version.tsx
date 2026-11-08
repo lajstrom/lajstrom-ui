@@ -23,7 +23,7 @@ import { CodeBlock, CopyText } from "@/components/ui/code-block";
 import { EmptyState, Properties, Property, Segmented, Skeleton } from "@/components/ui/misc";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Tooltip } from "@/components/ui/tooltip";
-import { config } from "@/app/config";
+import { demoMode } from "@/app/demo";
 import { copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/cn";
 import { formatBytes, formatDateTime, shortDigest } from "@/lib/format";
@@ -160,7 +160,7 @@ export function VersionPage({ format, repoName, name, version }: Props) {
 function FilesCard({ detail, spec }: { detail: VersionDetail; spec: FormatSpec }) {
   const info = useQuery(infoQuery);
   const base = (info.data?.externalURL ?? window.location.origin).replace(/\/$/, "");
-  const mock = config().mock;
+  const mock = demoMode().active;
   return (
     <Card>
       <CardHeader

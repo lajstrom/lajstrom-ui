@@ -1,5 +1,6 @@
 {
   "apiBaseUrl": "",
   "mock": true,
+  "demo": true,
   "title": "Lajstrom"
 }

@@ -9,15 +9,17 @@ The web UI of [Lajstrom](https://github.com/lajstrom/lajstrom), an artifact regi
 any OCI registry. A static single-page app in its own repository and its own container images;
 it talks to the server only through `/api/v1`.
 
-**Status: prototype on mock data.** The server does not serve the read API yet, so the UI runs
-against a mock of `/api/v1` (MSW, in the browser) built from the server's specs. The endpoints
-it needs are proposed in [docs/api-proposal.md](docs/api-proposal.md), for a `contract` issue in
-the server repository. Why this is a separate repository: [ADR 0001](docs/adr/0001-web-ui-in-its-own-repository.md).
+**Status: prototype.** Against a server it shows what the server serves today (repositories,
+who you are, personal and deploy tokens) and says plainly where the server has no endpoint yet.
+Everything else runs in the [demo](#demo), on a mock of `/api/v1` in the browser built from the
+server's specs. The read endpoints the UI needs are proposed in
+[docs/api-proposal.md](docs/api-proposal.md). Why this is a separate repository:
+[ADR 0001](docs/adr/0001-web-ui-in-its-own-repository.md).
 
 ## Requirements
 
 - No server-side rendering: a fully static build; all data comes from API calls in the browser.
-- Without a backend the UI still renders: on mock data, for now.
+- Without a backend the UI still works: in the demo, on data generated in the browser.
 - Separate images for dev, test and prod (not built yet; see [Not done yet](#not-done-yet)).
 
 ## What is in it
@@ -37,12 +39,28 @@ the server repository. Why this is a separate repository: [ADR 0001](docs/adr/00
   `sha256` digest to find the manifest or file it belongs to.
 - **Admin pages**: registries with their capabilities and health, the audit log, and a read-only
   preview of users, tokens and bindings.
+- **Sign-in** with a password, which creates a personal access token for the browser (12 hours,
+  revoked on sign-out), or with a token you already have. Requests carry it as
+  `Authorization: Bearer`; there are no cookies.
+- **Tokens**: your personal access tokens and a repository's deploy tokens: create one, copy the
+  secret the one time it is shown, revoke.
 - Every screen state is in the URL (`/ui/apt/ubuntu-internal?suite=jammy&arch=arm64`), so a link
   shows the same view. Light and dark theme.
 
-In mock mode the user menu switches between three personas, to see how the UI follows RBAC:
-`admin` (admin on `*/*`), `alice` (reader on `*/*`, writer on `*/payments`) and `anonymous`
-(anonymous-read repos only).
+## Demo
+
+The demo is the whole UI on generated data: a mock of `/api/v1` answers in the browser (a
+service worker, MSW), and what you change there, such as tokens, is kept in this browser's
+`localStorage`. Nothing reaches a server. It starts signed in as `admin`; the user menu switches
+to `alice`, `bob` or `carol` to see how the UI follows their bindings, and the sign-in page takes
+any of them with any password.
+
+- Next to a server, "Open the demo" on the sign-in page, "See it in the demo" where the server
+  has no endpoint yet, or `/ui/?demo=1` enter it; "Exit demo" or `?demo=0` go back. The real
+  session is kept apart and is still there afterwards.
+- "Reset data" starts the demo over.
+- `"mock": true` in `config.json` (`LAJSTROM_UI_MOCK=true`) makes the demo the only mode, for a
+  deployment without a server; `"demo": false` (`LAJSTROM_UI_DEMO=false`) stops offering it.
 
 ## Run it
 
@@ -50,12 +68,18 @@ Node 22.12 or newer.
 
 ```sh
 npm ci
-npm run dev            # http://localhost:5173/ui/, on mock data (public/config.json)
+npm run dev            # http://localhost:5173/ui/, the demo (public/config.json)
 npm run check          # typecheck, lint, tests, production build
 ```
 
-Against a running Lajstrom, set `"mock": false` in `public/config.json`; the dev server forwards
-`/api` and `/-` to `LAJSTROM_API_UPSTREAM` (default `http://localhost:8080`).
+Against a running Lajstrom:
+
+```sh
+LAJSTROM_UI_MOCK=false LAJSTROM_API_UPSTREAM=http://localhost:8080 npm run dev
+```
+
+The dev server forwards `/api` and `/-` to the server, so the browser sees one origin: the server
+does not answer cross-origin requests. `LAJSTROM_UI_DEMO=false` hides the demo.
 
 ## Container image
 
@@ -71,7 +95,8 @@ runtime configuration from these variables:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `LAJSTROM_UI_MOCK` | `false` | `true`: generated data from the mock, no server needed |
+| `LAJSTROM_UI_MOCK` | `false` | `true`: the demo only, on generated data; no server needed |
+| `LAJSTROM_UI_DEMO` | `true` | `false`: do not offer the demo next to the server |
 | `LAJSTROM_UI_API_URL` | empty | Base URL of the API as the browser sees it; empty = same origin |
 | `LAJSTROM_UI_TITLE` | `Lajstrom` | Instance name in the header and the title |
 | `LAJSTROM_API_UPSTREAM` | empty | `http://lajstrom:8080`: this nginx proxies `/api/` and `/-/` (use without an Ingress) |
@@ -92,29 +117,30 @@ Network); without it other devices get `ERR_ADDRESS_UNREACHABLE` or a request th
 
 Plain `http://` to an IP is not a secure context: browsers offer neither service workers nor the
 Clipboard API there. The mock still works, because MSW falls back to intercepting `fetch` in the
-page, and copy buttons fall back to a hidden textarea. Each device generates its own mock data;
-the persona and the theme are kept per browser.
+page, and copy buttons fall back to a hidden textarea. Each device generates its own demo data;
+what is done in the demo and the theme are kept per browser.
 
 ## Kubernetes
 
 [deploy/k8s/lajstrom-ui.yaml](deploy/k8s/lajstrom-ui.yaml): a Deployment (2 replicas,
 non-root, read-only root filesystem), a Service, and an Ingress that sends `/ui` to the UI and
-everything else to the Lajstrom server on the same host. One origin means no CORS and, later,
-one cookie for the browser session. [deploy/compose.yaml](deploy/compose.yaml) runs the image
+everything else to the Lajstrom server on the same host. One origin means no CORS, which the
+server does not answer. [deploy/compose.yaml](deploy/compose.yaml) runs the image
 alone.
 
 ## Layout
 
 ```
 src/
-  api/          types of /api/v1, fetch client, TanStack Query options
-  app/          bootstrap, runtime config, router, shell (header, menus), command palette, theme
+  api/          types of /api/v1, fetch client, session and sign-in, queries and mutations
+  app/          bootstrap, runtime config, demo mode, router, shell (header, menus), palette, theme
   pages/        one file per screen; package-model.ts groups versions and builds breadcrumbs
   components/   shared pieces; ui/ holds the primitives (button, table, tooltip, …)
   lib/
     formats/    one module per format: labels, snippets, file roles, metadata fields
     profile.ts  Escape, EscapeComponent, tags and package paths (manifest profile §4)
-  mocks/        the mock API: handlers, an in-memory "server" (db.ts), seed data per format
+  mocks/        the demo's API: handlers, authentication and tokens (auth.ts), an in-memory
+                "server" (db.ts), seed data per format
 docker/         nginx.conf and the start script of the image
 deploy/         Kubernetes and compose examples
 docs/           the API proposal and the ADRs of the UI
@@ -151,9 +177,9 @@ the snippet scan has nothing to match.
 
 - **Images per environment**: dev, test and prod images are a requirement; one image configured
   by environment variables exists today. What differs between them is still open.
-- **Login**: the browser session of api-proposal.md §5; management screens (create repos,
-  tokens, bindings) come after it.
-- **Real API**: switching `mock` off shows what the server does not implement yet.
+- **Repository management**: the server has the endpoints to create a repository, change its
+  anonymous read and policy, and delete it; the forms are not written yet.
+- **Users and bindings**: managed with `lajstrom admin` until the server has their API.
 - Code splitting per page (the main chunk is about 190 KiB gzipped).
 
 ## Contributing and license

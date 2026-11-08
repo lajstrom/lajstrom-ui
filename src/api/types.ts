@@ -1,8 +1,17 @@
-// Types of the /api/v1 JSON the UI reads. Endpoints marked "proposed" are not in
-// docs/spec/http-routing.md §4 yet; docs/api-proposal.md describes them for the `contract`
-// issue. Field names follow the index models (internal/index/models.go) in camelCase.
+// Types of the /api/v1 JSON the UI reads. The resources the server has follow its docs/api.md
+// (repos, tokens, whoami); endpoints and fields marked "proposed" are not in the server yet:
+// docs/api-proposal.md describes them, and the UI shows them only when
+// they are there. Field names follow the index models (internal/index/models.go) in camelCase.
 
+/** The formats the UI has a spec for (src/lib/formats). */
 export type FormatName = "raw" | "pypi" | "apt" | "maven";
+
+/** A repo's format as the server answers it: `oci` repos are the pass-through repos of the
+ * OCI facade, which need no plugin and get no format pages. */
+export type RepoFormat = FormatName | "oci";
+
+/** What a principal may do on a repo (rbac.md §2). */
+export type Action = "read" | "write" | "delete" | "manage";
 
 /** Error envelope of http-routing.md §4. */
 export type ApiErrorBody = {
@@ -16,21 +25,24 @@ export type ServerInfo = {
   date: string;
   /** server.externalURL; snippets are built from it. */
   externalURL: string;
-  /** auth.anonymousRead, the server-wide switch. */
-  anonymousRead: boolean;
+  /** auth.anonymousRead, the server-wide switch; unknown when the server does not have /info. */
+  anonymousRead?: boolean;
   formats: { name: FormatName; artifactType: string }[];
 };
 
-/** Who is calling: GET /api/v1/whoami. */
+/** Who is calling: GET /api/v1/whoami. Without credentials the server answers 401; the UI reads
+ * that as `anonymous`. */
 export type WhoAmI = {
   principal: string; // user:alice, token:12, anonymous
   kind: "user" | "token" | "group" | "anonymous";
   name: string;
-  admin: boolean;
-  bindings: Binding[];
+  /** Proposed: whether the principal has the admin role. Unknown until the server says. */
+  admin?: boolean;
+  /** Proposed: the principal's role bindings (come with role-based access control). */
+  bindings?: Binding[];
 };
 
-/** repos.policy (M3-09). PATCH merges. The key of the session expiry policy is not named in the
+/** repos.policy. PATCH merges. The key of the session expiry policy is not named in the
  * plan yet; "maven.sessionExpiry" is this prototype's proposal. */
 export type RepoPolicy = {
   maxFileSize?: number;
@@ -39,7 +51,7 @@ export type RepoPolicy = {
   "maven.sessionExpiry"?: "seal" | "abort";
 };
 
-/** Reindex and reconcile status of a repo (M1-06 `reindex: {state, started, done, errors}`, M1-07). */
+/** Reindex and reconcile status of a repo (the plan's `reindex: {state, started, done, errors}`). */
 export type ReindexStatus = {
   state: "idle" | "running" | "failed";
   startedAt: string | null;
@@ -49,7 +61,7 @@ export type ReindexStatus = {
   nextReconcileAt: string | null;
 };
 
-/** The repo's OpenPGP signing key for apt (M2-03); retired keys are still served for a while. */
+/** The repo's OpenPGP signing key for apt; retired keys are still served for a while. */
 export type SigningKey = {
   algorithm: "ed25519" | "rsa4096";
   fingerprint: string;
@@ -68,27 +80,33 @@ export type RepoStats = {
   lastPushAt: string | null;
 };
 
-/** A repo (control plane, index-schema.md `repos`) plus derived stats. */
+/** A repo as GET /api/v1/repos answers it (control plane, index-schema.md `repos`), plus
+ * `prefix`, which the UI derives, and the proposed fields of api-proposal.md §3.2. */
 export type Repo = {
-  format: FormatName;
+  format: RepoFormat;
   name: string;
   kind: "hosted" | "proxy" | "group";
   registry: string;
-  /** OCI path below the instance prefix: <format>/<name>. */
+  /** <format>/<name>: the repo's path on every protocol and its OCI path below the instance
+   * prefix. Not in the answer: src/api/queries.ts derives it. */
   prefix: string;
   anonymousRead: boolean;
-  policy: RepoPolicy;
+  /** null when the repo has no policy. */
+  policy: RepoPolicy | null;
   createdAt: string;
   updatedAt: string;
-  stats: RepoStats;
-  /** What the caller may do here (rbac.md §2); drives which actions the UI shows. */
-  permissions: ("read" | "write" | "delete" | "manage")[];
-  reindex: ReindexStatus;
-  /** apt only: current key first, then retired ones. */
+  /** Proposed: derived counts. */
+  stats?: RepoStats;
+  /** Proposed: what the caller may do here (rbac.md §2). Absent: the UI offers the actions and
+   * the server decides (src/lib/access.ts). */
+  permissions?: Action[];
+  /** Proposed: reindex and reconcile status. */
+  reindex?: ReindexStatus;
+  /** Proposed, apt only: current key first, then retired ones. */
   signingKeys?: SigningKey[];
 };
 
-/** Cursor pagination of M2-09: pass `next` or `prev` back as `cursor`. */
+/** Cursor pagination of the management API: pass `next` or `prev` back as `cursor`. */
 export type Page = {
   total: number;
   limit: number;
@@ -254,7 +272,7 @@ export type Registry = {
   url: string;
   prefix: string;
   capabilities: Capabilities;
-  /** Support tier of M1-12: tested in CI, tested manually, untested. */
+  /** Support tier: tested in CI, tested manually, untested. */
   support: "ci" | "manual" | "untested";
   status: { state: "ok" | "degraded" | "down"; checkedAt: string; latencyMs: number | null; message: string | null };
   repos: string[];
@@ -283,19 +301,38 @@ export type User = {
   lastSeenAt: string | null;
 };
 
+/** A personal access token or a deploy token (docs/api.md, Tokens). The secret is answered only
+ * once, by the creation: CreatedToken. */
 export type Token = {
   id: number;
   kind: "pat" | "deploy";
   name: string;
-  /** Owner of a PAT. */
-  user: string | null;
-  /** <format>/<repo> of a deploy token. */
-  repo: string | null;
-  scopes: ("read" | "write")[];
+  /** Owner of a personal access token; left out for a deploy token. */
+  user?: string;
+  /** <format>/<repo> of a deploy token; left out for a personal access token. */
+  repo?: string;
+  /** Empty for a personal access token with its user's full rights. */
+  scopes: TokenScope[];
   expiresAt: string | null;
   lastUsedAt: string | null;
   createdAt: string;
   revokedAt: string | null;
+  /** The first 8 hexadecimal characters of the sha256 of the secret, to tell tokens apart. */
+  hashPrefix: string;
+};
+
+export type TokenScope = "read" | "write";
+
+/** The answer of a token creation: the resource and its secret, shown this one time. */
+export type CreatedToken = Token & { secret: string };
+
+/** The body of POST /api/v1/users/{name}/tokens and …/deploy-tokens. */
+export type TokenRequest = {
+  name: string;
+  scopes?: TokenScope[];
+  /** A number of days, "30d", or a duration, "12h"; at most one of expiresIn and expiresAt. */
+  expiresIn?: string;
+  expiresAt?: string;
 };
 
 export type Binding = {
@@ -306,7 +343,7 @@ export type Binding = {
   createdAt: string;
 };
 
-/** An open publication session (M3-02): maven deploys file by file until maven-metadata.xml. */
+/** An open publication session: maven deploys file by file until maven-metadata.xml. */
 export type PublishSession = {
   id: number;
   key: string; // g:a:v
@@ -318,7 +355,7 @@ export type PublishSession = {
   expiresAt: string;
 };
 
-/** The report of `lajstrom reindex --report` / POST …/reindex (M1-06). The plan names no
+/** The report of `lajstrom reindex --report` / POST …/reindex. The plan names no
  * fields; these are the prototype's proposal. */
 export type ReindexReport = {
   repo: string;

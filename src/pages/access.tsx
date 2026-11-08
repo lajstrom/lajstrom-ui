@@ -3,31 +3,17 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Info } from "lucide-react";
 
 import { bindingsQuery, reposQuery, tokensQuery, usersQuery } from "@/api/queries";
-import type { Binding, Token } from "@/api/types";
+import type { Binding } from "@/api/types";
 import { ErrorState, PageHeader, RelativeTime } from "@/components/common";
+import { TokenStatus } from "@/components/tokens";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Segmented, Skeleton } from "@/components/ui/misc";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
-import { tokenState } from "@/lib/tokens";
 
 type Tab = "users" | "tokens" | "bindings";
-
-export function TokenStatus({ token }: { token: Token }) {
-  const state = tokenState(token);
-  if (state === "revoked") return <Badge tone="danger">revoked</Badge>;
-  if (state === "expired") return <Badge tone="danger">expired</Badge>;
-  if (state === "expiring") {
-    return (
-      <Tooltip content="Expires within a week">
-        <Badge tone="warning">expires soon</Badge>
-      </Tooltip>
-    );
-  }
-  return <Badge tone="success">active</Badge>;
-}
 
 const roleTone: Record<Binding["role"], "primary" | "success" | "warning" | "neutral"> = {
   admin: "warning",
@@ -57,8 +43,8 @@ export function AccessPage() {
       <div className="mb-4 flex items-start gap-2 rounded-lg border border-primary/20 bg-primary-soft px-4 py-3 text-sm text-primary-soft-foreground">
         <Info className="mt-0.5 size-4 shrink-0" />
         <span>
-          Read-only preview. Creating users, tokens and bindings lands with the management API (M2-09); the second stage of the UI adds
-          the forms here.
+          Read-only preview: users and bindings are managed with the lajstrom admin commands for now. Your own tokens are under
+          Personal access tokens in the user menu.
         </span>
       </div>
       <Segmented
