@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { AlertTriangle, ChevronRight, Construction, FlaskConical, Globe, KeyRound, Lock, RefreshCw, ShieldCheck, User, UserX } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { ApiError, isUnavailable } from "@/api/client";
+import { ApiError, isUnavailable, isUnreachable } from "@/api/client";
 import { demoMode, enterDemo } from "@/app/demo";
 import type { FormatName, Repo } from "@/api/types";
 import { cn } from "@/lib/cn";
@@ -153,6 +153,29 @@ export function ErrorState({ error, onRetry, className }: { error: unknown; onRe
         See it in the demo
       </Button>
     ) : null;
+  const unreachable = isUnreachable(api);
+  if (unreachable) {
+    return (
+      <EmptyState
+        className={className}
+        icon={<AlertTriangle />}
+        title="The server does not answer"
+        action={
+          <div className="flex flex-wrap justify-center gap-2">
+            {onRetry ? (
+              <Button onClick={onRetry}>
+                <RefreshCw />
+                Try again
+              </Button>
+            ) : null}
+            {tryDemo}
+          </div>
+        }
+      >
+        The UI is here, but the Lajstrom server behind it {api?.status === 0 ? "cannot be reached" : `does not answer (${api?.message})`}.
+      </EmptyState>
+    );
+  }
   if (api && isUnavailable(api)) {
     return (
       <EmptyState className={className} icon={<Construction />} title="Not in this server version yet" action={tryDemo}>
@@ -180,16 +203,11 @@ export function ErrorState({ error, onRetry, className }: { error: unknown; onRe
       icon={<AlertTriangle />}
       title="Something went wrong"
       action={
-        onRetry || (api?.status === 0 && tryDemo) ? (
-          <div className="flex flex-wrap justify-center gap-2">
-            {onRetry ? (
-              <Button onClick={onRetry}>
-                <RefreshCw />
-                Try again
-              </Button>
-            ) : null}
-            {api?.status === 0 ? tryDemo : null}
-          </div>
+        onRetry ? (
+          <Button onClick={onRetry}>
+            <RefreshCw />
+            Try again
+          </Button>
         ) : null
       }
     >

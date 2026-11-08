@@ -95,6 +95,14 @@ export function ReposPage() {
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {repos.isPending ? (
           Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-[62px]" />)
+        ) : repos.isError ? (
+          // Nothing loaded: no counts, rather than counts of nothing.
+          <>
+            <Stat icon={<Boxes />} label="Repositories" value="—" />
+            <Stat icon={<Package />} label="Packages" value="—" />
+            <Stat icon={<HardDrive />} label="Stored in registries" value="—" />
+            <Stat icon={<Upload />} label="Last publish" value="—" />
+          </>
         ) : (
           <>
             <Stat icon={<Boxes />} label="Repositories" value={all.length} hint={`${totals.registries.size} backend registries`} />
@@ -127,8 +135,8 @@ export function ReposPage() {
             value={format}
             onChange={(v) => setSearch({ format: v === "all" ? undefined : v })}
             options={[
-              { value: "all", label: "All", count: all.length },
-              ...formatOrder.map((f) => ({ value: f, label: formats[f].label, count: counts(f) })),
+              { value: "all", label: "All", count: repos.isSuccess ? all.length : undefined },
+              ...formatOrder.map((f) => ({ value: f, label: formats[f].label, count: repos.isSuccess ? counts(f) : undefined })),
             ]}
           />
           <SearchInput

@@ -48,6 +48,9 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // With --host, other devices on the network may also use the Bonjour name of this machine
+    // (http://<LocalHostName>.local:5173/ui/); Vite answers only localhost and IPs otherwise.
+    allowedHosts: [".local"],
     proxy: {
       "/api": { target: apiUpstream, changeOrigin: true },
       "/-": { target: apiUpstream, changeOrigin: true },
