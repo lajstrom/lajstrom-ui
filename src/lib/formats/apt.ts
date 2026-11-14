@@ -99,6 +99,15 @@ export const apt: FormatSpec = {
       },
     ];
   },
+  filePath(repo, pkg, version, file) {
+    // The pool lays files out by source package: the control file's Source, else the name;
+    // its first letter, or four for a lib* source (http-routing.md §3, apt).
+    const control = version.metadata?.control as Record<string, string> | undefined;
+    const source = control?.Source?.split(" ")[0] || pkg;
+    const component = version.attrs?.["lajstrom.deb.component"] ?? "main";
+    const p = source.startsWith("lib") && source.length > 3 ? source.slice(0, 4) : source.slice(0, 1);
+    return `/apt/${repo}/pool/${component}/${p}/${source}/${file}`;
+  },
   fileRole(mediaType) {
     if (mediaType.includes("deb.package")) return "Debian package";
     return "File";

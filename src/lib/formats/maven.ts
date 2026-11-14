@@ -123,7 +123,7 @@ export const maven: FormatSpec = {
   install(_ctx, pkg, version) {
     const { groupId, artifactId } = coords(pkg.name);
     const v = version?.version ?? pkg.latestVersion ?? "<version>";
-    const packaging = version?.attrs["maven.packaging"] ?? pkg.attrs["maven.packaging"];
+    const packaging = version?.attrs?.["lajstrom.maven.packaging"] ?? pkg.attrs?.["maven.packaging"];
     const typeLine = packaging && packaging !== "jar" ? [`  <type>${packaging}</type>`] : [];
     return [
       {
@@ -148,6 +148,10 @@ export const maven: FormatSpec = {
         code: `mvn dependency:get -Dartifact=${groupId}:${artifactId}:${v}`,
       },
     ];
+  },
+  filePath(repo, pkg, version, file) {
+    const { groupId, artifactId } = coords(pkg);
+    return `/maven/${repo}/${groupId.replaceAll(".", "/")}/${artifactId}/${version.version}/${file}`;
   },
   fileRole(mediaType, attrs) {
     if (mediaType.includes("maven.pom")) return "POM";

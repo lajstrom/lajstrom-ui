@@ -83,24 +83,15 @@ export type Repo = Schemas["Repo"] & {
   signingKeys?: SigningKey[];
 };
 
-/** Cursor pagination of the management API: pass `next` or `prev` back as `cursor`. */
-export type Page = {
-  total: number;
-  limit: number;
-  next: string | null;
-  prev: string | null;
-};
-
 /** A directory of a raw repo, for browsing paths like a file tree. */
 export type RawDirectory = { name: string; path: string; files: number; size: number; updatedAt: string };
 
 /** One value of a filter facet with its count: suite "jammy" (12). */
 export type FacetValue = { value: string; count: number };
 
-/** A row of GET /api/v1/repos/{format}/{repo}/packages (proposed). */
-export type PackageSummary = {
-  /** lajstrom.name, the format's spelling: nginx, Requests, com.example:lib-core, docs/readme.md */
-  name: string;
+/** What api-proposal.md §3.3 adds to a package of the list (lajstrom/lajstrom#955, #957); the
+ * server answers name and createdAt only. */
+export type PackageFacts = {
   /** Escaped package path (Plugin.EscapeName). */
   nameOci: string;
   latestVersion: string | null;
@@ -113,69 +104,55 @@ export type PackageSummary = {
   size: number;
   /** One line from the metadata layer: pypi summary, deb description, maven name. */
   summary: string | null;
-  /** Format attributes of the latest version: deb.suite, maven.packaging, … */
+  /** Format attributes of the latest version without "lajstrom.": deb.suite, maven.packaging, … */
   attrs: Record<string, string>;
-  createdAt: string;
   updatedAt: string;
 };
 
-export type PackageList = Page & {
+/** A row of GET …/packages: the server's, and the proposed facts when the answer has them. */
+export type PackageSummary = Schemas["Package"] & Partial<PackageFacts>;
+
+/** GET …/packages: a page ordered by name, with the server's cursor. `facets` and `directories`
+ * are proposed (lajstrom/lajstrom#955); an answer with facets takes the proposed filters too. */
+export type PackageList = Omit<Schemas["PackageList"], "packages"> & {
   packages: PackageSummary[];
   /** Filter values over the whole repo, by attribute key (deb.suite, deb.component, …). */
-  facets: Record<string, FacetValue[]>;
+  facets?: Record<string, FacetValue[]>;
   /** raw with ?dir=: the subdirectories of dir (packages then holds the files directly in it). */
   directories?: RawDirectory[];
 };
 
-/** GET /api/v1/repos/{format}/{repo}/packages/{name} (proposed). */
-export type PackageDetail = PackageSummary & {
-  /** <format>/<repo>/<nameOci>, the OCI repository below the instance prefix. */
-  ociRepository: string;
-  /** The metadata layer of the newest manifest. */
-  latestMetadata: Record<string, unknown> | null;
-};
+/** GET …/packages/{name} (proposed, lajstrom/lajstrom#958); the package page derives it from the
+ * versions when the server does not have it (src/pages/package-model.ts). */
+export type PackageDetail = Schemas["Package"] &
+  PackageFacts & {
+    /** <format>/<repo>/<nameOci>, the OCI repository below the instance prefix. */
+    ociRepository: string;
+    /** The metadata layer of the newest manifest. */
+    latestMetadata: Record<string, unknown> | null;
+  };
 
 export type ReferrerCounts = { signatures: number; sboms: number; attestations: number };
 
-/** A row of GET …/packages/{name}/versions (proposed): one manifest. */
-export type VersionSummary = {
-  /** The metadata layer is missing or unreadable; reindex kept the row from annotations only. */
-  degraded: boolean;
-  version: string;
-  variant: string;
-  tag: string;
-  digest: string;
+/** What api-proposal.md §3.4 adds to a variant of the version list; the server answers its tag,
+ * digest and publish time only. */
+export type VariantFacts = {
   artifactType: string;
-  /** lajstrom.<format>.* annotations without the prefix: deb.arch, deb.suite, … */
+  /** The manifest's lajstrom.* annotations by their full key, as VariantDetail has them. */
   attrs: Record<string, string>;
-  createdAt: string;
-  indexedAt: string;
   size: number;
   fileCount: number;
-  uploadedBy: string | null;
+  /** The metadata layer is missing or unreadable: indexed from annotations only. */
+  degraded: boolean;
   referrers: ReferrerCounts;
 };
 
-export type FileEntry = {
-  name: string;
-  mediaType: string;
-  digest: string;
-  size: number;
-  attrs: Record<string, string>;
-  /** Protocol URL to download the file, relative to externalURL. */
-  path: string;
-};
+export type VariantSummary = Schemas["Variant"] & Partial<VariantFacts>;
 
-export type Referrer = {
-  digest: string;
-  artifactType: string;
-  kind: "signature" | "sbom" | "attestation" | "other";
-  /** cosign, notation, syft, …: who made it, when the annotations say so. */
-  tool: string | null;
-  size: number;
-  createdAt: string | null;
-  annotations: Record<string, string>;
-};
+/** A version of GET …/packages/{name}/versions, newest first, with its variants. */
+export type VersionSummary = Omit<Schemas["Version"], "variants"> & { variants: VariantSummary[] };
+
+export type FileEntry = Schemas["File"];
 
 export type OciDescriptor = {
   mediaType: string;
@@ -193,16 +170,17 @@ export type OciManifest = {
   annotations: Record<string, string>;
 };
 
-/** GET …/packages/{name}/versions/{digest} (proposed): one manifest in full. */
-export type VersionDetail = VersionSummary & {
-  files: FileEntry[];
-  metadata: Record<string, unknown> | null;
-  annotations: Record<string, string>;
-  manifest: OciManifest;
-  referrerList: Referrer[];
-  /** Without the instance prefix and scheme: host/pypi/internal/requests:2.32.3__py3-none-any */
-  ociReference: string;
-};
+/** One variant of GET …/versions/{version}; the manifest and its annotations are proposed
+ * (lajstrom/lajstrom#951): the server reads them from the registry on /v2. */
+export type VariantDetail = Schemas["VariantDetail"] & { annotations?: Record<string, string>; manifest?: OciManifest };
+
+/** GET …/packages/{name}/versions/{version}: one version with every variant in detail. */
+export type VersionDetail = Omit<Schemas["VersionDetail"], "variants"> & { variants: VariantDetail[] };
+
+/** An attachment of a version: one layer of a referrer of one of its variants, labelled. */
+export type Attachment = Schemas["Attachment"];
+
+export type AttachmentList = Schemas["AttachmentList"];
 
 export type SearchHit =
   | {

@@ -88,6 +88,9 @@ export const pypi: FormatSpec = {
       },
     ];
   },
+  filePath(repo, pkg, version, file) {
+    return `/pypi/${repo}/files/${normalizePypi(pkg)}/${version.version}/${file}`;
+  },
   fileRole(mediaType) {
     if (mediaType.includes("pypi.wheel")) return "Wheel";
     if (mediaType.includes("pypi.sdist")) return "Source distribution";

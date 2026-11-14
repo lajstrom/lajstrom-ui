@@ -2,14 +2,17 @@
 // Lajstrom would compute. Handlers in handlers.ts translate HTTP to these functions.
 
 import type {
+  Attachment,
+  AttachmentList,
   AuditEvent,
   AuditList,
   Binding,
   Caller,
   FacetValue,
   PackageDetail,
-  PackageSummary,
+  PackageList,
   PublishSession,
+  VariantDetail,
   VersionDetail,
   RawDirectory,
   ReindexReport,
@@ -192,7 +195,10 @@ function summaryLine(v: BuiltVersion): string | null {
   return null;
 }
 
-function summarize(name: string, list: Row[]): PackageSummary {
+/** A package with every proposed fact, as the mock answers it. */
+type Summary = Omit<PackageDetail, "ociRepository" | "latestMetadata">;
+
+function summarize(name: string, list: Row[]): Summary {
   const latest = list[0]!;
   const latestVariants = list.filter((v) => v.version === latest.version).map((v) => v.variant).filter(Boolean);
   const attrs = { ...latest.attrs };
@@ -216,6 +222,7 @@ function summarize(name: string, list: Row[]): PackageSummary {
 }
 
 export type PackageQuery = {
+  prefix?: string;
   q?: string;
   attr?: string[];
   sort?: string;
@@ -247,7 +254,7 @@ export function paginate<T>(items: T[], limit: number, cursor?: string | null) {
   };
 }
 
-export function listPackages(repo: Repo, query: PackageQuery) {
+export function listPackages(repo: Repo, query: PackageQuery): PackageList {
   const pkgs = byRepo.get(repo.prefix) ?? new Map<string, Row[]>();
   let rows = [...pkgs.entries()].map(([name, list]) => ({ summary: summarize(name, list), list }));
 
@@ -263,6 +270,7 @@ export function listPackages(repo: Repo, query: PackageQuery) {
     facets[key] = [...counts.entries()].map(([value, count]) => ({ value, count })).sort((a, b) => a.value.localeCompare(b.value));
   }
 
+  if (query.prefix) rows = rows.filter(({ summary }) => summary.name.startsWith(query.prefix!));
   const q = query.q?.trim().toLowerCase();
   if (q) rows = rows.filter(({ summary }) => summary.name.toLowerCase().includes(q) || summary.summary?.toLowerCase().includes(q));
   for (const f of query.attr ?? []) {
@@ -273,7 +281,7 @@ export function listPackages(repo: Repo, query: PackageQuery) {
   }
 
   let directories: RawDirectory[] | undefined;
-  if (repo.format === "raw" && query.dir !== undefined && query.dir !== null && !q) {
+  if (repo.format === "raw" && query.dir !== undefined && query.dir !== null && !q && !query.prefix) {
     const prefix = query.dir ? query.dir.replace(/\/?$/, "/") : "";
     const inDir = rows.filter(({ summary }) => summary.name.startsWith(prefix));
     const dirs = new Map<string, RawDirectory>();
@@ -297,7 +305,7 @@ export function listPackages(repo: Repo, query: PackageQuery) {
 
   const dirSign = query.order === "asc" ? 1 : query.order === "desc" ? -1 : null;
   const sort = query.sort ?? "name";
-  const cmp: Record<string, (a: PackageSummary, b: PackageSummary) => number> = {
+  const cmp: Record<string, (a: Summary, b: Summary) => number> = {
     name: (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
     updated: (a, b) => a.updatedAt.localeCompare(b.updatedAt),
     versions: (a, b) => a.versions - b.versions,
@@ -307,8 +315,8 @@ export function listPackages(repo: Repo, query: PackageQuery) {
   const by = cmp[sort] ?? cmp.name!;
   rows.sort((a, b) => by(a.summary, b.summary) * (dirSign ?? defaultSign));
 
-  const { page, ...pageInfo } = paginate(rows, query.limit ?? 50, query.cursor);
-  return { packages: page.map((r) => r.summary), ...pageInfo, facets, ...(directories ? { directories } : {}) };
+  const { page, next } = paginate(rows, query.limit ?? 100, query.cursor);
+  return { packages: page.map((r) => r.summary), next: next ?? undefined, facets, ...(directories ? { directories } : {}) };
 }
 
 function manifestsOf(repo: Repo, name: string): Row[] | null {
@@ -326,33 +334,117 @@ export function getPackage(repo: Repo, name: string): PackageDetail | null {
   };
 }
 
-function toSummary(v: Row): VersionSummary {
-  return {
-    degraded: v.degraded,
-    version: v.version,
-    variant: v.variant,
-    tag: v.tag,
-    digest: v.digest,
-    artifactType: v.artifactType,
-    attrs: v.attrs,
-    createdAt: v.createdAt,
-    indexedAt: v.indexedAt,
-    size: v.size,
-    fileCount: v.fileCount,
-    uploadedBy: v.uploadedBy,
-    referrers: v.referrers,
-  };
+/** The manifest's lajstrom.* annotations by their full key, as the server's attrs. */
+function lajstromAttrs(v: Row): Record<string, string> {
+  return Object.fromEntries(Object.entries(v.annotations).filter(([k]) => k.startsWith("lajstrom.")));
+}
+
+/** A package's manifests grouped by version, newest first (docs/api.md, List versions). */
+function byVersion(list: Row[]): Row[][] {
+  const groups = new Map<string, Row[]>();
+  for (const v of list) groups.set(v.version, [...(groups.get(v.version) ?? []), v]);
+  return [...groups.values()]
+    .map((g) => [...g].sort((a, b) => a.createdAt.localeCompare(b.createdAt)))
+    .sort((a, b) => b[0]!.createdAt.localeCompare(a[0]!.createdAt) || b[0]!.version.localeCompare(a[0]!.version));
+}
+
+/** The fields every version answer shares: the first variant's publish time orders, the
+ * newest one's is lastModified. */
+function versionHead(rows: Row[]) {
+  return { version: rows[0]!.version, publishedAt: rows[0]!.createdAt, lastModified: rows.at(-1)!.createdAt, pointers: [] };
 }
 
 export function listVersions(repo: Repo, name: string): VersionSummary[] | null {
-  return manifestsOf(repo, name)?.map(toSummary) ?? null;
+  const list = manifestsOf(repo, name);
+  if (!list) return null;
+  return byVersion(list).map((rows) => ({
+    ...versionHead(rows),
+    variants: rows.map((v) => ({
+      variant: v.variant,
+      tag: v.tag,
+      digest: v.digest,
+      publishedAt: v.createdAt,
+      artifactType: v.artifactType,
+      attrs: lajstromAttrs(v),
+      size: v.size,
+      fileCount: v.fileCount,
+      degraded: v.degraded,
+      referrers: v.referrers,
+    })),
+  }));
 }
 
-export function getVersion(repo: Repo, name: string, digest: string): VersionDetail | null {
-  const v = manifestsOf(repo, name)?.find((m) => m.digest === digest);
-  if (!v) return null;
-  const { packageName: _p, repoKey: _r, format: _f, ...detail } = v;
-  return detail;
+function variantDetail(v: Row): VariantDetail {
+  return {
+    variant: v.variant,
+    tag: v.tag,
+    digest: v.digest,
+    publishedAt: v.createdAt,
+    artifactType: v.artifactType,
+    attrs: lajstromAttrs(v),
+    metadata: v.metadata,
+    degraded: v.degraded,
+    indexedAt: v.indexedAt,
+    files: v.files,
+    annotations: v.annotations,
+    manifest: v.manifest,
+  };
+}
+
+/** GET …/versions/{version}[?variant=]: 404 (null) for a version or a variant that is not there. */
+export function getVersion(repo: Repo, name: string, version: string, variant: string | null): VersionDetail | null {
+  const rows = manifestsOf(repo, name)?.filter((m) => m.version === version);
+  if (!rows?.length) return null;
+  const sorted = [...rows].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const shown = variant === null ? sorted : sorted.filter((v) => v.variant === variant);
+  if (!shown.length) return null;
+  return {
+    ...versionHead(sorted),
+    variants: shown.map(variantDetail),
+    ociRepository: `${repo.format}/${repo.name}/${packagePath(repo.format, name)}`,
+  };
+}
+
+const attachmentKind: Record<string, Attachment["kind"]> = {
+  "application/vnd.dev.cosign.artifact.sig.v1+json": "signature",
+  "application/vnd.cncf.notary.signature": "signature",
+  "application/spdx+json": "sbom",
+  "application/vnd.cyclonedx+json": "sbom",
+};
+
+/** GET …/versions/{version}/attachments: the referrers of its variants as the index labels
+ * them (docs/api.md, Attachments of a version). Keyless and notation signatures are
+ * unsupported, the SBOMs unsigned, the provenance signed by the demo's trusted key. */
+export function listAttachments(repo: Repo, name: string, version: string, variant: string | null): AttachmentList | null {
+  const rows = manifestsOf(repo, name)?.filter((m) => m.version === version && (variant === null || m.variant === variant));
+  if (!rows?.length) return null;
+  const attachments: Attachment[] = rows.flatMap((v) =>
+    v.referrerList.map((r) => {
+      const predicateType = r.annotations["in-toto.io/predicate-type"] ?? "";
+      const kind = predicateType.startsWith("https://slsa.dev/provenance") ? "provenance" : (attachmentKind[r.artifactType] ?? "other");
+      const verification: Attachment["verification"] = kind === "signature" ? "unsupported" : kind === "provenance" ? "verified" : "unsigned";
+      return {
+        variant: v.variant,
+        subject: v.digest,
+        digest: r.digest,
+        layer: `sha256:${sha256Hex(`layer:${r.digest}`)}`,
+        mediaType: kind === "provenance" ? "application/vnd.dsse.envelope.v1+json" : r.artifactType,
+        artifactType: r.artifactType,
+        kind,
+        predicateType,
+        size: r.size,
+        annotations: r.annotations,
+        ...(r.tool ? { tool: r.tool } : {}),
+        verification,
+        ...(verification === "verified" ? { signedBy: "release-key" } : {}),
+        ...(verification === "unsupported" ? { reason: r.tool === "notation" ? "a notation signature" : "a keyless signature" } : {}),
+        ...(r.createdAt ? { createdAt: r.createdAt } : {}),
+        indexedAt: v.indexedAt,
+      };
+    }),
+  );
+  attachments.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+  return { attachments, truncated: false };
 }
 
 // --- Search ---------------------------------------------------------------------------------
