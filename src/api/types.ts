@@ -1,7 +1,11 @@
-// Types of the /api/v1 JSON the UI reads. The resources the server has follow its docs/api.md
-// (repos, tokens, whoami); endpoints and fields marked "proposed" are not in the server yet:
-// docs/api-proposal.md describes them, and the UI shows them only when
-// they are there. Field names follow the index models (internal/index/models.go) in camelCase.
+// Types of the /api/v1 JSON the UI reads. Where the server has a resource, its type is the
+// server's: src/api/server.gen.ts, generated from the server's openapi.yaml as vendored in
+// openapi/server.yaml (npm run update:openapi). The rest are written here: endpoints and fields
+// marked "proposed" are not in the server yet; docs/api-proposal.md describes them, and the UI
+// shows them only when they are there. Field names follow the index models
+// (internal/index/models.go) in camelCase.
+
+import type { Schemas } from "./server.gen";
 
 /** The formats the UI has a spec for (src/lib/formats). */
 export type FormatName = "raw" | "pypi" | "apt" | "maven";
@@ -303,37 +307,15 @@ export type User = {
 
 /** A personal access token or a deploy token (docs/api.md, Tokens). The secret is answered only
  * once, by the creation: CreatedToken. */
-export type Token = {
-  id: number;
-  kind: "pat" | "deploy";
-  name: string;
-  /** Owner of a personal access token; left out for a deploy token. */
-  user?: string;
-  /** <format>/<repo> of a deploy token; left out for a personal access token. */
-  repo?: string;
-  /** Empty for a personal access token with its user's full rights. */
-  scopes: TokenScope[];
-  expiresAt: string | null;
-  lastUsedAt: string | null;
-  createdAt: string;
-  revokedAt: string | null;
-  /** The first 8 hexadecimal characters of the sha256 of the secret, to tell tokens apart. */
-  hashPrefix: string;
-};
+export type Token = Schemas["Token"];
 
-export type TokenScope = "read" | "write";
+export type TokenScope = Token["scopes"][number];
 
 /** The answer of a token creation: the resource and its secret, shown this one time. */
-export type CreatedToken = Token & { secret: string };
+export type CreatedToken = Schemas["CreatedToken"];
 
 /** The body of POST /api/v1/users/{name}/tokens and …/deploy-tokens. */
-export type TokenRequest = {
-  name: string;
-  scopes?: TokenScope[];
-  /** A number of days, "30d", or a duration, "12h"; at most one of expiresIn and expiresAt. */
-  expiresIn?: string;
-  expiresAt?: string;
-};
+export type TokenRequest = Schemas["TokenRequest"];
 
 export type Binding = {
   id: number;
