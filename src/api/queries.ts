@@ -1,6 +1,6 @@
 import { keepPreviousData, queryOptions } from "@tanstack/react-query";
 
-import { apiGet, apiPath } from "./client";
+import { ApiError, apiGet, apiPath, isUnavailable } from "./client";
 import type {
   AuditList,
   Binding,
@@ -8,7 +8,7 @@ import type {
   PackageList,
   PublishSession,
   Registry,
-  ReindexReport,
+  ReindexRun,
   Repo,
   SearchResult,
   ServerInfo,
@@ -104,10 +104,19 @@ export const versionQuery = (format: string, repo: string, name: string, digest:
     staleTime: Infinity, // a manifest never changes: tags are immutable, digests are content.
   });
 
+/** The latest reindex run that covered the repo; null when none has (the server's 404, for a
+ * repo the page has already read). */
 export const reindexQuery = (format: string, repo: string) =>
   queryOptions({
     queryKey: ["repos", format, repo, "reindex"],
-    queryFn: ({ signal }) => apiGet<ReindexReport>(apiPath("repos", format, repo, "reindex"), undefined, signal),
+    queryFn: async ({ signal }) => {
+      try {
+        return await apiGet<ReindexRun>(apiPath("repos", format, repo, "reindex"), undefined, signal);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404 && !isUnavailable(err)) return null;
+        throw err;
+      }
+    },
   });
 
 export const sessionsQuery = (format: string, repo: string) =>

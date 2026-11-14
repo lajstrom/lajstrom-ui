@@ -73,7 +73,7 @@ export function ReposPage() {
       counted: all.every((r) => r.stats),
     };
     for (const r of all) {
-      t.registries.add(r.registry);
+      if (r.registry) t.registries.add(r.registry);
       if (!r.stats) continue;
       t.packages += r.stats.packages;
       t.versions += r.stats.versions;
@@ -231,7 +231,7 @@ function RepoRow({ repo, showWrite }: { repo: Repo; showWrite: boolean }) {
       </TD>
       <TD className="text-right tabular whitespace-nowrap">{stats ? formatBytes(stats.size) : "—"}</TD>
       <TD>
-        <span className="font-mono text-xs text-muted-foreground">{repo.registry}</span>
+        <span className="font-mono text-xs text-muted-foreground">{repo.registry ?? "—"}</span>
       </TD>
       <TD>
         <AccessBadge repo={repo} />

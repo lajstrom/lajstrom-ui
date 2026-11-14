@@ -141,7 +141,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
                       <FormatMark format={r.format} />
                       <span className="font-medium">{r.prefix}</span>
                       <span className="flex-1 text-right text-xs text-muted-foreground">
-                        {r.stats ? `${r.stats.packages} packages` : r.registry}
+                        {r.stats ? `${r.stats.packages} packages` : (r.registry ?? r.kind)}
                       </span>
                     </Command.Item>
                   ))}
