@@ -12,8 +12,9 @@ import {
   Tags,
 } from "lucide-react";
 
-import { infoQuery, packageQuery, repoQuery, versionQuery, versionsQuery } from "@/api/queries";
-import type { Referrer, Repo, VersionDetail } from "@/api/types";
+import { ApiError, isUnavailable } from "@/api/client";
+import { attachmentsQuery, infoQuery, packageQuery, repoQuery, versionQuery, versionsQuery } from "@/api/queries";
+import type { Attachment, Repo, VariantDetail, VersionDetail } from "@/api/types";
 import { ErrorState, FormatMark, PageHeader, Principal, RelativeTime } from "@/components/common";
 import { SnippetTabs } from "@/components/snippets";
 import { Badge } from "@/components/ui/badge";
@@ -32,9 +33,29 @@ import { variantShort } from "@/lib/variants";
 import { ociSnippets, referrerKinds } from "@/lib/formats/common";
 
 import { MetadataRows } from "./metadata";
-import { groupVersions, packageCrumbs } from "./package-model";
+import { packageCrumbs } from "./package-model";
 
 type Props = { format: string; repoName: string; name: string; version: string };
+
+/** One variant of a version as the cards show it: the server's VariantDetail, with what the
+ * version and the format add. */
+type View = VariantDetail & {
+  version: string;
+  ociRepository: string;
+  size: number;
+  /** lajstrom.uploaded-by, absent on a degraded row. */
+  uploadedBy: string | null;
+};
+
+function viewOf(d: VersionDetail, v: VariantDetail): View {
+  return {
+    ...v,
+    version: d.version,
+    ociRepository: d.ociRepository,
+    size: v.files.reduce((n, f) => n + f.size, 0),
+    uploadedBy: v.attrs["lajstrom.uploaded-by"] ?? null,
+  };
+}
 
 export function VersionPage({ format, repoName, name, version }: Props) {
   const spec = formatSpec(format);
@@ -43,32 +64,34 @@ export function VersionPage({ format, repoName, name, version }: Props) {
   const repo = useQuery(repoQuery(format, repoName));
   const pkg = useQuery(packageQuery(format, repoName, name));
   const versions = useQuery(versionsQuery(format, repoName, name));
+  const detail = useQuery(versionQuery(format, repoName, name, version));
 
-  const group = versions.data ? groupVersions(versions.data).find((g) => g.version === version) : undefined;
-  const selected = group?.manifests.find((m) => m.variant === search.variant) ?? group?.manifests[0];
-  const detail = useQuery({ ...versionQuery(format, repoName, name, selected?.digest ?? ""), enabled: Boolean(selected) });
-  const isLatest = pkg.data?.latestVersion === version;
+  const d = detail.data;
+  const variant = d?.variants.find((v) => v.variant === search.variant) ?? d?.variants[0];
+  const view = d && variant ? viewOf(d, variant) : undefined;
+  const latest = pkg.data?.latestVersion ?? versions.data?.[0]?.version;
+  const isLatest = latest === version;
   const isRaw = format === "raw";
 
   const crumbs = packageCrumbs(format, repoName, name, version);
-  if (versions.isError || (versions.data && !group)) {
+  if (detail.isError) {
+    const missing = detail.error instanceof ApiError && detail.error.status === 404;
     return (
       <>
         <PageHeader crumbs={crumbs} title={`${name} ${version}`} />
         <Card>
-          {versions.isError ? (
-            <ErrorState error={versions.error} onRetry={() => void versions.refetch()} />
-          ) : (
+          {missing ? (
             <EmptyState icon={<AlertTriangle />} title="Version not found">
               {name} has no version {version} in {format}/{repoName}.
             </EmptyState>
+          ) : (
+            <ErrorState error={detail.error} onRetry={() => void detail.refetch()} />
           )}
         </Card>
       </>
     );
   }
 
-  const d = detail.data;
   return (
     <>
       <PageHeader
@@ -83,12 +106,24 @@ export function VersionPage({ format, repoName, name, version }: Props) {
         badges={
           <>
             {isLatest ? <Badge tone="primary">{isRaw ? "current" : "latest"}</Badge> : null}
-            {selected?.attrs["pypi.nonstandard"] === "true" ? (
+            {d?.yanked ? (
+              <Tooltip content={d.yanked.reason ? `Yanked: ${d.yanked.reason}` : "Yanked: installers skip it unless pinned (PEP 592)"}>
+                <Badge tone="warning">yanked</Badge>
+              </Tooltip>
+            ) : null}
+            {d?.pointers.map((ptr) => (
+              <Tooltip key={ptr.name} content={`The ${ptr.kind} ${ptr.name} names this version`}>
+                <Badge tone="outline" className="font-mono">
+                  {ptr.name}
+                </Badge>
+              </Tooltip>
+            ))}
+            {view?.attrs["lajstrom.pypi.nonstandard"] === "true" ? (
               <Tooltip content="Not a PEP 440 version: accepted and flagged lajstrom.pypi.nonstandard=true">
                 <Badge tone="warning">non-standard version</Badge>
               </Tooltip>
             ) : null}
-            {selected?.degraded ? (
+            {view?.degraded ? (
               <Tooltip content="The metadata layer is missing or unreadable; reindex kept the row from annotations only">
                 <Badge tone="warning">degraded</Badge>
               </Tooltip>
@@ -96,10 +131,16 @@ export function VersionPage({ format, repoName, name, version }: Props) {
           </>
         }
         description={
-          selected ? (
+          d && view ? (
             <span>
-              Published <RelativeTime iso={selected.createdAt} /> by <Principal value={selected.uploadedBy} />
-              {group && group.manifests.length > 1 ? ` · ${group.manifests.length} ${spec.variantLabel?.toLowerCase()}s` : null}
+              Published <RelativeTime iso={d.publishedAt} />
+              {view.uploadedBy ? (
+                <>
+                  {" "}
+                  by <Principal value={view.uploadedBy} />
+                </>
+              ) : null}
+              {d.variants.length > 1 ? ` · ${d.variants.length} ${spec.variantLabel?.toLowerCase()}s` : null}
             </span>
           ) : (
             <Skeleton className="h-4 w-72" />
@@ -107,14 +148,14 @@ export function VersionPage({ format, repoName, name, version }: Props) {
         }
       />
 
-      {group && group.manifests.length > 1 ? (
+      {d && d.variants.length > 1 ? (
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <span className="text-sm text-muted-foreground">{spec.variantLabel}:</span>
           <Segmented
             aria-label={spec.variantLabel ?? "Variant"}
-            value={selected?.variant ?? ""}
+            value={view?.variant ?? ""}
             onChange={(v) => void navigate({ to: ".", search: { variant: v }, replace: true })}
-            options={group.manifests.map((m) => ({
+            options={d.variants.map((m) => ({
               value: m.variant,
               label: (
                 <Tooltip content={`tag ${m.tag}`}>
@@ -126,11 +167,7 @@ export function VersionPage({ format, repoName, name, version }: Props) {
         </div>
       ) : null}
 
-      {detail.isError ? (
-        <Card>
-          <ErrorState error={detail.error} onRetry={() => void detail.refetch()} />
-        </Card>
-      ) : !d || !repo.data || !pkg.data ? (
+      {!view || !repo.data ? (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
           <div className="space-y-4">
             <Skeleton className="h-40" />
@@ -141,15 +178,15 @@ export function VersionPage({ format, repoName, name, version }: Props) {
       ) : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
           <div className="min-w-0 space-y-4">
-            <FilesCard detail={d} spec={spec} />
-            <UseCard repo={repo.data} detail={d} spec={spec} pkgName={name} ociRepository={pkg.data.ociRepository} />
-            <SupplyChainCard detail={d} />
-            <MetadataCard detail={d} spec={spec} />
-            <ManifestCard detail={d} />
+            <FilesCard view={view} spec={spec} repoName={repoName} pkgName={name} />
+            <UseCard repo={repo.data} view={view} spec={spec} pkgName={name} />
+            <AttachmentsCard format={format} repoName={repoName} pkgName={name} view={view} />
+            <MetadataCard view={view} spec={spec} />
+            <ManifestCard view={view} />
           </div>
           <aside className="min-w-0 space-y-4">
-            <DetailsCard detail={d} />
-            <AttributesCard detail={d} />
+            <DetailsCard view={view} />
+            <AttributesCard view={view} format={format} />
           </aside>
         </div>
       )}
@@ -157,7 +194,7 @@ export function VersionPage({ format, repoName, name, version }: Props) {
   );
 }
 
-function FilesCard({ detail, spec }: { detail: VersionDetail; spec: FormatSpec }) {
+function FilesCard({ view, spec, repoName, pkgName }: { view: View; spec: FormatSpec; repoName: string; pkgName: string }) {
   const info = useQuery(infoQuery);
   const base = (info.data?.externalURL ?? window.location.origin).replace(/\/$/, "");
   const mock = demoMode().active;
@@ -166,7 +203,7 @@ function FilesCard({ detail, spec }: { detail: VersionDetail; spec: FormatSpec }
       <CardHeader
         icon={<FileText />}
         title="Files"
-        description={`${detail.files.length} file layer${detail.files.length === 1 ? "" : "s"} · ${formatBytes(detail.size)}${detail.metadata ? " · plus metadata.json" : ""}`}
+        description={`${view.files.length} file layer${view.files.length === 1 ? "" : "s"} · ${formatBytes(view.size)}${view.metadata ? " · plus metadata.json" : ""}`}
       />
       <Table>
         <THead>
@@ -179,8 +216,9 @@ function FilesCard({ detail, spec }: { detail: VersionDetail; spec: FormatSpec }
           </TR>
         </THead>
         <TBody>
-          {detail.files.map((f) => {
-            const url = base + f.path;
+          {view.files.map((f) => {
+            const path = spec.filePath(repoName, pkgName, view, f.name);
+            const url = path === null ? null : base + path;
             return (
               <TR key={f.digest}>
                 <TD className="max-w-[22rem]">
@@ -194,7 +232,7 @@ function FilesCard({ detail, spec }: { detail: VersionDetail; spec: FormatSpec }
                   <CopyText value={f.digest} display={shortDigest(f.digest)} label="digest" />
                 </TD>
                 <TD>
-                  {mock ? (
+                  {url === null ? null : mock ? (
                     <Tooltip content={`Mock data: copies ${url}`}>
                       <Button variant="ghost" size="icon-sm" aria-label={`Copy download URL of ${f.name}`} onClick={() => void copyText(url)}>
                         <Link2 />
@@ -219,24 +257,10 @@ function FilesCard({ detail, spec }: { detail: VersionDetail; spec: FormatSpec }
   );
 }
 
-function UseCard({
-  repo,
-  detail,
-  spec,
-  pkgName,
-  ociRepository,
-}: {
-  repo: Repo;
-  detail: VersionDetail;
-  spec: FormatSpec;
-  pkgName: string;
-  ociRepository: string;
-}) {
+function UseCard({ repo, view, spec, pkgName }: { repo: Repo; view: View; spec: FormatSpec; pkgName: string }) {
   const info = useQuery(infoQuery);
-  const pkg = useQuery(packageQuery(repo.format, repo.name, pkgName));
   const ctx = snippetContext(info.data, repo);
-  if (!pkg.data) return null;
-  const snippets = [...spec.install(ctx, pkg.data, detail), ...ociSnippets(ctx, detail, ociRepository)];
+  const snippets = [...spec.install(ctx, { name: pkgName }, view), ...ociSnippets(ctx, view, view.ociRepository)];
   return (
     <Card>
       <CardHeader title="Use this version" description="Native client, or any OCI tool through the facade" />
@@ -247,41 +271,70 @@ function UseCard({
   );
 }
 
-function referrerIcon(r: Referrer) {
-  if (r.kind === "signature") return <ShieldCheck className="size-4 text-success" />;
-  if (r.kind === "attestation") return <BadgeCheck className="size-4 text-primary" />;
+function attachmentIcon(a: Attachment) {
+  if (a.kind === "signature") return <ShieldCheck className="size-4 text-success" />;
+  if (a.kind === "attestation" || a.kind === "provenance") return <BadgeCheck className="size-4 text-primary" />;
   return <FileText className="size-4 text-muted-foreground" />;
 }
 
-function SupplyChainCard({ detail }: { detail: VersionDetail }) {
-  const refs = detail.referrerList;
+const verificationTone = { verified: "success", untrusted: "warning", unsigned: "neutral", invalid: "danger", unsupported: "outline" } as const;
+
+const verificationHelp: Record<Attachment["verification"], string> = {
+  verified: "A trusted key signed it, for its predicate type, and what it signed names this variant",
+  untrusted: "Signed, but by a key the server does not trust",
+  unsigned: "Nothing signed it",
+  invalid: "Its signature does not verify",
+  unsupported: "The server cannot verify it: keyless, notation, a message signature, or too large",
+};
+
+function AttachmentsCard({ format, repoName, pkgName, view }: { format: string; repoName: string; pkgName: string; view: View }) {
+  const list = useQuery(attachmentsQuery(format, repoName, pkgName, view.version, view.variant));
   return (
     <Card>
       <CardHeader
         icon={<ShieldCheck />}
-        title="Signatures and attestations"
-        description="OCI referrers whose subject is this manifest; Lajstrom passes them through unchanged"
+        title="Signatures, SBOMs and attestations"
+        description="OCI referrers of this manifest, as the index labels them; Lajstrom passes them through unchanged"
       />
-      {refs.length === 0 ? (
+      {list.isError ? (
+        isUnavailable(list.error) ? (
+          <EmptyState title="Not listed by this server" className="py-6">
+            This server version does not list attachments; they are on /v2 as referrers of the manifest.
+          </EmptyState>
+        ) : (
+          <ErrorState error={list.error} onRetry={() => void list.refetch()} />
+        )
+      ) : !list.data ? (
+        <CardBody>
+          <Skeleton className="h-16" />
+        </CardBody>
+      ) : list.data.attachments.length === 0 ? (
         <EmptyState title="Nothing attached" className="py-6">
           No signature, SBOM or attestation references this manifest. Sign it in CI with{" "}
           <code className="font-mono text-foreground">cosign sign</code>; it shows up here.
         </EmptyState>
       ) : (
         <ul className="divide-y divide-border">
-          {refs.map((r) => {
-            const identity = r.annotations["dev.sigstore.cosign/certificate-identity"];
-            const issuer = r.annotations["dev.sigstore.cosign/certificate-oidc-issuer"];
-            const predicate = r.annotations["in-toto.io/predicate-type"];
+          {list.data.attachments.map((a) => {
+            const identity = a.annotations["dev.sigstore.cosign/certificate-identity"];
+            const issuer = a.annotations["dev.sigstore.cosign/certificate-oidc-issuer"];
             return (
-              <li key={r.digest} className="flex items-start gap-3 px-4 py-3">
-                <span className="mt-0.5">{referrerIcon(r)}</span>
+              <li key={`${a.digest}:${a.layer}`} className="flex items-start gap-3 px-4 py-3">
+                <span className="mt-0.5">{attachmentIcon(a)}</span>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                    {referrerKinds[r.artifactType]?.label ?? r.artifactType}
-                    {r.tool ? <Badge tone="outline">{r.tool}</Badge> : null}
+                    {referrerKinds[a.artifactType]?.label ?? a.kind}
+                    {a.tool ? <Badge tone="outline">{a.toolVersion ? `${a.tool} ${a.toolVersion}` : a.tool}</Badge> : null}
+                    <Tooltip content={a.reason ? `${verificationHelp[a.verification]}: ${a.reason}` : verificationHelp[a.verification]}>
+                      <span>
+                        <Badge tone={verificationTone[a.verification] ?? "neutral"}>
+                          {a.verification}
+                          {a.signedBy ? ` by ${a.signedBy}` : ""}
+                        </Badge>
+                      </span>
+                    </Tooltip>
                   </div>
-                  <div className="mt-0.5 font-mono text-xs break-all text-muted-foreground">{r.artifactType}</div>
+                  <div className="mt-0.5 font-mono text-xs break-all text-muted-foreground">{a.artifactType}</div>
                   {identity ? (
                     <div className="mt-1 text-xs text-muted-foreground">
                       Keyless, identity <span className="font-mono break-all text-foreground">{identity}</span>
@@ -293,34 +346,37 @@ function SupplyChainCard({ detail }: { detail: VersionDetail }) {
                       ) : null}
                     </div>
                   ) : null}
-                  {predicate ? (
+                  {a.predicateType ? (
                     <div className="mt-1 text-xs text-muted-foreground">
-                      Predicate <span className="font-mono text-foreground">{predicate}</span>
+                      Predicate <span className="font-mono text-foreground">{a.predicateType}</span>
                     </div>
                   ) : null}
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-0.5 text-xs text-muted-foreground">
-                  <CopyText value={r.digest} display={shortDigest(r.digest)} label="referrer digest" />
+                  <CopyText value={a.digest} display={shortDigest(a.digest)} label="referrer digest" />
                   <span>
-                    {formatBytes(r.size)} · <RelativeTime iso={r.createdAt} />
+                    {formatBytes(a.size)} · <RelativeTime iso={a.createdAt ?? a.indexedAt} />
                   </span>
                 </div>
               </li>
             );
           })}
+          {list.data.truncated ? (
+            <li className="px-4 py-2 text-xs text-muted-foreground">More attachments than the server lists at once; the oldest are left out.</li>
+          ) : null}
         </ul>
       )}
     </Card>
   );
 }
 
-function MetadataCard({ detail, spec }: { detail: VersionDetail; spec: FormatSpec }) {
-  const rows = spec.metadataRows(detail.metadata);
+function MetadataCard({ view, spec }: { view: View; spec: FormatSpec }) {
+  const rows = spec.metadataRows(view.metadata);
   return (
     <Card>
       <CardHeader icon={<Braces />} title="Metadata" description="metadata.json, the metadata layer: read without unpacking the package" />
       <CardBody>
-        {detail.metadata === null ? (
+        {view.metadata === null ? (
           <p className="flex items-start gap-2 text-sm text-warning">
             <AlertTriangle className="mt-0.5 size-4 shrink-0" />
             No readable metadata layer. The index row comes from the manifest annotations alone.
@@ -330,7 +386,7 @@ function MetadataCard({ detail, spec }: { detail: VersionDetail; spec: FormatSpe
             {rows.length ? <MetadataRows rows={rows} /> : null}
             <details className="group mt-3">
               <summary className="cursor-pointer text-sm text-primary select-none hover:underline">Show metadata.json</summary>
-              <CodeBlock className="mt-2" caption="metadata.json" code={JSON.stringify(detail.metadata, null, 2)} />
+              <CodeBlock className="mt-2" caption="metadata.json" code={JSON.stringify(view.metadata, null, 2)} />
             </details>
           </>
         )}
@@ -339,8 +395,21 @@ function MetadataCard({ detail, spec }: { detail: VersionDetail; spec: FormatSpe
   );
 }
 
-function ManifestCard({ detail }: { detail: VersionDetail }) {
-  const entries = Object.entries(detail.annotations);
+function ManifestCard({ view }: { view: View }) {
+  const info = useQuery(infoQuery);
+  const host = info.data?.externalURL ? new URL(info.data.externalURL).host : window.location.host;
+  if (!view.annotations || !view.manifest) {
+    // The server reads the manifest from the registry on /v2, not in /api/v1 (lajstrom/lajstrom#951).
+    return (
+      <Card>
+        <CardHeader icon={<Tags />} title="Manifest" description="On /v2 under the version's OCI repository; the registry stays the source of truth" />
+        <CardBody>
+          <CodeBlock caption="shell" code={`oras manifest fetch --pretty ${host}/${view.ociRepository}@${view.digest}`} />
+        </CardBody>
+      </Card>
+    );
+  }
+  const entries = Object.entries(view.annotations);
   return (
     <Card>
       <CardHeader
@@ -361,49 +430,52 @@ function ManifestCard({ detail }: { detail: VersionDetail }) {
       <CardBody className="border-t border-border">
         <details>
           <summary className="cursor-pointer text-sm text-primary select-none hover:underline">Show the OCI manifest</summary>
-          <CodeBlock className="mt-2" caption={`${detail.manifest.mediaType} · ${shortDigest(detail.digest)}`} code={JSON.stringify(detail.manifest, null, 2)} />
+          <CodeBlock className="mt-2" caption={`${view.manifest.mediaType} · ${shortDigest(view.digest)}`} code={JSON.stringify(view.manifest, null, 2)} />
         </details>
       </CardBody>
     </Card>
   );
 }
 
-function DetailsCard({ detail }: { detail: VersionDetail }) {
-  const source = detail.annotations["org.opencontainers.image.source"];
-  const revision = detail.annotations["org.opencontainers.image.revision"];
+function DetailsCard({ view }: { view: View }) {
+  const info = useQuery(infoQuery);
+  const host = info.data?.externalURL ? new URL(info.data.externalURL).host : window.location.host;
+  const reference = `${view.ociRepository}:${view.tag}`;
+  const source = view.annotations?.["org.opencontainers.image.source"];
+  const revision = view.annotations?.["org.opencontainers.image.revision"];
   return (
     <Card>
       <CardHeader icon={<Fingerprint />} title="Manifest" />
       <CardBody>
         <Properties className="grid-cols-[5.5rem_1fr]">
           <Property label="Tag">
-            <CopyText value={detail.tag} label="tag" />
+            <CopyText value={view.tag} label="tag" />
           </Property>
           <Property label="Digest">
-            <CopyText value={detail.digest} display={shortDigest(detail.digest, 16)} label="digest" />
+            <CopyText value={view.digest} display={shortDigest(view.digest, 16)} label="digest" />
           </Property>
           <Property label="Reference">
-            <CopyText value={detail.ociReference} display={detail.ociReference.split("/").slice(1).join("/")} label="OCI reference" />
+            <CopyText value={`${host}/${reference}`} display={reference} label="OCI reference" />
           </Property>
           <Property label="Type">
-            <span className="font-mono text-xs break-all">{detail.artifactType}</span>
+            <span className="font-mono text-xs break-all">{view.artifactType}</span>
           </Property>
-          {detail.variant ? <Property label="Variant">{detail.variant}</Property> : null}
+          {view.variant ? <Property label="Variant">{view.variant}</Property> : null}
           <Property label="Size">
-            {formatBytes(detail.size)} in {detail.fileCount} file{detail.fileCount === 1 ? "" : "s"}
+            {formatBytes(view.size)} in {view.files.length} file{view.files.length === 1 ? "" : "s"}
           </Property>
-          <Property label="Created">
-            <Tooltip content={formatDateTime(detail.createdAt)}>
+          <Property label="Published">
+            <Tooltip content={formatDateTime(view.publishedAt)}>
               <span>
-                <RelativeTime iso={detail.createdAt} />
+                <RelativeTime iso={view.publishedAt} />
               </span>
             </Tooltip>
           </Property>
           <Property label="Indexed">
-            <RelativeTime iso={detail.indexedAt} />
+            <RelativeTime iso={view.indexedAt} />
           </Property>
           <Property label="By">
-            <Principal value={detail.uploadedBy} />
+            <Principal value={view.uploadedBy} />
           </Property>
           {source ? (
             <Property label="Source">
@@ -419,8 +491,8 @@ function DetailsCard({ detail }: { detail: VersionDetail }) {
   );
 }
 
-function AttributesCard({ detail }: { detail: VersionDetail }) {
-  const attrs = Object.entries(detail.attrs);
+function AttributesCard({ view, format }: { view: View; format: string }) {
+  const attrs = Object.entries(view.attrs).filter(([k]) => k.startsWith(`lajstrom.${format}.`));
   if (!attrs.length) return null;
   return (
     <Card>

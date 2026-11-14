@@ -1,5 +1,3 @@
-import type { VersionDetail, VersionSummary } from "@/api/types";
-
 import type { Snippet, SnippetContext } from "./types";
 
 export const USER = "$LAJSTROM_USER";
@@ -24,7 +22,7 @@ export function strList(v: unknown): string[] {
 }
 
 /** oras and cosign work with any manifest Lajstrom stores, through the OCI facade (/v2). */
-export function ociSnippets(ctx: SnippetContext, v: VersionSummary | VersionDetail, ociRepository: string): Snippet[] {
+export function ociSnippets(ctx: SnippetContext, v: { tag: string; digest: string }, ociRepository: string): Snippet[] {
   const ref = `${ctx.host}/${ociRepository}`;
   return [
     {

@@ -364,24 +364,56 @@ paths:
                   versions: { type: array, items: { $ref: "#/components/schemas/VersionSummary" } }
         "404": { $ref: "#/components/responses/NotFound" }
 
-  /api/v1/repos/{format}/{repo}/packages/{name}/versions/{digest}:
+  /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}:
     parameters:
       - $ref: "#/components/parameters/format"
       - $ref: "#/components/parameters/repo"
       - $ref: "#/components/parameters/package"
-      - { name: digest, in: path, required: true, description: The manifest digest, schema: { type: string, example: "sha256:…" } }
+      - { name: version, in: path, required: true, description: The version, one path segment, schema: { type: string, example: "2.32.3" } }
     get:
-      tags: [Packages (proposed)]
-      summary: One manifest in full
-      description: Files with their download paths, the metadata layer, the annotations, the OCI manifest and its referrers.
+      tags: [Packages]
+      summary: One version with its variants
+      description: >-
+        Every variant of the version with what the index has of its manifest: the artifact type,
+        the lajstrom.* annotations by their full key, the metadata layer and the files; and the
+        OCI repository that holds it. ?variant= keeps one variant.
       operationId: getVersion
-      x-lajstrom-status: proposed
+      parameters:
+        - { name: variant, in: query, required: false, description: One variant; empty for a format without variants, schema: { type: string } }
       responses:
         "200":
           description: The version
           content:
             application/json:
               schema: { $ref: "#/components/schemas/VersionDetail" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/attachments:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/package"
+      - { name: version, in: path, required: true, description: The version, one path segment, schema: { type: string, example: "2.32.3" } }
+    get:
+      tags: [Packages]
+      summary: The attachments of a version
+      description: >-
+        Signatures, SBOMs, scan reports and provenance: one layer of a referrer of one of the
+        version's variants each, labelled, newest first. ?variant= keeps one variant.
+      operationId: listAttachments
+      parameters:
+        - { name: variant, in: query, required: false, description: One variant, schema: { type: string } }
+      responses:
+        "200":
+          description: The attachments
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attachments, truncated]
+                properties:
+                  attachments: { type: array, items: { type: object } }
+                  truncated: { type: boolean }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /api/v1/repos/{format}/{repo}/reindex:

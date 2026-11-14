@@ -92,6 +92,10 @@ export const raw: FormatSpec = {
       },
     ];
   },
+  filePath(repo, pkg, version) {
+    // ?digest= pins the version; without it the path is the newest (http-routing.md §3, raw).
+    return `/raw/${repo}/${pkg}?digest=${version.files[0]?.digest ?? version.digest}`;
+  },
   fileRole() {
     return "File";
   },

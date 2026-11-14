@@ -2,6 +2,7 @@ import { keepPreviousData, queryOptions } from "@tanstack/react-query";
 
 import { ApiError, apiGet, apiPath, isUnavailable } from "./client";
 import type {
+  AttachmentList,
   AuditList,
   Binding,
   PackageDetail,
@@ -64,13 +65,15 @@ export const repoQuery = (format: string, repo: string) =>
   });
 
 export type PackageParams = {
-  q?: string;
+  /** The server's filter: names that start with it. */
+  prefix?: string;
+  /** Proposed (lajstrom/lajstrom#955): attribute filters, a sort, and a raw directory. */
   attr?: string[];
   sort?: string;
-  order?: "asc" | "desc";
+  order?: string;
+  dir?: string;
   cursor?: string;
   limit?: number;
-  dir?: string;
 };
 
 export const packagesQuery = (format: string, repo: string, params: PackageParams) =>
@@ -81,27 +84,41 @@ export const packagesQuery = (format: string, repo: string, params: PackageParam
     placeholderData: keepPreviousData,
   });
 
+/** GET …/packages/{name} (proposed); null from a server without it, and the package page
+ * derives what it shows from the versions. */
 export const packageQuery = (format: string, repo: string, name: string) =>
   queryOptions({
     queryKey: ["repos", format, repo, "package", name],
-    queryFn: ({ signal }) => apiGet<PackageDetail>(apiPath("repos", format, repo, "packages", name), undefined, signal),
+    queryFn: async ({ signal }) => {
+      try {
+        return await apiGet<PackageDetail>(apiPath("repos", format, repo, "packages", name), undefined, signal);
+      } catch (err) {
+        if (isUnavailable(err)) return null;
+        throw err;
+      }
+    },
   });
 
+/** Every version of a package, newest first. */
 export const versionsQuery = (format: string, repo: string, name: string) =>
   queryOptions({
     queryKey: ["repos", format, repo, "package", name, "versions"],
-    queryFn: ({ signal }) =>
-      apiGet<{ versions: VersionSummary[] }>(apiPath("repos", format, repo, "packages", name, "versions"), undefined, signal).then(
-        (r) => r.versions,
-      ),
+    queryFn: ({ signal }) => allPages<VersionSummary>(apiPath("repos", format, repo, "packages", name, "versions"), "versions", signal),
   });
 
-export const versionQuery = (format: string, repo: string, name: string, digest: string) =>
+/** One version with all its variants; the page picks one. */
+export const versionQuery = (format: string, repo: string, name: string, version: string) =>
   queryOptions({
-    queryKey: ["repos", format, repo, "package", name, "versions", digest],
+    queryKey: ["repos", format, repo, "package", name, "versions", version],
+    queryFn: ({ signal }) => apiGet<VersionDetail>(apiPath("repos", format, repo, "packages", name, "versions", version), undefined, signal),
+  });
+
+/** The attachments of a version, newest first, of one variant. */
+export const attachmentsQuery = (format: string, repo: string, name: string, version: string, variant: string) =>
+  queryOptions({
+    queryKey: ["repos", format, repo, "package", name, "versions", version, "attachments", variant],
     queryFn: ({ signal }) =>
-      apiGet<VersionDetail>(apiPath("repos", format, repo, "packages", name, "versions", digest), undefined, signal),
-    staleTime: Infinity, // a manifest never changes: tags are immutable, digests are content.
+      apiGet<AttachmentList>(apiPath("repos", format, repo, "packages", name, "versions", version, "attachments"), { variant }, signal),
   });
 
 /** The latest reindex run that covered the repo; null when none has (the server's 404, for a

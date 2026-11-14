@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 
 import { callerQuery, infoQuery, packagesQuery, repoQuery } from "@/api/queries";
 import type { PackageList, PackageSummary, Repo } from "@/api/types";
-import { AccessBadge, ErrorState, FormatMark, PageHeader, Pagination, RelativeTime } from "@/components/common";
+import { AccessBadge, CursorPagination, ErrorState, FormatMark, PageHeader, RelativeTime } from "@/components/common";
 import { DemoCommandsNote, SnippetTabs } from "@/components/snippets";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,6 @@ import { SortableTH, TBody, TD, TH, THead, TR, Table } from "@/components/ui/tab
 import { Tooltip } from "@/components/ui/tooltip";
 import { can } from "@/lib/access";
 import { cn } from "@/lib/cn";
-import { cursorStart } from "@/lib/cursor";
 import { formatBytes, formatNumber, pluralize, shortDigest } from "@/lib/format";
 import { formatSpec, snippetContext, type FormatSpec } from "@/lib/formats";
 import { facetParam, variantShort } from "@/lib/variants";
@@ -25,7 +24,8 @@ import { RepoActivity, RepoDetails, RepoMaintenance } from "./repo-tabs";
 
 export type RepoSearch = {
   tab?: "packages" | "connect" | "details" | "maintenance" | "activity";
-  q?: string;
+  /** Names that start with it: the server's filter of the package list. */
+  prefix?: string;
   sort?: "name" | "updated" | "versions" | "size";
   order?: "asc" | "desc";
   cursor?: string;
@@ -262,14 +262,14 @@ type PackagesTabProps = {
 
 function PackagesTab({ repo, spec, search, setSearch }: PackagesTabProps) {
   const isRaw = repo.format === "raw";
-  const browsing = isRaw && !search.q;
+  const browsing = isRaw && !search.prefix;
   const facetValues = search as Record<string, string | undefined>;
   const attr = spec.facets
     .map((f) => [f.key, facetValues[facetParam(f.key)]] as const)
     .filter(([, v]) => v)
     .map(([k, v]) => `${k}:${v}`);
   const params = {
-    q: search.q,
+    prefix: search.prefix,
     attr,
     sort: search.sort,
     order: search.order,
@@ -285,7 +285,13 @@ function PackagesTab({ repo, spec, search, setSearch }: PackagesTabProps) {
       sort: col === "name" && sort !== "name" ? undefined : col,
       order: sort === col ? (order === "asc" ? "desc" : "asc") : col === "name" ? undefined : "desc",
     });
-  const filtered = Boolean(search.q || attr.length);
+  const filtered = Boolean(search.prefix || attr.length);
+  // Facets in the answer: the server takes the proposed filters, sort and directories
+  // (lajstrom/lajstrom#955); without them the list is by name, filtered by prefix.
+  const proposed = data?.facets !== undefined;
+  const facts = data?.packages.some((p) => p.versions !== undefined) ?? false;
+  const inDirs = browsing && data?.directories !== undefined;
+  const sorting = proposed ? { sort, order, sortBy } : null;
 
   return (
     <>
@@ -293,13 +299,13 @@ function PackagesTab({ repo, spec, search, setSearch }: PackagesTabProps) {
       <Card>
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
           <SearchInput
-            value={search.q ?? ""}
-            onValueChange={(v) => setSearch({ q: v || undefined })}
-            placeholder={`Search ${spec.noun.many}${isRaw ? " by path" : ""}`}
+            value={search.prefix ?? ""}
+            onValueChange={(v) => setSearch({ prefix: v || undefined })}
+            placeholder={isRaw ? "Paths that start with…" : `${spec.noun.many[0]!.toUpperCase()}${spec.noun.many.slice(1)} that start with…`}
             className="w-full sm:w-72"
           />
           {spec.facets.map((f) => {
-            const values = data?.facets[f.key] ?? [];
+            const values = data?.facets?.[f.key] ?? [];
             if (values.length < 2) return null;
             const p = facetParam(f.key);
             return (
@@ -319,17 +325,19 @@ function PackagesTab({ repo, spec, search, setSearch }: PackagesTabProps) {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setSearch(Object.fromEntries([["q", undefined], ...spec.facets.map((f) => [facetParam(f.key), undefined])]))}
+              onClick={() => setSearch(Object.fromEntries([["prefix", undefined], ...spec.facets.map((f) => [facetParam(f.key), undefined])]))}
             >
               Clear filters
             </Button>
           ) : null}
           <span className={cn("ml-auto text-xs text-muted-foreground tabular", pkgs.isFetching && "animate-skeleton")}>
-            {data ? pluralize(data.total, isRaw && browsing ? "item" : spec.noun.one, isRaw && browsing ? "items" : spec.noun.many) : null}
+            {data
+              ? `${pluralize(data.packages.length + (data.directories?.length ?? 0), inDirs ? "item" : spec.noun.one, inDirs ? "items" : spec.noun.many)}${data.next ? " on this page" : ""}`
+              : null}
           </span>
         </div>
 
-        {browsing ? <RawPath dir={search.dir ?? ""} onDir={(dir) => setSearch({ dir: dir || undefined })} /> : null}
+        {inDirs ? <RawPath dir={search.dir ?? ""} onDir={(dir) => setSearch({ dir: dir || undefined })} /> : null}
 
         {pkgs.isError ? (
           <ErrorState error={pkgs.error} onRetry={() => void pkgs.refetch()} />
@@ -351,22 +359,28 @@ function PackagesTab({ repo, spec, search, setSearch }: PackagesTabProps) {
           <Table>
             <THead>
               <TR>
-                <SortableTH active={sort === "name"} direction={order} onSort={() => sortBy("name")}>
+                <Sortable col="name" sorting={sorting}>
                   {isRaw ? "Path" : "Name"}
-                </SortableTH>
-                <TH>{isRaw ? "Current version" : "Latest version"}</TH>
-                {spec.columns.map((c) => (
-                  <TH key={c.key}>{c.label}</TH>
-                ))}
-                <SortableTH active={sort === "versions"} direction={order} onSort={() => sortBy("versions")} className="text-right">
-                  Versions
-                </SortableTH>
-                <SortableTH active={sort === "size"} direction={order} onSort={() => sortBy("size")} className="text-right">
-                  Size
-                </SortableTH>
-                <SortableTH active={sort === "updated"} direction={order} onSort={() => sortBy("updated")}>
-                  Updated
-                </SortableTH>
+                </Sortable>
+                {facts ? (
+                  <>
+                    <TH>{isRaw ? "Current version" : "Latest version"}</TH>
+                    {spec.columns.map((c) => (
+                      <TH key={c.key}>{c.label}</TH>
+                    ))}
+                    <Sortable col="versions" sorting={sorting} className="text-right">
+                      Versions
+                    </Sortable>
+                    <Sortable col="size" sorting={sorting} className="text-right">
+                      Size
+                    </Sortable>
+                    <Sortable col="updated" sorting={sorting}>
+                      Updated
+                    </Sortable>
+                  </>
+                ) : (
+                  <TH>First published</TH>
+                )}
               </TR>
             </THead>
             <TBody>
@@ -386,19 +400,16 @@ function PackagesTab({ repo, spec, search, setSearch }: PackagesTabProps) {
                 </TR>
               ))}
               {data.packages.map((p) => (
-                <PackageRow key={p.name} repo={repo} spec={spec} pkg={p} dir={browsing ? (search.dir ?? "") : ""} />
+                <PackageRow key={p.name} repo={repo} spec={spec} pkg={p} dir={inDirs ? (search.dir ?? "") : ""} facts={facts} />
               ))}
             </TBody>
           </Table>
         )}
         {data ? (
-          <Pagination
-            total={data.total}
-            limit={data.limit}
+          <CursorPagination
             shown={data.packages.length}
             next={data.next}
-            prev={data.prev}
-            start={cursorStart(search.cursor)}
+            cursor={search.cursor}
             onCursor={(cursor) => setSearch({ cursor }, { resetCursor: false })}
             noun={spec.noun.many}
           />
@@ -432,10 +443,24 @@ function RawPath({ dir, onDir }: { dir: string; onDir: (dir: string) => void }) 
   );
 }
 
-function PackageRow({ repo, spec, pkg, dir }: { repo: Repo; spec: FormatSpec; pkg: PackageSummary; dir: string }) {
+type SortCol = NonNullable<RepoSearch["sort"]>;
+type Sorting = { sort: SortCol; order: "asc" | "desc"; sortBy: (col: SortCol) => void } | null;
+
+/** A column header that sorts when the server takes the proposed sort, else a plain one. */
+function Sortable({ col, sorting, className, children }: { col: SortCol; sorting: Sorting; className?: string; children: ReactNode }) {
+  if (!sorting) return <TH className={className}>{children}</TH>;
+  return (
+    <SortableTH active={sorting.sort === col} direction={sorting.order} onSort={() => sorting.sortBy(col)} className={className}>
+      {children}
+    </SortableTH>
+  );
+}
+
+function PackageRow({ repo, spec, pkg, dir, facts }: { repo: Repo; spec: FormatSpec; pkg: PackageSummary; dir: string; facts: boolean }) {
   const navigate = useNavigate();
   const isRaw = repo.format === "raw";
   const label: ReactNode = isRaw ? pkg.name.slice(dir.length) : pkg.name;
+  const latestVariants = pkg.latestVariants ?? [];
   const open = () => void navigate({ to: "/$format/$repo/$", params: { format: repo.format, repo: repo.name, _splat: pkg.name } });
   return (
     <TR
@@ -460,39 +485,47 @@ function PackageRow({ repo, spec, pkg, dir }: { repo: Repo; spec: FormatSpec; pk
           </div>
         </div>
       </TD>
-      <TD>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Tooltip content={isRaw ? "Version of a raw file: the first 16 hex digits of its sha256" : null}>
-            <span className="font-mono text-[13px]">{isRaw ? shortDigest(pkg.latestVersion ?? "", 8) : pkg.latestVersion}</span>
-          </Tooltip>
-          {pkg.latestVariants.length > 0 ? (
-            <Tooltip content={`${spec.variantLabel}: ${pkg.latestVariants.join(", ")}`}>
-              <span className="flex gap-1">
-                {pkg.latestVariants.slice(0, 3).map((v) => (
-                  <Badge key={v} tone="outline" shape="square" className="px-1.5 font-mono text-[11px]">
-                    {variantShort(v)}
-                  </Badge>
-                ))}
-                {pkg.latestVariants.length > 3 ? (
-                  <Badge tone="outline" shape="square" className="px-1.5 text-[11px]">
-                    +{pkg.latestVariants.length - 3}
-                  </Badge>
-                ) : null}
-              </span>
-            </Tooltip>
-          ) : null}
-        </div>
-      </TD>
-      {spec.columns.map((c) => (
-        <TD key={c.key} className="font-mono text-xs text-muted-foreground">
-          {pkg.attrs[c.key] ?? "—"}
+      {facts ? (
+        <>
+          <TD>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Tooltip content={isRaw ? "Version of a raw file: the first 16 hex digits of its sha256" : null}>
+                <span className="font-mono text-[13px]">{isRaw ? shortDigest(pkg.latestVersion ?? "", 8) : pkg.latestVersion}</span>
+              </Tooltip>
+              {latestVariants.length > 0 ? (
+                <Tooltip content={`${spec.variantLabel}: ${latestVariants.join(", ")}`}>
+                  <span className="flex gap-1">
+                    {latestVariants.slice(0, 3).map((v) => (
+                      <Badge key={v} tone="outline" shape="square" className="px-1.5 font-mono text-[11px]">
+                        {variantShort(v)}
+                      </Badge>
+                    ))}
+                    {latestVariants.length > 3 ? (
+                      <Badge tone="outline" shape="square" className="px-1.5 text-[11px]">
+                        +{latestVariants.length - 3}
+                      </Badge>
+                    ) : null}
+                  </span>
+                </Tooltip>
+              ) : null}
+            </div>
+          </TD>
+          {spec.columns.map((c) => (
+            <TD key={c.key} className="font-mono text-xs text-muted-foreground">
+              {pkg.attrs?.[c.key] ?? "—"}
+            </TD>
+          ))}
+          <TD className="text-right tabular">{pkg.versions === undefined ? "—" : formatNumber(pkg.versions)}</TD>
+          <TD className="text-right tabular whitespace-nowrap">{pkg.size === undefined ? "—" : formatBytes(pkg.size)}</TD>
+          <TD className="text-muted-foreground">
+            <RelativeTime iso={pkg.updatedAt ?? null} />
+          </TD>
+        </>
+      ) : (
+        <TD className="text-muted-foreground">
+          <RelativeTime iso={pkg.createdAt} />
         </TD>
-      ))}
-      <TD className="text-right tabular">{formatNumber(pkg.versions)}</TD>
-      <TD className="text-right tabular whitespace-nowrap">{formatBytes(pkg.size)}</TD>
-      <TD className="text-muted-foreground">
-        <RelativeTime iso={pkg.updatedAt} />
-      </TD>
+      )}
     </TR>
   );
 }
