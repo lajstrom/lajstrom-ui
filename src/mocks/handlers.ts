@@ -182,8 +182,8 @@ export const handlers = [
   get("*/api/v1/repos/:format/:repo/reindex", async ({ params }) => {
     const repo = repoOr404(params);
     if (repo instanceof Response) return repo;
-    if (!repo.permissions.includes("manage")) return fail(403, "FORBIDDEN", "the reindex report needs manage on the repo");
-    return HttpResponse.json(db.reindexReport(repo));
+    if (!repo.permissions.includes("manage")) return fail(403, "FORBIDDEN", "the reindex run needs manage on the repo");
+    return HttpResponse.json(db.reindexRun(repo));
   }),
 
   get("*/api/v1/repos/:format/:repo/sessions", async ({ params }) => {
@@ -293,10 +293,19 @@ export const handlers = [
     return HttpResponse.json(repoJson(created), { status: 201, headers: { Location: `/api/v1/repos/${created.prefix}` } });
   }),
 
-  post("*/api/v1/repos/:format/:repo/reindex", async ({ params }) => {
-    const repo = repoOr404(params);
-    // Like the server, which has no reindex yet.
-    return repo instanceof Response ? repo : fail(501, "UNAVAILABLE", "reindex is not in this version");
+  post("*/api/v1/repos/:format/:repo/reindex", async ({ params, request }) => {
+    const repo = repoFor(params, "manage");
+    if (repo instanceof Response) return repo;
+    // The body is optional: an empty one means the defaults (docs/api.md, Reindex).
+    const text = await request.text();
+    let options: unknown;
+    try {
+      options = text ? JSON.parse(text) : null;
+    } catch {
+      return fail(400, "INVALID", "the body must be JSON");
+    }
+    const run = db.startReindex(repo, options, `user:${getPersona()}`);
+    return "status" in run ? refusal(run) : HttpResponse.json(run, { status: 202 });
   }),
 
   patch("*/api/v1/repos/:format/:repo", async ({ params, request }) => {

@@ -138,9 +138,6 @@ live; everything else comes from the index database.
 
 The mock fills these with plausible values; the real shapes are open:
 
-- the key of the maven session expiry policy (`maven.sessionExpiry`: `seal` or `abort`);
-- the fields of the reindex report (`ociRepositories`, `manifests`, `added`, `updated`,
-  `removed`, `degraded`, `foreign[]`);
 - registry `status` and `support` (the support tiers: `ci`, `manual`, `untested`).
 
 ## 5. Browser session

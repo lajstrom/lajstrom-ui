@@ -101,7 +101,13 @@ export function RepoPage() {
                   {formatBytes(r.stats.size)} ·{" "}
                 </>
               ) : null}
-              stored in <span className="font-mono text-foreground">{r.registry}</span>
+              {r.registry ? (
+                <>
+                  stored in <span className="font-mono text-foreground">{r.registry}</span>
+                </>
+              ) : (
+                <>a group of {r.group?.members.join(", ")}</>
+              )}
               {r.stats ? (
                 <>
                   {" "}
