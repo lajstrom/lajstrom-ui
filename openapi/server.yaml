@@ -1,0 +1,1728 @@
+# Vendored from lajstrom/lajstrom@a49fac3ec3dfab43067c7e9812d9c968a5834e1e, internal/api/openapi.yaml. Do not edit:
+# npm run update:openapi -- <ref> replaces it and regenerates src/api/server.gen.ts.
+openapi: 3.1.0
+info:
+  title: Lajstrom management API
+  version: v1
+  description: >-
+    The REST interface to Lajstrom's control plane: repos, users, bindings, tokens and the audit
+    log. docs/api.md is the guide; this document is checked against the server's routes by
+    TestOpenAPIRoutes, its error codes against the server's and docs/api.md's by
+    TestErrorCodes, and the statuses of each operation against those its handler answers in
+    the tests of internal/api (statuses_test.go). Any operation may also answer 408 and 413 to
+    a body, 500 and 503, as the Errors of docs/api.md say.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+servers:
+  - url: /
+tags:
+  - name: repos
+    description: Repos and their reindex runs.
+  - name: tokens
+    description: Personal access tokens of a user and deploy tokens of a repo.
+  - name: users
+    description: Local users.
+  - name: bindings
+    description: Roles of users on the repos of a mask.
+  - name: audit
+    description: The audit log.
+  - name: meta
+    description: Who is asking, the server, and this document.
+security:
+  - basic: []
+  - bearer: []
+paths:
+  /api/v1/repos:
+    get:
+      tags: [repos]
+      operationId: listRepos
+      summary: The repos the caller may read.
+      parameters:
+        - name: format
+          in: query
+          description: Only the repos of this format.
+          schema: {type: string}
+      responses:
+        "200":
+          description: The repos, by format and name.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RepoList"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+    post:
+      tags: [repos]
+      operationId: createRepo
+      summary: Create a repo (admin).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateRepo"}
+      responses:
+        "201":
+          description: The repo.
+          headers:
+            Location: {$ref: "#/components/headers/Location"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Repo"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /api/v1/repos/{format}/{repo}:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+    get:
+      tags: [repos]
+      operationId: getRepo
+      summary: One repo (read).
+      responses:
+        "200":
+          description: The repo.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Repo"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      tags: [repos]
+      operationId: updateRepo
+      summary: >-
+        Change anonymousRead, policy, a proxy's upstream and a group's group (manage);
+        changing upstream.name or group.members needs the admin role, sending back the
+        value the repo has does not. {"kind": "hosted"}, alone, turns a proxy into a hosted
+        repo that keeps what it holds, its dist-tags written to its journal (the admin role).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RepoPatch"}
+      responses:
+        "200":
+          description: The repo as it is then.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Repo"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "501": {$ref: "#/components/responses/Unavailable"}
+    delete:
+      tags: [repos]
+      operationId: deleteRepo
+      summary: Delete a repo (manage); force deletes one that has versions.
+      parameters:
+        - name: force
+          in: query
+          schema: {type: boolean}
+      responses:
+        "204": {description: Deleted.}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /api/v1/repos/{format}/{repo}/reindex:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+    post:
+      tags: [repos]
+      operationId: reindexRepo
+      summary: Start a reindex of the repo (manage).
+      requestBody:
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ReindexRequest"}
+      responses:
+        "202":
+          description: The run, started.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReindexRun"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "501": {$ref: "#/components/responses/Unavailable"}
+    get:
+      tags: [repos]
+      operationId: reindexStatus
+      summary: The latest run that covered the repo, with its report (manage).
+      responses:
+        "200":
+          description: The run.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReindexRun"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/repos/{format}/{repo}/packages:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+    get:
+      tags: [repos]
+      operationId: listPackages
+      summary: A page of the repo's packages, by name (read).
+      parameters:
+        - name: prefix
+          in: query
+          description: Only the packages whose name starts with it.
+          schema: {type: string}
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: The page; the cursor holds the place of its last package.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PackageList"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/repos/{format}/{repo}/packages/{name}/versions:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/package"
+    get:
+      tags: [repos]
+      operationId: listVersions
+      summary: >-
+        A page of the package's versions, newest first (read): each with the digests of its
+        variants, its publish time and the pointers that name it.
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: The page; the cursor holds the place of its last version.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/VersionList"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/package"
+      - name: version
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      tags: [repos]
+      operationId: getVersion
+      summary: >-
+        One version (read): its variants, each with what the index has of its manifest and its
+        files, and the OCI repository that holds it. The manifest and its referrers are not in it.
+      parameters:
+        - name: variant
+          in: query
+          description: Only this variant; empty for a format without variants.
+          schema: {type: string}
+      responses:
+        "200":
+          description: The version.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/VersionDetail"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      tags: [repos]
+      operationId: deleteVersion
+      summary: >-
+        Delete a version (delete): every variant, or the one variant names; each manifest with its
+        referrers, its rows and an audit row. If-Match and If-Unmodified-Since make it a
+        compare-and-delete, checked under the lock of each manifest; a version a pointer names
+        is refused unless forced.
+      parameters:
+        - name: variant
+          in: query
+          description: Only this variant; empty for a format without variants.
+          schema: {type: string}
+        - name: force
+          in: query
+          description: Delete a version that pointers (npm dist-tags) name.
+          schema: {type: boolean}
+        - name: If-Match
+          in: header
+          description: >-
+            The digests of the variants the client read, each a quoted entity tag
+            ("sha256:…"), separated by commas; the delete goes ahead only when the variants it
+            deletes have exactly these digests. * matches any.
+          schema: {type: string}
+        - name: If-Unmodified-Since
+          in: header
+          description: >-
+            An HTTP-date, the cut-off: the delete goes ahead only when no variant it deletes was
+            published after it.
+          schema: {type: string}
+      responses:
+        "204": {description: Deleted.}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "412": {$ref: "#/components/responses/PreconditionFailed"}
+        "501":
+          description: >-
+            The repo's registry does not delete manifests (capabilities.deleteManifest false), and
+            nothing was deleted; or this server deletes no versions. Code UNAVAILABLE.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "502":
+          description: >-
+            The registry refused the delete: it rejected Lajstrom's credentials or the request.
+            Code UNAVAILABLE; the message names the variants deleted before, which stay deleted.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+  /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/yank:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/package"
+      - name: version
+        in: path
+        required: true
+        schema: {type: string}
+    put:
+      tags: [repos]
+      operationId: yankVersion
+      summary: >-
+        Yank a version of a hosted pypi repo (write; PEP 592): every file of it is marked yanked
+        in the simple index, with the reason or none, and pip skips it unless a requirement pins
+        it with ==. An entry of the package's journal and an audit row pypi.yank; a yank with the
+        reason the version has appends nothing.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/YankRequest"}
+      responses:
+        "204": {description: "Yanked, or yanked already with this reason."}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "501": {$ref: "#/components/responses/Unavailable"}
+        "503":
+          description: >-
+            The registry did not serve the new entry of the yank within the visibility timeout, or
+            the index did not answer; try again after Retry-After. Code UNAVAILABLE.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+    delete:
+      tags: [repos]
+      operationId: unyankVersion
+      summary: >-
+        Unyank a version of a hosted pypi repo (write): an entry of the package's journal and an
+        audit row pypi.yank; a version that is not yanked appends nothing.
+      responses:
+        "204": {description: "Unyanked, or not yanked."}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "501": {$ref: "#/components/responses/Unavailable"}
+        "503":
+          description: >-
+            The registry did not serve the new entry within the visibility timeout, or the index
+            did not answer; try again after Retry-After. Code UNAVAILABLE.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+  /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/attachments:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/package"
+      - name: version
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      tags: [repos]
+      operationId: listAttachments
+      summary: >-
+        The attachments of a version (read): the signatures, SBOMs, scan reports and attestations
+        of its variants' referrers, as the index has them, newest first, each labelled with its
+        verification against the operator's trust. Every result is kept: the list is their history.
+      parameters:
+        - name: variant
+          in: query
+          description: Only this variant; empty for a format without variants.
+          schema: {type: string}
+        - name: kind
+          in: query
+          description: Only the attachments of this kind.
+          schema: {type: string, enum: [signature, sbom, scan, provenance, attestation, other]}
+        - name: predicateType
+          in: query
+          description: Only the attachments of this predicate type, as written.
+          schema: {type: string}
+        - name: verified
+          in: query
+          description: true keeps the verified attachments, false the others.
+          schema: {type: boolean}
+        - name: limit
+          in: query
+          description: At most this many, the newest; 1000 by default and at most.
+          schema: {type: integer, minimum: 1, maximum: 1000}
+      responses:
+        "200":
+          description: The attachments.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AttachmentList"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/repos/{format}/{repo}/versions:delete:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+    post:
+      tags: [repos]
+      operationId: deleteVersions
+      summary: >-
+        Delete versions in a batch (delete): each item under its own lock, with the conditions of
+        the single delete, and a result per item; not all-or-nothing, and a rerun is idempotent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/BatchDeleteRequest"}
+      responses:
+        "200":
+          description: What became of each item, in the order of the request.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BatchDeleteResult"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "501": {$ref: "#/components/responses/Unavailable"}
+  /api/v1/repos/{format}/{repo}/upstream-cache:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+    delete:
+      tags: [repos]
+      operationId: purgeUpstreamCache
+      summary: >-
+        Drop a proxy repo's cache of its upstream's documents, or of one name (manage); the next
+        read asks the upstream again. What the repo fetched stays.
+      parameters:
+        - name: name
+          in: query
+          description: Only the documents of this package name.
+          schema: {type: string}
+      responses:
+        "204": {description: Dropped.}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/repos/{format}/{repo}/prefetch:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+    post:
+      tags: [repos]
+      operationId: prefetch
+      summary: >-
+        Fetch versions of a list of names into a proxy repo before a client asks for them
+        (manage), each as a miss would, or the images of a list of references into an oci proxy
+        repo, each as a pull would; what the repo holds is held, and a rerun is idempotent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PrefetchRequest"}
+      responses:
+        "200":
+          description: >-
+            A result per version, and per name that failed before its versions, in the order of
+            the names; of an oci repo, per image, platform and blob not held, in the order of the
+            images.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PrefetchResult"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "501": {$ref: "#/components/responses/Unavailable"}
+  /api/v1/repos/{format}/{repo}/deploy-tokens:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+    get:
+      tags: [tokens]
+      operationId: listDeployTokens
+      summary: The deploy tokens of a repo (manage).
+      responses:
+        "200":
+          description: The tokens, in the order of their creation; never a secret.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TokenList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      tags: [tokens]
+      operationId: createDeployToken
+      summary: Create a deploy token of the repo (manage); the answer has its secret, once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/TokenRequest"}
+      responses:
+        "201":
+          description: The token and its secret.
+          headers:
+            Location: {$ref: "#/components/headers/Location"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreatedToken"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /api/v1/repos/{format}/{repo}/deploy-tokens/{id}:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/id"
+    delete:
+      tags: [tokens]
+      operationId: revokeDeployToken
+      summary: Revoke a deploy token (manage); a revoked one again is 204.
+      responses:
+        "204": {description: Revoked.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/users:
+    get:
+      tags: [users]
+      operationId: listUsers
+      summary: A page of the live users, by name (admin).
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: The page.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/UserList"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [users]
+      operationId: createUser
+      summary: Create a local user (admin).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UserRequest"}
+      responses:
+        "201":
+          description: The user.
+          headers:
+            Location: {$ref: "#/components/headers/Location"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/User"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /api/v1/users/{user}:
+    parameters:
+      - $ref: "#/components/parameters/user"
+    get:
+      tags: [users]
+      operationId: getUser
+      summary: One live user (admin).
+      responses:
+        "200":
+          description: The user.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/User"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      tags: [users]
+      operationId: updateUser
+      summary: Change the name and disabled (admin).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UserPatch"}
+      responses:
+        "200":
+          description: The user as it is then.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/User"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+    delete:
+      tags: [users]
+      operationId: deleteUser
+      summary: Delete a user (admin); its tokens are revoked and its bindings deleted.
+      responses:
+        "204": {description: Deleted.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /api/v1/users/{user}/password:
+    parameters:
+      - $ref: "#/components/parameters/user"
+    post:
+      tags: [users]
+      operationId: setPassword
+      summary: Set the password of a user (admin).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PasswordRequest"}
+      responses:
+        "204": {description: Set.}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/users/{user}/tokens:
+    parameters:
+      - $ref: "#/components/parameters/user"
+    get:
+      tags: [tokens]
+      operationId: listTokens
+      summary: The personal access tokens of a user (the user, or admin).
+      responses:
+        "200":
+          description: The tokens, in the order of their creation; never a secret.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TokenList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      tags: [tokens]
+      operationId: createToken
+      summary: Create a personal access token of a user; the answer has its secret, once.
+      description: >-
+        Only a password creates one: a request whose credential is a personal access token,
+        with scopes or without, or a deploy token is 403.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/TokenRequest"}
+      responses:
+        "201":
+          description: The token and its secret.
+          headers:
+            Location: {$ref: "#/components/headers/Location"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreatedToken"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /api/v1/users/{user}/tokens/{id}:
+    parameters:
+      - $ref: "#/components/parameters/user"
+      - $ref: "#/components/parameters/id"
+    delete:
+      tags: [tokens]
+      operationId: revokeToken
+      summary: Revoke a personal access token; a revoked one again is 204.
+      responses:
+        "204": {description: Revoked.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/bindings:
+    get:
+      tags: [bindings]
+      operationId: listBindings
+      summary: A page of the bindings, by id (admin).
+      parameters:
+        - name: principal
+          in: query
+          description: Only the bindings of user:<name> or user:<uid>.
+          schema: {type: string}
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: The page.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BindingList"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [bindings]
+      operationId: createBinding
+      summary: Create a binding (admin).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/BindingRequest"}
+      responses:
+        "201":
+          description: The binding.
+          headers:
+            Location: {$ref: "#/components/headers/Location"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Binding"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /api/v1/bindings/{id}:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    delete:
+      tags: [bindings]
+      operationId: deleteBinding
+      summary: Delete a binding (admin); not the last admin binding of an enabled user.
+      responses:
+        "204": {description: Deleted.}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /api/v1/audit:
+    get:
+      tags: [audit]
+      operationId: listAudit
+      summary: A page of the audit log, newest first (admin).
+      parameters:
+        - name: repo
+          in: query
+          description: <format>/<name>.
+          schema: {type: string}
+        - name: principal
+          in: query
+          description: user:<name>, user:<uid>, token:<id> or anonymous.
+          schema: {type: string}
+        - name: action
+          in: query
+          schema: {type: string}
+        - name: state
+          in: query
+          description: The outcome; only the row of a registry write is ever another than ok.
+          schema: {type: string, enum: [ok, pending, failed, unknown]}
+        - name: since
+          in: query
+          description: Inclusive.
+          schema: {type: string, format: date-time}
+        - name: until
+          in: query
+          description: Exclusive.
+          schema: {type: string, format: date-time}
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: The page.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AuditList"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /api/v1/whoami:
+    get:
+      tags: [meta]
+      operationId: whoami
+      summary: The caller's principal; without credentials 401.
+      responses:
+        "200":
+          description: The principal.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Whoami"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/v1/info:
+    get:
+      tags: [meta]
+      operationId: getInfo
+      summary: The server's build and facts, and the caller; to anyone.
+      description: >-
+        What a client needs before it signs in: the build, server.externalURL,
+        auth.anonymousRead, the format plugins the server serves, how a person signs in, and the
+        caller with whether its credential reaches the admin role. Without credentials it is 200
+        with the anonymous caller; credentials that are refused are 401, as on every route.
+      security:
+        - {}
+        - basic: []
+        - bearer: []
+      responses:
+        "200":
+          description: The server and the caller.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Info"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/v1/bootstrap:
+    post:
+      tags: [users]
+      operationId: bootstrap
+      summary: The first admin, for the bootstrap token; 404 once an admin exists.
+      description: >-
+        Creates the first admin, with the admin binding on */*, for the one-time bootstrap token
+        that serve made valid at start while no enabled user had an admin binding. The token is
+        the credential: no other is needed. Once an admin exists, every request is 404.
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/BootstrapRequest"}
+      responses:
+        "201":
+          description: The admin.
+          headers:
+            Location: {$ref: "#/components/headers/Location"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/User"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "403":
+          description: The token is refused, or it is the token and it was used or expired.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "429":
+          description: Too many wrong tokens from the client address; try again after Retry-After.
+          headers:
+            Retry-After:
+              description: Seconds to wait.
+              schema: {type: integer}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+  /api/v1/openapi.yaml:
+    get:
+      tags: [meta]
+      operationId: openAPI
+      summary: This document.
+      security:
+        - {}
+      responses:
+        "200":
+          description: The OpenAPI document.
+          content:
+            application/yaml:
+              schema: {type: string}
+components:
+  securitySchemes:
+    basic:
+      type: http
+      scheme: basic
+      description: A local user's name and its password or personal access token, or a deploy token under any user name (deploy:<deploy token>).
+    bearer:
+      type: http
+      scheme: bearer
+      description: A personal access token (ljs_pat_…) or a deploy token (ljs_dep_…).
+  headers:
+    Location:
+      description: The path of the created resource.
+      schema: {type: string}
+  parameters:
+    format:
+      name: format
+      in: path
+      required: true
+      schema: {type: string}
+    repo:
+      name: repo
+      in: path
+      required: true
+      schema: {type: string}
+    id:
+      name: id
+      in: path
+      required: true
+      schema: {type: integer, format: int64, minimum: 1}
+    package:
+      name: name
+      in: path
+      required: true
+      description: The package name in the format's spelling; a raw path escapes its / as %2F.
+      schema: {type: string}
+    user:
+      name: user
+      in: path
+      required: true
+      description: The user's name or its uid.
+      schema: {type: string}
+    limit:
+      name: limit
+      in: query
+      description: The size of the page, 100 when absent.
+      schema: {type: integer, minimum: 1, maximum: 1000}
+    cursor:
+      name: cursor
+      in: query
+      description: The next of the page before; opaque.
+      schema: {type: string}
+  responses:
+    Invalid:
+      description: The request breaks a rule; the message names the field.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Unauthorized:
+      description: No credentials, or credentials that are refused; code UNAUTHENTICATED.
+      headers:
+        WWW-Authenticate:
+          description: Basic realm="lajstrom".
+          schema: {type: string}
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Forbidden:
+      description: The caller may not do this; code FORBIDDEN.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    NotFound:
+      description: No such resource, or a repo the caller may not read.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Conflict:
+      description: The resource exists, or the change would break a rule of the server.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    PreconditionFailed:
+      description: >-
+        The version changed since the client read it, or was published after the cut-off; code
+        CONFLICT. Nothing was deleted.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Unavailable:
+      description: Not enabled in this server; code UNAVAILABLE.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [NOT_FOUND, CONFLICT, UNAUTHENTICATED, FORBIDDEN, INVALID, UNAVAILABLE, INTERNAL]
+            message: {type: string}
+    Repo:
+      type: object
+      required: [format, name, kind, anonymousRead, createdAt, updatedAt]
+      properties:
+        format: {type: string}
+        name: {type: string}
+        registry: {type: string, description: Absent on a group.}
+        kind: {type: string, enum: [hosted, proxy, group]}
+        anonymousRead: {type: boolean}
+        policy:
+          anyOf:
+            - {$ref: "#/components/schemas/Policy"}
+            - {type: "null"}
+          description: Absent on a group.
+        upstream:
+          $ref: "#/components/schemas/Upstream"
+          description: A proxy repo only, with every key; absent on another kind.
+        group:
+          $ref: "#/components/schemas/Group"
+          description: A group only, with members and merge, or members and paths on a group of oci repos; absent on another kind.
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    Group:
+      type: object
+      description: >-
+        A group's settings (docs/spec/proxy-and-group.md §2.3): its members, read in order, and
+        the names a hosted member does not hide; or, on a group of oci repos (§12.1), its
+        members and the routes that send each path to one of them.
+      required: [members]
+      additionalProperties: false
+      properties:
+        members:
+          type: array
+          minItems: 1
+          maxItems: 16
+          description: Repos of the group's format by name, in order; each hosted or proxy, at most one hosted but in a group of oci repos.
+          items: {type: string}
+        merge:
+          type: array
+          maxItems: 256
+          description: Name patterns whose versions are merged across members even when the hosted member holds the name; not on a group of oci repos.
+          items: {type: string, minLength: 1, maxLength: 256}
+        paths:
+          type: object
+          description: >-
+            A group of oci repos only, required there: each member's name to the patterns of the
+            paths it serves, "<path>", "<prefix>/*" or "*". Every member has one at least, no
+            pattern is on two members, 256 in all at most; the most specific pattern that matches
+            a path routes it.
+          additionalProperties:
+            type: array
+            minItems: 1
+            items: {type: string, minLength: 1, maxLength: 256}
+    Upstream:
+      type: object
+      description: >-
+        A proxy repo's settings (docs/spec/proxy-and-group.md §2.2). The upstream is named as the
+        configuration names it (upstreams[].name); its URL and credentials are configuration and
+        never part of the API. Absent keys take their defaults.
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: {type: string, description: "One of upstreams[].name of the repo's format."}
+        metadataTTL: {type: string, description: "How long a cached document is used, a duration from 0s to 168h; default 10m.", examples: [10m]}
+        negativeTTL: {type: string, description: "How long a name the upstream does not have is remembered, 0s to 24h; default 2m.", examples: [2m]}
+        offline: {type: boolean, description: "Never ask the upstream; default false."}
+        allow:
+          type: array
+          maxItems: 256
+          description: "Name patterns, * matching any run: a name is fetched when one matches; empty, every name."
+          items: {type: string, minLength: 1, maxLength: 256}
+        deny:
+          type: array
+          maxItems: 256
+          description: Name patterns that are never fetched; deny wins over allow.
+          items: {type: string, minLength: 1, maxLength: 256}
+    Policy:
+      type: object
+      description: >-
+        The policy of a repo: the keys the server reads, with their defaults when absent
+        (maxFileSize by format: npm 512 MiB, pypi and maven 4 GiB, apt and raw 8 GiB, oci 16 GiB;
+        blobRedirect auto, maven.sessionTimeout 30m, maven.maxSessionFiles 256, maven.versionPolicy
+        release). Any other key is 400.
+      additionalProperties: false
+      properties:
+        maxFileSize:
+          type: integer
+          format: int64
+          minimum: 1
+          description: The largest file an upload, or a /v2 blob, may carry, in bytes; on every repo, oci included.
+        blobRedirect: {type: string, enum: [auto, never]}
+        maven:
+          type: object
+          description: A maven repo only.
+          additionalProperties: false
+          properties:
+            sessionTimeout:
+              type: string
+              description: How long a publication session lives after its last request, a duration from 1m to 24h.
+              examples: [45m]
+            maxSessionFiles:
+              type: integer
+              minimum: 1
+              maximum: 999
+              description: >-
+                How many files a publication session of a deploy stores, signatures included,
+                checksum files and maven-metadata.xml not; the next is 400.
+            versionPolicy:
+              type: string
+              enum: [release, snapshot]
+              description: >-
+                Which versions a deploy may add: release versions, or the builds of SNAPSHOT
+                versions, each deploy one more build under its own tag. The other kind is 400; a
+                change applies to the deploys after it.
+    PolicyPatch:
+      type: object
+      description: >-
+        An RFC 7396 merge patch of the policy: a member sets its key, null removes it, maven
+        merges key by key. The policy that results is checked as a whole.
+      additionalProperties: false
+      properties:
+        maxFileSize: {type: [integer, "null"], format: int64, minimum: 1}
+        blobRedirect: {type: [string, "null"], enum: [auto, never, null]}
+        maven:
+          type: [object, "null"]
+          additionalProperties: false
+          properties:
+            sessionTimeout: {type: [string, "null"]}
+            maxSessionFiles: {type: [integer, "null"], minimum: 1, maximum: 999}
+            versionPolicy: {type: [string, "null"], enum: [release, snapshot, null]}
+    RepoList:
+      type: object
+      required: [repos]
+      properties:
+        repos:
+          type: array
+          items: {$ref: "#/components/schemas/Repo"}
+    CreateRepo:
+      type: object
+      required: [format, name]
+      additionalProperties: false
+      properties:
+        format: {type: string}
+        name: {type: string}
+        registry: {type: string, description: Required but on a group, which has none.}
+        kind: {type: string, enum: [hosted, proxy, group]}
+        anonymousRead: {type: boolean}
+        policy:
+          anyOf:
+            - {$ref: "#/components/schemas/Policy"}
+            - {type: "null"}
+          description: None on a group.
+        upstream:
+          anyOf:
+            - {$ref: "#/components/schemas/Upstream"}
+            - {type: "null"}
+          description: Required on a proxy repo, refused on another kind.
+        group:
+          anyOf:
+            - {$ref: "#/components/schemas/Group"}
+            - {type: "null"}
+          description: Required on a group, refused on another kind.
+    RepoPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        anonymousRead: {type: boolean}
+        policy:
+          anyOf:
+            - {$ref: "#/components/schemas/PolicyPatch"}
+            - {type: "null"}
+        upstream:
+          type: object
+          description: >-
+            A proxy repo only: an RFC 7396 merge patch of its settings (the keys of Upstream),
+            checked whole after the merge; allow and deny are replaced whole. Changing name needs
+            the admin role and drops the repo's cache of the old upstream; the name the repo
+            has, sent back, is no change. The other keys need manage.
+        group:
+          type: object
+          description: >-
+            A group only: an RFC 7396 merge patch of its settings (the keys of Group), checked
+            whole after the merge; each list is replaced whole, and a key of paths set to null
+            is removed. Changing members, their order included, or paths needs the admin role;
+            the members and paths the group has, sent back, are no change. merge needs manage.
+        kind:
+          type: string
+          enum: [hosted]
+          description: >-
+            Alone in the body, by the admin role: a proxy becomes a hosted repo that keeps what it
+            holds, its dist-tags and deprecations written to its journal; 409 while a fetch runs
+            or when a group of it has a hosted member. On a hosted repo it resumes a conversion
+            that stopped half way, else changes nothing.
+    ReindexRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        prune: {type: boolean}
+        verify: {type: boolean}
+    ReindexRun:
+      type: object
+      required: [id, state, source, principal, replica, allRepos, prune, verify, startedAt, heartbeatAt, finishedAt, report]
+      properties:
+        id: {type: integer, format: int64}
+        state: {type: string}
+        source: {type: string}
+        principal: {type: string}
+        replica: {type: string}
+        allRepos: {type: boolean}
+        prune: {type: boolean}
+        verify: {type: boolean}
+        startedAt: {type: string, format: date-time}
+        heartbeatAt: {type: string, format: date-time}
+        finishedAt: {type: [string, "null"], format: date-time}
+        error: {type: string}
+        report:
+          description: >-
+            The repo's part of the run's report; null while the run is running, and for a run of
+            every repo that stopped before it reached the repo.
+          type: [object, "null"]
+          properties:
+            deletedPending:
+              description: >-
+                The tags the registry still lists whose manifests were deleted through Lajstrom
+                less than reconcile.graceAge before the run, on a registry not classified strong:
+                not indexed again. Absent from the report of a run of a release before it.
+              type: integer
+            repairedReferrers:
+              description: >-
+                The sha256-<hex> indexes that lacked referrers the audit log has as pushed and the
+                registry still has, or were missing, and that Lajstrom pushed again with them: runs of
+                the reconcile loop and with verify, on a registry without the referrers API. null in
+                the report of a run of a release before it.
+              type: [array, "null"]
+              items: {$ref: "#/components/schemas/RepairedReferrersIndex"}
+    RepairedReferrersIndex:
+      description: A subject's sha256-<hex> index that a reindex run pushed again with the referrers it lacked.
+      type: object
+      required: [repository, subject, index, added]
+      properties:
+        repository: {type: string, description: The OCI repository of the subject, below the repo's base.}
+        subject: {type: string}
+        index: {type: string, description: The digest of the index pushed.}
+        added:
+          description: The referrers it lacked, in the order of their pushes.
+          type: array
+          items: {type: string}
+    Token:
+      type: object
+      required: [id, kind, name, scopes, expiresAt, lastUsedAt, createdAt, revokedAt, hashPrefix]
+      properties:
+        id: {type: integer, format: int64}
+        kind: {type: string, enum: [pat, deploy]}
+        user: {type: string, description: The owner of a personal access token.}
+        repo: {type: string, description: The <format>/<name> of a deploy token.}
+        name: {type: string}
+        scopes:
+          type: array
+          items: {type: string, enum: [read, write]}
+        expiresAt: {type: [string, "null"], format: date-time}
+        lastUsedAt: {type: [string, "null"], format: date-time}
+        createdAt: {type: string, format: date-time}
+        revokedAt: {type: [string, "null"], format: date-time}
+        hashPrefix: {type: string}
+    CreatedToken:
+      allOf:
+        - $ref: "#/components/schemas/Token"
+        - type: object
+          required: [secret]
+          properties:
+            secret: {type: string, description: Shown this once.}
+    TokenList:
+      type: object
+      required: [tokens]
+      properties:
+        tokens:
+          type: array
+          items: {$ref: "#/components/schemas/Token"}
+    TokenRequest:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: {type: string}
+        scopes:
+          type: array
+          items: {type: string, enum: [read, write]}
+        expiresAt: {type: string, format: date-time}
+        expiresIn: {type: string, description: A number of days (30d) or a duration (12h).}
+    User:
+      type: object
+      required: [uid, name, kind, disabled, createdAt]
+      properties:
+        uid: {type: string, format: uuid}
+        name: {type: string}
+        kind: {type: string, enum: [local]}
+        disabled: {type: boolean}
+        createdAt: {type: string, format: date-time}
+    UserList:
+      type: object
+      required: [users]
+      properties:
+        users:
+          type: array
+          items: {$ref: "#/components/schemas/User"}
+        next: {type: string}
+    UserRequest:
+      type: object
+      required: [name, password]
+      additionalProperties: false
+      properties:
+        name: {type: string}
+        password: {$ref: "#/components/schemas/Password"}
+        admin: {type: boolean}
+    BootstrapRequest:
+      type: object
+      required: [token, name, password]
+      additionalProperties: false
+      properties:
+        token: {type: string}
+        name: {type: string}
+        password: {$ref: "#/components/schemas/Password"}
+    UserPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: {type: string}
+        disabled: {type: boolean}
+    PasswordRequest:
+      type: object
+      required: [password]
+      additionalProperties: false
+      properties:
+        password: {$ref: "#/components/schemas/Password"}
+    Password:
+      type: string
+      minLength: 8
+      maxLength: 1024
+      description: A password of 8 to 1024 bytes of UTF-8; the server counts bytes, and the lengths here count characters.
+    Binding:
+      type: object
+      required: [id, principal, role, repoMask, createdAt]
+      properties:
+        id: {type: integer, format: int64}
+        principal: {type: string, description: "user:<uid>, or group:<name> (docs/spec/rbac.md §8)."}
+        name: {type: string, description: "The user's name now; absent for a group."}
+        role: {type: string, enum: [reader, writer, maintainer, admin]}
+        repoMask: {type: string}
+        createdAt: {type: string, format: date-time}
+    BindingList:
+      type: object
+      required: [bindings]
+      properties:
+        bindings:
+          type: array
+          items: {$ref: "#/components/schemas/Binding"}
+        next: {type: string}
+    BindingRequest:
+      type: object
+      required: [principal, role, repoMask]
+      additionalProperties: false
+      properties:
+        principal: {type: string, description: "user:<name>, user:<uid>, or group:<name>, which need not have members (docs/spec/rbac.md §8)."}
+        role: {type: string, enum: [reader, writer, maintainer, admin]}
+        repoMask: {type: string}
+    AuditEntry:
+      type: object
+      required: [id, at, principal, action, state]
+      properties:
+        id: {type: integer, format: int64}
+        at: {type: string, format: date-time}
+        principal: {type: string}
+        principalName: {type: string}
+        action: {type: string}
+        repo: {type: string}
+        subject: {type: string}
+        digest: {type: string}
+        ip: {type: string}
+        details: {type: object}
+        state: {type: string, enum: [ok, pending, failed, unknown]}
+        error: {type: string, description: Why a failed row failed.}
+    AuditList:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          items: {$ref: "#/components/schemas/AuditEntry"}
+        next: {type: string}
+    Package:
+      type: object
+      required: [name, createdAt]
+      properties:
+        name: {type: string, description: The name in the format's spelling.}
+        createdAt: {type: string, format: date-time, description: The publish time of its first version.}
+    PackageList:
+      type: object
+      required: [packages]
+      properties:
+        packages:
+          type: array
+          items: {$ref: "#/components/schemas/Package"}
+        next: {type: string}
+    Version:
+      type: object
+      required: [version, publishedAt, lastModified, variants, pointers]
+      properties:
+        version: {type: string}
+        publishedAt:
+          type: string
+          format: date-time
+          description: The publish time of its first variant, from the manifest; the order of the list.
+        lastModified:
+          type: string
+          format: date-time
+          description: The publish time of its newest variant, which If-Unmodified-Since and the cut-off compare.
+        variants:
+          type: array
+          items: {$ref: "#/components/schemas/Variant"}
+        pointers:
+          type: array
+          description: What names the version and moves; a conditional delete refuses it unless forced.
+          items: {$ref: "#/components/schemas/Pointer"}
+        yanked: {$ref: "#/components/schemas/Yank"}
+    Yank:
+      description: The yank of a pypi version (PEP 592); absent when the version is not yanked.
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, description: Empty when the yank gave none.}
+    YankRequest:
+      description: The optional body of a yank.
+      type: object
+      properties:
+        reason:
+          type: [string, "null"]
+          maxLength: 4096
+          description: Why the version is yanked, at most 4096 bytes of UTF-8; absent, null or empty for none.
+    Variant:
+      type: object
+      required: [variant, tag, digest, publishedAt]
+      properties:
+        variant: {type: string, description: Empty for a format without variants.}
+        tag: {type: string}
+        digest: {type: string, description: The manifest digest, the entity tag of If-Match.}
+        publishedAt: {type: string, format: date-time}
+    Pointer:
+      type: object
+      required: [kind, name]
+      properties:
+        kind: {type: string, enum: [dist-tag]}
+        name: {type: string}
+    VersionDetail:
+      description: "One version: its row of the version list, its variants in detail and its OCI repository."
+      type: object
+      required: [version, publishedAt, lastModified, variants, pointers, ociRepository]
+      properties:
+        version: {type: string}
+        publishedAt:
+          type: string
+          format: date-time
+          description: The publish time of its first variant, whatever variant keeps.
+        lastModified:
+          type: string
+          format: date-time
+          description: The publish time of its newest variant, whatever variant keeps.
+        variants:
+          type: array
+          items: {$ref: "#/components/schemas/VariantDetail"}
+        pointers:
+          type: array
+          items: {$ref: "#/components/schemas/Pointer"}
+        yanked: {$ref: "#/components/schemas/Yank"}
+        ociRepository:
+          type: string
+          description: <format>/<repo>/<package path>, the repository of its manifests on /v2.
+    AttachmentList:
+      description: The attachments of a version, newest first.
+      type: object
+      required: [attachments, truncated]
+      properties:
+        attachments:
+          type: array
+          items: {$ref: "#/components/schemas/Attachment"}
+        truncated:
+          type: boolean
+          description: There are more attachments than the limit; the oldest are left out.
+    Attachment:
+      description: >-
+        One attachment of a version: one layer of a referrer of one of its variants, with its label
+        (docs/spec/manifest-profile.md §6).
+      type: object
+      required: [variant, subject, digest, layer, mediaType, artifactType, kind, predicateType, size, annotations, verification, indexedAt]
+      properties:
+        variant: {type: string, description: Empty for a format without variants.}
+        subject: {type: string, description: The variant's manifest digest.}
+        digest: {type: string, description: The referrer manifest's digest.}
+        tag: {type: string, description: "cosign's legacy tag, sha256-<hex>.sig, .att or .sbom; absent for a referrer pushed by digest."}
+        layer: {type: string, description: The digest of the attachment's layer; empty for a manifest without layers.}
+        mediaType: {type: string, description: The layer's media type.}
+        artifactType: {type: string, description: The referrer's artifactType, else its config's media type.}
+        kind:
+          type: string
+          description: What it is; a value this list does not name is shown as it is.
+          enum: [signature, sbom, scan, provenance, attestation, other]
+        predicateType: {type: string, description: The predicate type of its statement or cosign's annotation; empty when none.}
+        size: {type: integer, format: int64, description: The layer's size.}
+        annotations:
+          type: object
+          description: The referrer manifest's annotations.
+          additionalProperties: {type: string}
+        tool: {type: string, description: lajstrom.attachment.tool, when set.}
+        toolVersion: {type: string, description: lajstrom.attachment.toolVersion, when set.}
+        database: {type: string, description: lajstrom.attachment.database, when set.}
+        input: {type: string, description: lajstrom.attachment.input, the SBOM a scan was computed from, when it is a digest.}
+        verification:
+          type: string
+          description: >-
+            verified (a trusted key signed it, for its predicate type, and what it signed names the
+            variant), untrusted, unsigned, invalid or unsupported (keyless, notation, a message
+            signature, a layer above attachments.maxBlobSize).
+          enum: [verified, untrusted, unsigned, invalid, unsupported]
+        signedBy: {type: string, description: The name of the trust entry whose key verified it.}
+        reason: {type: string, description: Why it is not verified.}
+        createdAt: {type: string, format: date-time, description: The referrer's org.opencontainers.image.created, when it has one.}
+        indexedAt: {type: string, format: date-time, description: When ingest or reindex last wrote or saw the row.}
+    VariantDetail:
+      description: One manifest of a version, with its row of the index and its files.
+      type: object
+      required: [variant, tag, digest, publishedAt, artifactType, attrs, metadata, degraded, indexedAt, files]
+      properties:
+        variant: {type: string, description: Empty for a format without variants.}
+        tag: {type: string}
+        digest: {type: string, description: The manifest digest.}
+        publishedAt: {type: string, format: date-time}
+        artifactType: {type: string}
+        attrs:
+          type: object
+          description: The manifest's lajstrom.* annotations by their full key.
+          additionalProperties: {type: string}
+        metadata:
+          description: The metadata layer; null when there is none or it was too large to keep.
+          type: [object, "null"]
+        degraded: {type: boolean, description: The row came from the annotations alone.}
+        indexedAt:
+          type: string
+          format: date-time
+          description: When ingest or reindex last wrote or saw the row.
+        files:
+          type: array
+          description: The file layers, in manifest order.
+          items: {$ref: "#/components/schemas/File"}
+    File:
+      description: One file layer of a manifest.
+      type: object
+      required: [name, mediaType, digest, size, attrs]
+      properties:
+        name: {type: string}
+        mediaType: {type: string}
+        digest: {type: string}
+        size: {type: integer, format: int64}
+        attrs:
+          type: object
+          description: The layer's annotations.
+          additionalProperties: {type: string}
+    VersionList:
+      type: object
+      required: [versions]
+      properties:
+        versions:
+          type: array
+          items: {$ref: "#/components/schemas/Version"}
+        next: {type: string}
+    BatchDeleteRequest:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items: {$ref: "#/components/schemas/BatchDeleteItem"}
+        cutoff:
+          type: string
+          format: date-time
+          description: A version published after it is not deleted (young).
+        dryRun:
+          type: boolean
+          description: Check every item and delete nothing; deleted then means it would be.
+        job:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          description: The job id for the audit rows; a new one when absent.
+    BatchDeleteItem:
+      type: object
+      required: [package, version, digests]
+      additionalProperties: false
+      properties:
+        package: {type: string, description: The name in the format's spelling.}
+        version: {type: string}
+        digests:
+          type: array
+          minItems: 1
+          description: The digests of every variant of the version, as the client read them.
+          items: {type: string}
+    BatchDeleteResult:
+      type: object
+      required: [job, dryRun, results]
+      properties:
+        job: {type: string, description: In details.job of every audit row of the batch.}
+        dryRun: {type: boolean}
+        results:
+          type: array
+          items: {$ref: "#/components/schemas/BatchDeleteItemResult"}
+    BatchDeleteItemResult:
+      type: object
+      required: [package, version, status]
+      properties:
+        package: {type: string}
+        version: {type: string}
+        status:
+          type: string
+          enum: [deleted, changed, protected, young, gone, error]
+        message: {type: string, description: Why, for every status but deleted.}
+        digests:
+          type: array
+          description: The digests of the version now, for changed.
+          items: {type: string}
+        lastModified:
+          type: string
+          format: date-time
+          description: The publish time of its newest variant, for young.
+        pointers:
+          type: array
+          description: What names the version, for protected.
+          items: {$ref: "#/components/schemas/Pointer"}
+    PrefetchRequest:
+      type: object
+      description: names and allVersions of a format's proxy repo; images and platforms of an oci one.
+      additionalProperties: false
+      properties:
+        names:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: Package names in the format's spelling.
+          items: {type: string, minLength: 1}
+        allVersions:
+          type: boolean
+          description: >-
+            Every version the upstream lists; without it the versions its pointers name (npm's
+            dist-tags), or the newest when they name none.
+        images:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: >-
+            References below an oci proxy repo, <path>[:<tag>][@<digest>]: latest without a tag
+            or a digest, the digest when both are given.
+          items: {type: string, minLength: 1}
+        platforms:
+          type: array
+          description: >-
+            The platforms of an index to fetch, os/architecture[/variant]; required for a
+            reference that names an index, not used for one that names a manifest.
+          items: {type: string, minLength: 1}
+    PrefetchResult:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items: {$ref: "#/components/schemas/PrefetchItemResult"}
+    PrefetchItemResult:
+      type: object
+      required: [name, status]
+      properties:
+        name: {type: string}
+        version: {type: string, description: Absent for a name that failed before its versions.}
+        variant: {type: string}
+        status:
+          type: string
+          enum: [fetched, held, shared, failed]
+          description: >-
+            fetched by this request; held already; shared, fetched meanwhile by another request
+            or replica; failed.
+        httpStatus:
+          type: integer
+          description: For failed, the status a request of the file would have had.
+        message: {type: string, description: Why, for failed.}
+        kind:
+          type: string
+          enum: [index, manifest, blob]
+          description: >-
+            Of an oci repo: what a reference names, an index or a manifest; a platform's
+            manifest; a blob. Absent for an image that failed before what it names was known.
+        platform: {type: string, description: Of an oci repo, the platform of a manifest or a blob of an index.}
+        digest: {type: string, description: Of an oci repo, the digest of the index, manifest or blob.}
+        bytes:
+          type: integer
+          format: int64
+          description: Of an oci repo, what the request got from the upstream; a manifest's with its blobs.
+        retryAfter:
+          type: integer
+          description: For a failed 503, when to ask again, in seconds.
+    Whoami:
+      type: object
+      required: [principal, kind, name]
+      properties:
+        principal: {type: string}
+        kind: {type: string, enum: [user, token]}
+        name: {type: string}
+        uid: {type: string, format: uuid}
+        groups:
+          type: array
+          items: {type: string}
+          description: A user's groups that count now, from its latest OIDC login (docs/spec/rbac.md §8).
+    Info:
+      description: "What a client needs before it signs in, and the caller."
+      type: object
+      required: [version, commit, date, externalURL, anonymousRead, formats, authModes, caller]
+      properties:
+        version: {type: string, description: The release version; dev for an unversioned build.}
+        commit: {type: string, description: The short commit hash; empty when unknown.}
+        date: {type: string, description: The build time in RFC 3339; empty when unknown.}
+        externalURL: {type: string, description: "server.externalURL; empty on the dev stack when it leaves it empty."}
+        anonymousRead: {type: boolean, description: "auth.anonymousRead, the server-wide switch."}
+        formats:
+          type: array
+          description: The format plugins the server serves, by name; oci repos need none.
+          items: {$ref: "#/components/schemas/FormatInfo"}
+        authModes:
+          type: array
+          description: How a person signs in; the OIDC login adds oidc.
+          items: {type: string, enum: [password, token, oidc]}
+        caller: {$ref: "#/components/schemas/Caller"}
+    FormatInfo:
+      description: "A format plugin the server serves, and the artifact type of its manifests."
+      type: object
+      required: [name, artifactType]
+      properties:
+        name: {type: string}
+        artifactType: {type: string}
+    Caller:
+      description: "The request's principal as whoami answers it, or anonymous, and whether its credential reaches the admin role."
+      type: object
+      required: [principal, kind, name, admin]
+      properties:
+        principal: {type: string}
+        kind: {type: string, enum: [user, token, anonymous]}
+        name: {type: string}
+        uid: {type: string, format: uuid}
+        admin: {type: boolean, description: Whether the request's credential reaches the admin role.}
