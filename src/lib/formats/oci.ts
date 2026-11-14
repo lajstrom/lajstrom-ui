@@ -42,6 +42,7 @@ export const oci: FormatSpec = {
   install(ctx, pkg, version) {
     return [{ id: "pull", title: "docker", caption: "shell", shell: true, code: `docker pull ${ctx.host}/oci/${ctx.repo.name}/${pkg.name}:${version?.version ?? "latest"}` }];
   },
+  filePath: () => null,
   fileRole: () => "Layer",
   metadataRows: () => [],
 };

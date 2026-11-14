@@ -1,18 +1,13 @@
 // Builders that turn a compact description of a package version into what the API would return:
 // the manifest of docs/spec/manifest-profile.md with real sha256 digests, the tag of §4.2, the
-// package path of §4.1, the index rows and the protocol download paths of http-routing.md §3.
+// package path of §4.1 and the index rows.
 
-import type {
-  FileEntry,
-  FormatName,
-  OciDescriptor,
-  OciManifest,
-  Referrer,
-  VersionDetail,
-} from "@/api/types";
-import { normalizePypi, packagePath, tagFor } from "@/lib/profile";
+import type { FormatName, OciDescriptor, OciManifest } from "@/api/types";
+import { packagePath, tagFor } from "@/lib/profile";
 import { Rand } from "@/lib/prng";
 import { sha256Hex } from "@/lib/sha256";
+
+import type { MockFile, MockReferrer, MockVersion } from "./model";
 
 export const EMPTY_CONFIG: OciDescriptor = {
   mediaType: "application/vnd.oci.empty.v1+json",
@@ -69,28 +64,7 @@ function digestOf(s: string): string {
   return `sha256:${sha256Hex(s)}`;
 }
 
-/** The protocol path a client downloads a file from (http-routing.md §3). */
-export function downloadPath(spec: VersionSpec, file: FileSpec, firstLayerDigest: string): string {
-  const r = spec.repo;
-  switch (spec.format) {
-    case "raw":
-      return `/raw/${r}/${spec.name}?digest=${firstLayerDigest}`;
-    case "pypi":
-      return `/pypi/${r}/files/${normalizePypi(spec.name)}/${spec.version}/${file.name}`;
-    case "apt": {
-      const component = spec.attrs?.["deb.component"] ?? "main";
-      const pkg = spec.name;
-      const p = pkg.startsWith("lib") && pkg.length > 3 ? pkg.slice(0, 4) : pkg.slice(0, 1);
-      return `/apt/${r}/pool/${component}/${p}/${pkg}/${file.name}`;
-    }
-    case "maven": {
-      const [groupId = "", artifactId = ""] = spec.name.split(":");
-      return `/maven/${r}/${groupId.replaceAll(".", "/")}/${artifactId}/${spec.version}/${file.name}`;
-    }
-  }
-}
-
-function referrer(kind: ReferrerSpec, subject: string, createdAt: string, rand: Rand): Referrer {
+function referrer(kind: ReferrerSpec, subject: string, createdAt: string, rand: Rand): MockReferrer {
   const at = new Date(new Date(createdAt).getTime() + rand.int(20, 400) * 1000).toISOString();
   const digest = digestOf(`${kind}:${subject}`);
   switch (kind) {
@@ -159,7 +133,7 @@ function referrer(kind: ReferrerSpec, subject: string, createdAt: string, rand: 
   }
 }
 
-export type BuiltVersion = VersionDetail & { packageName: string };
+export type BuiltVersion = MockVersion & { packageName: string };
 
 export function buildVersion(spec: VersionSpec, host: string): BuiltVersion {
   const variant = spec.variant ?? "";
@@ -212,17 +186,16 @@ export function buildVersion(spec: VersionSpec, host: string): BuiltVersion {
   const tag = tagFor(spec.version, variant);
   const nameOci = packagePath(spec.format, spec.name);
 
-  const files: FileEntry[] = spec.files.map((f, i) => ({
+  const files: MockFile[] = spec.files.map((f, i) => ({
     name: f.name,
     mediaType: f.mediaType,
     digest: layers[i]!.digest,
     size: f.size,
     attrs: layers[i]!.annotations ?? {},
-    path: downloadPath(spec, f, layers[0]!.digest),
   }));
 
   const referrerList = (spec.referrers ?? []).map((k) => referrer(k, digest, spec.createdAt, rand));
-  const count = (kind: Referrer["kind"]) => referrerList.filter((r) => r.kind === kind).length;
+  const count = (kind: MockReferrer["kind"]) => referrerList.filter((r) => r.kind === kind).length;
   const indexedAt = new Date(new Date(spec.createdAt).getTime() + rand.int(1, 3) * 1000).toISOString();
 
   return {

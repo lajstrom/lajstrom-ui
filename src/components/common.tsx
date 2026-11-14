@@ -218,18 +218,6 @@ export function ErrorState({ error, onRetry, className }: { error: unknown; onRe
   );
 }
 
-type PaginationProps = {
-  total: number;
-  limit: number;
-  shown: number;
-  next: string | null;
-  prev: string | null;
-  /** Index of the first row on this page, counted from 0. */
-  start: number;
-  onCursor: (cursor: string | undefined) => void;
-  noun?: string;
-};
-
 type CursorPaginationProps = {
   shown: number;
   /** The server's cursor of the page after this one; absent on the last page. */
@@ -263,21 +251,3 @@ export function CursorPagination({ shown, next, cursor, onCursor, noun = "items"
   );
 }
 
-export function Pagination({ total, shown, next, prev, start, onCursor, noun = "items" }: PaginationProps) {
-  if (total === 0 || (!next && !prev)) return null;
-  return (
-    <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-2 text-xs text-muted-foreground">
-      <span className="tabular">
-        {shown === total ? `${total} ${noun}` : `${start + 1}–${start + shown} of ${total} ${noun}`}
-      </span>
-      <div className="flex items-center gap-1">
-        <Button size="sm" disabled={!prev} onClick={() => onCursor(prev ?? undefined)}>
-          Previous
-        </Button>
-        <Button size="sm" disabled={!next} onClick={() => onCursor(next ?? undefined)}>
-          Next
-        </Button>
-      </div>
-    </div>
-  );
-}

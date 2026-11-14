@@ -145,11 +145,12 @@ export const handlers = [
     const sp = new URL(request.url).searchParams;
     return HttpResponse.json(
       db.listPackages(repo, {
+        prefix: sp.get("prefix") ?? undefined,
         q: sp.get("q") ?? undefined,
         attr: sp.getAll("attr"),
         sort: sp.get("sort") ?? undefined,
         order: sp.get("order") ?? undefined,
-        limit: num(sp.get("limit"), 50),
+        limit: num(sp.get("limit"), 100),
         cursor: sp.get("cursor") ?? undefined,
         dir: sp.has("dir") ? (sp.get("dir") ?? "") : null,
       }),
@@ -163,20 +164,30 @@ export const handlers = [
     return pkg ? HttpResponse.json(pkg) : fail(404, "NOT_FOUND", `package ${decode(params.name)} not found in ${repo.prefix}`);
   }),
 
-  get("*/api/v1/repos/:format/:repo/packages/:name/versions", async ({ params }) => {
+  get("*/api/v1/repos/:format/:repo/packages/:name/versions", async ({ params, request }) => {
     const repo = repoOr404(params);
     if (repo instanceof Response) return repo;
     const versions = db.listVersions(repo, decode(params.name));
-    return versions
-      ? HttpResponse.json({ versions })
-      : fail(404, "NOT_FOUND", `package ${decode(params.name)} not found in ${repo.prefix}`);
+    if (!versions) return fail(404, "NOT_FOUND", `package ${decode(params.name)} not found in ${repo.prefix}`);
+    const sp = new URL(request.url).searchParams;
+    const { page, next } = db.paginate(versions, num(sp.get("limit"), 100), sp.get("cursor"));
+    return HttpResponse.json({ versions: page, ...(next ? { next } : {}) });
   }),
 
-  get("*/api/v1/repos/:format/:repo/packages/:name/versions/:digest", async ({ params }) => {
+  get("*/api/v1/repos/:format/:repo/packages/:name/versions/:version", async ({ params, request }) => {
     const repo = repoOr404(params);
     if (repo instanceof Response) return repo;
-    const v = db.getVersion(repo, decode(params.name), decode(params.digest));
-    return v ? HttpResponse.json(v) : fail(404, "NOT_FOUND", `manifest ${decode(params.digest)} not found`);
+    const variant = new URL(request.url).searchParams.get("variant");
+    const v = db.getVersion(repo, decode(params.name), decode(params.version), variant);
+    return v ? HttpResponse.json(v) : fail(404, "NOT_FOUND", `version ${decode(params.version)} of ${decode(params.name)} not found in ${repo.prefix}`);
+  }),
+
+  get("*/api/v1/repos/:format/:repo/packages/:name/versions/:version/attachments", async ({ params, request }) => {
+    const repo = repoOr404(params);
+    if (repo instanceof Response) return repo;
+    const variant = new URL(request.url).searchParams.get("variant");
+    const list = db.listAttachments(repo, decode(params.name), decode(params.version), variant);
+    return list ? HttpResponse.json(list) : fail(404, "NOT_FOUND", `version ${decode(params.version)} of ${decode(params.name)} not found in ${repo.prefix}`);
   }),
 
   get("*/api/v1/repos/:format/:repo/reindex", async ({ params }) => {
