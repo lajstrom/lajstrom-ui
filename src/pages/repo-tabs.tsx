@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { AlertTriangle, CheckCircle2, Clock, KeyRound, Loader2, RefreshCw, ShieldCheck, Upload } from "lucide-react";
 
 import { callerQuery, infoQuery, registriesQuery, reindexQuery, sessionsQuery } from "@/api/queries";
-import type { Repo } from "@/api/types";
+import type { ReindexRun, Repo } from "@/api/types";
 import { ErrorState, Principal, RelativeTime } from "@/components/common";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -18,6 +18,16 @@ import { AuditTable } from "./audit";
 import { DeployTokens } from "./deploy-tokens";
 
 const NOT_REPORTED = <span className="text-muted-foreground">not reported by this server version</span>;
+
+/** The largest file when the policy sets none (Policy in the server's openapi.yaml). */
+const defaultMaxFileSize: Record<string, number> = {
+  npm: 512 * 1024 ** 2,
+  pypi: 4 * 1024 ** 3,
+  maven: 4 * 1024 ** 3,
+  apt: 8 * 1024 ** 3,
+  raw: 8 * 1024 ** 3,
+  oci: 16 * 1024 ** 3,
+};
 
 export function RepoDetails({ repo }: { repo: Repo }) {
   const info = useQuery(infoQuery);
@@ -39,7 +49,8 @@ export function RepoDetails({ repo }: { repo: Repo }) {
             </Property>
             <Property label="Kind">
               {repo.kind}
-              <span className="ml-1 text-xs text-muted-foreground">(proxy and group repos come after the MVP)</span>
+              {repo.upstream ? <span className="ml-1 text-xs text-muted-foreground">of the upstream {repo.upstream.name}</span> : null}
+              {repo.group ? <span className="ml-1 text-xs text-muted-foreground">of {repo.group.members.join(", ")}</span> : null}
             </Property>
             <Property label="Endpoint">
               <CopyText value={`${ctx.baseUrl}/${repo.format}/${repo.name}/`} />
@@ -80,8 +91,22 @@ export function RepoDetails({ repo }: { repo: Repo }) {
       <Card>
         <CardHeader title="Policy" description="repos.policy; changing it needs manage on the repo" />
         <CardBody>
+          {repo.kind === "group" ? (
+            <p className="text-sm text-muted-foreground">A group has no policy of its own; each member keeps its own.</p>
+          ) : (
           <Properties>
-            <Property label="Max file size">{p.maxFileSize ? formatBytes(p.maxFileSize) : "registry limit only"}</Property>
+            <Property label="Max file size">
+              {p.maxFileSize ? (
+                formatBytes(p.maxFileSize)
+              ) : defaultMaxFileSize[repo.format] ? (
+                <>
+                  {formatBytes(defaultMaxFileSize[repo.format]!)}
+                  <span className="ml-1 text-xs text-muted-foreground">(the default for {spec.label})</span>
+                </>
+              ) : (
+                "the server's default"
+              )}
+            </Property>
             <Property label="Blob redirect">
               {p.blobRedirect ?? "auto"}
               <span className="ml-1 text-xs text-muted-foreground">
@@ -90,13 +115,15 @@ export function RepoDetails({ repo }: { repo: Repo }) {
             </Property>
             {repo.format === "maven" ? (
               <>
-                <Property label="Deploy session timeout">{p["maven.sessionTimeout"] ?? "30m"}</Property>
-                <Property label="On timeout">
-                  {(p["maven.sessionExpiry"] ?? "abort") === "seal" ? "seal: commit the files received so far" : "abort: drop the session"}
+                <Property label="Deploy session timeout">{p.maven?.sessionTimeout ?? "30m"}</Property>
+                <Property label="Files per deploy">{p.maven?.maxSessionFiles ?? 256}</Property>
+                <Property label="Versions taken">
+                  {(p.maven?.versionPolicy ?? "release") === "release" ? "release versions" : "SNAPSHOT builds, one more under its own tag per deploy"}
                 </Property>
               </>
             ) : null}
           </Properties>
+          )}
         </CardBody>
       </Card>
 
@@ -105,7 +132,9 @@ export function RepoDetails({ repo }: { repo: Repo }) {
         <CardBody>
           <Properties>
             <Property label="Name">
-              {who.data?.admin ? (
+              {!repo.registry ? (
+                <span className="text-muted-foreground">none: a group stores nothing, its members do</span>
+              ) : who.data?.admin ? (
                 <Link to="/registries" className="font-mono text-primary hover:underline">
                   {repo.registry}
                 </Link>
@@ -195,6 +224,124 @@ export function RepoDetails({ repo }: { repo: Repo }) {
   );
 }
 
+const runTone = { running: "primary", done: "success", failed: "danger", abandoned: "warning" } as const;
+
+function ReindexRunView({ run }: { run: ReindexRun }) {
+  const r = run.report;
+  const counts = (
+    [
+      ["OCI repositories", r?.ociRepositories],
+      ["Manifests", r?.manifests],
+      ["Added", r?.added],
+      ["Updated", r?.updated],
+      ["Removed", r?.removed],
+      ["Degraded", r?.degraded],
+      ["Foreign", r?.foreign?.length],
+      ["Deleted, pending", r?.deletedPending],
+      ["Referrers repaired", r?.repairedReferrers?.length],
+    ] as [string, number | undefined][]
+  ).flatMap(([label, n]) => (n === undefined ? [] : [[label, n] as const]));
+  const warn = new Set(["Foreign", "Degraded", "Deleted, pending"]);
+  return (
+    <>
+      <CardBody>
+        <p className="mb-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm">
+          <Badge tone={runTone[run.state as keyof typeof runTone] ?? "neutral"}>{run.state}</Badge>
+          {run.allRepos ? "a run of every repo" : "a run of this repo"}, from {run.source}, by <Principal value={run.principal} />, started{" "}
+          <RelativeTime iso={run.startedAt} />
+          {run.finishedAt ? (
+            <>
+              , took {Math.max(1, Math.round((Date.parse(run.finishedAt) - Date.parse(run.startedAt)) / 1000))} s
+            </>
+          ) : null}
+          {run.prune ? <Badge tone="outline">prune</Badge> : null}
+          {run.verify ? <Badge tone="outline">verify</Badge> : null}
+        </p>
+        {run.error ? <p className="mb-3 text-sm text-danger">{run.error}</p> : null}
+        {!r ? (
+          <p className="text-xs text-muted-foreground">
+            {run.state === "running" ? "The report comes when the run finishes." : "The run stopped before it reached this repo."}
+          </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+              {counts.map(([label, n]) => (
+                <div key={label} className="rounded-md border border-border px-3 py-2">
+                  <div className="text-xs text-muted-foreground">{label}</div>
+                  <div className={`text-base font-semibold tabular ${warn.has(label) && n > 0 ? "text-warning" : ""}`}>{formatNumber(n)}</div>
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Degraded rows have no readable metadata layer and were indexed from annotations only.
+              {r.deletedPending ? " Deleted, pending: tags the registry still lists after a delete through Lajstrom, not indexed again." : ""}
+            </p>
+          </>
+        )}
+      </CardBody>
+      {r?.foreign?.length ? (
+        <>
+          <div className="border-t border-border px-4 pt-3 pb-1 text-sm font-medium">Foreign manifests</div>
+          <p className="px-4 pb-2 text-xs text-muted-foreground">
+            Found under this repo's path in the registry but not written by Lajstrom: they have no lajstrom.schema annotation and are not indexed.
+          </p>
+          <Table>
+            <THead>
+              <TR>
+                <TH>OCI repository</TH>
+                <TH>Tag</TH>
+                <TH>Digest</TH>
+                <TH>Media type</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {r.foreign.map((f) => (
+                <TR key={f.digest}>
+                  <TD className="font-mono text-xs">{f.repository}</TD>
+                  <TD className="font-mono text-xs">{f.tag}</TD>
+                  <TD>
+                    <CopyText value={f.digest} display={shortDigest(f.digest)} label="digest" />
+                  </TD>
+                  <TD className="font-mono text-xs text-muted-foreground">{f.mediaType}</TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        </>
+      ) : null}
+      {r?.repairedReferrers?.length ? (
+        <>
+          <div className="border-t border-border px-4 pt-3 pb-1 text-sm font-medium">Referrers indexes pushed again</div>
+          <Table>
+            <THead>
+              <TR>
+                <TH>OCI repository</TH>
+                <TH>Subject</TH>
+                <TH>Index</TH>
+                <TH>Referrers added</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {r.repairedReferrers.map((x) => (
+                <TR key={x.index}>
+                  <TD className="font-mono text-xs">{x.repository}</TD>
+                  <TD>
+                    <CopyText value={x.subject} display={shortDigest(x.subject)} label="subject" />
+                  </TD>
+                  <TD>
+                    <CopyText value={x.index} display={shortDigest(x.index)} label="index" />
+                  </TD>
+                  <TD className="tabular">{x.added.length}</TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        </>
+      ) : null}
+    </>
+  );
+}
+
 export function ReindexState({ repo }: { repo: Repo }) {
   const r = repo.reindex;
   if (!r) return NOT_REPORTED;
@@ -235,74 +382,16 @@ export function RepoMaintenance({ repo }: { repo: Repo }) {
         />
         {report.isError ? (
           <ErrorState error={report.error} />
-        ) : !report.data ? (
+        ) : report.data === undefined ? (
           <CardBody>
             <Skeleton className="h-16" />
           </CardBody>
+        ) : report.data === null ? (
+          <EmptyState title="No reindex yet" className="py-6">
+            No run has covered this repo: ingest indexes every publish, and a reindex rebuilds the index from the registry.
+          </EmptyState>
         ) : (
-          <>
-            <CardBody>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-                {(
-                  [
-                    ["OCI repositories", report.data.ociRepositories],
-                    ["Manifests", report.data.manifests],
-                    ["Added", report.data.added],
-                    ["Updated", report.data.updated],
-                    ["Removed", report.data.removed],
-                    ["Degraded", report.data.degraded],
-                    ["Foreign", report.data.foreign.length],
-                  ] as const
-                ).map(([label, n]) => (
-                  <div key={label} className="rounded-md border border-border px-3 py-2">
-                    <div className="text-xs text-muted-foreground">{label}</div>
-                    <div className={`text-base font-semibold tabular ${(label === "Foreign" || label === "Degraded") && n > 0 ? "text-warning" : ""}`}>
-                      {formatNumber(n)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <p className="mt-2 text-xs text-muted-foreground">
-                {report.data.finishedAt ? (
-                  <>
-                    Finished <RelativeTime iso={report.data.finishedAt} /> in{" "}
-                    {Math.max(1, Math.round((Date.parse(report.data.finishedAt) - Date.parse(report.data.startedAt)) / 1000))} s.
-                  </>
-                ) : null}{" "}
-                Degraded rows have no readable metadata layer and were indexed from annotations only.
-              </p>
-            </CardBody>
-            {report.data.foreign.length ? (
-              <>
-                <div className="border-t border-border px-4 pt-3 pb-1 text-sm font-medium">Foreign manifests</div>
-                <p className="px-4 pb-2 text-xs text-muted-foreground">
-                  Found under this repo's path in the registry but not written by Lajstrom: they have no lajstrom.schema annotation and are not indexed.
-                </p>
-                <Table>
-                  <THead>
-                    <TR>
-                      <TH>OCI repository</TH>
-                      <TH>Tag</TH>
-                      <TH>Digest</TH>
-                      <TH>Why</TH>
-                    </TR>
-                  </THead>
-                  <TBody>
-                    {report.data.foreign.map((f) => (
-                      <TR key={f.digest}>
-                        <TD className="font-mono text-xs">{f.path}</TD>
-                        <TD className="font-mono text-xs">{f.tag}</TD>
-                        <TD>
-                          <CopyText value={f.digest} display={shortDigest(f.digest)} label="digest" />
-                        </TD>
-                        <TD className="text-xs text-muted-foreground">{f.reason}</TD>
-                      </TR>
-                    ))}
-                  </TBody>
-                </Table>
-              </>
-            ) : null}
-          </>
+          <ReindexRunView run={report.data} />
         )}
       </Card>
 

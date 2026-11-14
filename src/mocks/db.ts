@@ -13,7 +13,9 @@ import type {
   VersionDetail,
   RawDirectory,
   ReindexReport,
+  ReindexRun,
   Repo,
+  RepoPolicy,
   SearchHit,
   VersionSummary,
   WhoAmI,
@@ -435,42 +437,102 @@ export function listSessions(repo: Repo): PublishSession[] {
   return sessions.filter((s) => s.repo === repo.prefix).map(({ repo: _r, ...s }) => s);
 }
 
-export function reindexReport(repo: MockRepo): ReindexReport {
+function reindexReport(repo: MockRepo): ReindexReport {
   const pkgs = byRepo.get(repo.prefix) ?? new Map<string, Row[]>();
   const manifests = [...pkgs.values()].flat();
-  const foreign: ReindexReport["foreign"] = [];
+  const foreign: NonNullable<ReindexReport["foreign"]> = [];
   let removed = 0;
   if (repo.prefix === "raw/assets") {
     foreign.push({
-      path: "raw/assets/charts/podinfo",
+      repository: "charts/podinfo",
       tag: "6.7.1",
       digest: `sha256:${sha256Hex("foreign:podinfo")}`,
-      reason: "Helm chart (config application/vnd.cncf.helm.config.v1+json) without lajstrom.schema: pushed around Lajstrom",
+      mediaType: "application/vnd.oci.image.manifest.v1+json",
     });
   }
   if (repo.prefix === "raw/scratch") {
     foreign.push({
-      path: "raw/scratch/tmp/debug-image",
+      repository: "tmp/debug-image",
       tag: "latest",
       digest: `sha256:${sha256Hex("foreign:debug-image")}`,
-      reason: "container image without lajstrom.schema",
+      mediaType: "application/vnd.oci.image.manifest.v1+json",
     });
     removed = 1;
   }
-  // While a reindex runs, the report is the one of the previous, finished run.
-  const running = repo.reindex.state === "running";
   return {
     repo: repo.prefix,
-    startedAt: running ? before(0, 1, 21) : (repo.reindex.startedAt ?? before(0, 0, 21)),
-    finishedAt: running ? before(0, 1, 20) : (repo.reindex.finishedAt ?? before(0, 0, 20)),
     ociRepositories: pkgs.size + foreign.length,
     manifests: manifests.length + foreign.length,
     added: 0,
     updated: 0,
+    unchanged: manifests.length,
     removed,
+    pending: 0,
+    deletedPending: 0,
     degraded: manifests.filter((v) => v.degraded).length,
+    referrers: manifests.reduce((n, v) => n + v.referrers.signatures + v.referrers.sboms + v.referrers.attestations, 0),
     foreign,
+    repairedReferrers: [],
+    errors: [],
+    truncated: false,
   };
+}
+
+/** Runs started in the demo, by repo; each takes a few seconds. */
+const demoRuns = new Map<string, { id: number; startedAt: number; principal: string; prune: boolean; verify: boolean }>();
+let nextRunId = 40;
+const RUN_SECONDS = 4;
+
+/** GET …/reindex: the latest run that covered the repo. The seed's runs are the reconcile loop's;
+ * one that is running has no report yet, as on the server. */
+export function reindexRun(repo: MockRepo): ReindexRun {
+  const demo = demoRuns.get(repo.prefix);
+  if (demo) {
+    const running = Date.now() - demo.startedAt < RUN_SECONDS * 1000;
+    const finished = new Date(demo.startedAt + RUN_SECONDS * 1000).toISOString();
+    return {
+      id: demo.id,
+      state: running ? "running" : "done",
+      source: "api",
+      principal: apiPrincipal(demo.principal),
+      replica: "lajstrom-0 1",
+      allRepos: false,
+      prune: demo.prune,
+      verify: demo.verify,
+      startedAt: new Date(demo.startedAt).toISOString(),
+      heartbeatAt: running ? new Date().toISOString() : finished,
+      finishedAt: running ? null : finished,
+      report: running ? null : reindexReport(repo),
+    };
+  }
+  const state = repo.reindex.state === "running" ? "running" : repo.reindex.state === "failed" ? "failed" : "done";
+  return {
+    id: 31,
+    state,
+    source: "reconcile",
+    principal: "anonymous",
+    replica: "lajstrom-0 1",
+    allRepos: true,
+    prune: true,
+    verify: false,
+    startedAt: repo.reindex.startedAt ?? before(0, 0, 21),
+    heartbeatAt: repo.reindex.finishedAt ?? before(0, 0, 0.1),
+    finishedAt: repo.reindex.finishedAt,
+    error: state === "failed" ? "the registry answered 503 to the tag list of the repo's first OCI repository" : undefined,
+    report: state === "running" ? null : reindexReport(repo),
+  };
+}
+
+/** POST …/reindex: a run of the repo, refused while one runs (409). */
+export function startReindex(repo: MockRepo, body: unknown, by: string): ReindexRun | Refusal {
+  if (reindexRun(repo).state === "running") return { status: 409, code: "CONFLICT", message: `a reindex of ${repo.prefix} runs since a moment ago` };
+  const b = (body ?? {}) as Record<string, unknown>;
+  if (typeof b !== "object" || Array.isArray(b)) return invalid("the body must be a JSON object");
+  const unknown = Object.keys(b).find((k) => k !== "prune" && k !== "verify");
+  if (unknown) return invalid(`${unknown}: not a field of a reindex request`);
+  demoRuns.set(repo.prefix, { id: ++nextRunId, startedAt: Date.now(), principal: by, prune: b.prune === true, verify: b.verify === true });
+  changed({ at: new Date().toISOString(), principal: by, action: "repo.reindex", repo: repo.prefix, subject: repo.prefix, digest: null, ip: DEMO_IP, details: { prune: b.prune === true, verify: b.verify === true, source: "api" } });
+  return reindexRun(repo);
 }
 
 // --- Audit ----------------------------------------------------------------------------------
@@ -671,13 +733,45 @@ const invalid = (message: string): Refusal => ({ status: 400, code: "INVALID", m
 /** Repo names: lowercase letters and digits separated by single '.', '_' or '-' (manifest-profile.md §4.1). */
 const REPO_NAME = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 const FORMATS = ["raw", "pypi", "apt", "maven", "oci"] as const;
-const POLICY_KEYS = ["maxFileSize", "blobRedirect", "maven.sessionTimeout", "maven.sessionExpiry"];
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
-function checkPolicy(policy: unknown): Refusal | null {
+/** The keys of a policy (Policy in the server's openapi.yaml); a merge patch may also set any of
+ * them to null, which removes it. */
+function checkPolicy(policy: unknown, format: string, patch: boolean): Refusal | null {
   if (policy === null || policy === undefined) return null;
-  if (typeof policy !== "object" || Array.isArray(policy)) return invalid("policy: a JSON object or null");
-  const unknown = Object.keys(policy).find((k) => !POLICY_KEYS.includes(k));
-  return unknown ? invalid(`policy: ${unknown} is not a policy key`) : null;
+  if (!isObject(policy)) return invalid("policy: a JSON object or null");
+  for (const [k, v] of Object.entries(policy)) {
+    if (v === null && patch) continue;
+    if (k === "maxFileSize") {
+      if (!Number.isInteger(v) || (v as number) < 1) return invalid("policy.maxFileSize: a number of bytes, at least 1");
+    } else if (k === "blobRedirect") {
+      if (v !== "auto" && v !== "never") return invalid("policy.blobRedirect: auto or never");
+    } else if (k === "maven" && format === "maven") {
+      if (!isObject(v)) return invalid("policy.maven: a JSON object");
+      const unknown = Object.keys(v).find((mk) => !["sessionTimeout", "maxSessionFiles", "versionPolicy"].includes(mk));
+      if (unknown) return invalid(`policy.maven.${unknown} is not a policy key`);
+    } else return invalid(`policy.${k} is not a policy key`);
+  }
+  return null;
+}
+
+/** An RFC 7396 merge patch of a policy: null removes a key, maven merges key by key. */
+function mergePolicy(current: RepoPolicy | null, patch: Record<string, unknown> | null): RepoPolicy | null {
+  if (patch === null) return null;
+  const out: Record<string, unknown> = { ...current };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null) delete out[k];
+    else if (k === "maven" && isObject(v)) {
+      const maven: Record<string, unknown> = { ...(isObject(out.maven) ? out.maven : {}) };
+      for (const [mk, mv] of Object.entries(v)) {
+        if (mv === null) delete maven[mk];
+        else maven[mk] = mv;
+      }
+      if (Object.keys(maven).length) out.maven = maven;
+      else delete out.maven;
+    } else out[k] = v;
+  }
+  return Object.keys(out).length ? (out as RepoPolicy) : null;
 }
 
 export function versionCount(repoKey: string): number {
@@ -700,7 +794,7 @@ export function createRepo(body: unknown, by: string): MockRepo | Refusal {
   }
   if (b.kind !== undefined && b.kind !== "hosted") return invalid("kind: hosted, the only kind in this version");
   if (b.anonymousRead !== undefined && typeof b.anonymousRead !== "boolean") return invalid("anonymousRead: true or false");
-  const policyError = checkPolicy(b.policy);
+  const policyError = checkPolicy(b.policy, b.format as string, false);
   if (policyError) return policyError;
   const key = `${b.format}/${b.name}`;
   if (repoSeeds.some((s) => keyOf(s) === key)) return { status: 409, code: "CONFLICT", message: `repo ${key} exists` };
@@ -732,13 +826,13 @@ export function updateRepo(repo: MockRepo, body: unknown, by: string): MockRepo 
     if (k !== "anonymousRead" && k !== "policy") return invalid(`${k}: not a field of a repo`);
   }
   if (b.anonymousRead !== undefined && typeof b.anonymousRead !== "boolean") return invalid("anonymousRead: true or false");
-  const policyError = checkPolicy(b.policy);
+  const policyError = checkPolicy(b.policy, repo.format, true);
   if (policyError) return policyError;
   const seed = repoSeeds.find((s) => keyOf(s) === repo.prefix)!;
   const before = { anonymousRead: seed.anonymousRead, policy: seed.policy };
   const after = {
     anonymousRead: b.anonymousRead === undefined ? seed.anonymousRead : (b.anonymousRead as boolean),
-    policy: b.policy === undefined ? seed.policy : ((b.policy as RepoSeed["policy"]) ?? null),
+    policy: b.policy === undefined ? seed.policy : mergePolicy(seed.policy, (b.policy as Record<string, unknown> | null) ?? null),
   };
   // A body that changes nothing changes nothing, not even updatedAt.
   if (JSON.stringify(before) !== JSON.stringify(after)) {
