@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { ArrowRight, ChevronRight, File, Folder, FolderOpen, PackageOpen, Plug, Search as SearchIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { infoQuery, packagesQuery, repoQuery, whoamiQuery } from "@/api/queries";
+import { callerQuery, infoQuery, packagesQuery, repoQuery } from "@/api/queries";
 import type { PackageList, PackageSummary, Repo } from "@/api/types";
 import { AccessBadge, ErrorState, FormatMark, PageHeader, Pagination, RelativeTime } from "@/components/common";
 import { DemoCommandsNote, SnippetTabs } from "@/components/snippets";
@@ -53,7 +53,7 @@ export function RepoPage() {
   const { format = "", repo: name = "" } = useParams({ strict: false }) as { format?: string; repo?: string };
   const [search, setSearch] = useRepoSearch();
   const repo = useQuery(repoQuery(format, name));
-  const who = useQuery(whoamiQuery);
+  const who = useQuery(callerQuery);
   const spec = formatSpec(format);
   const tab = search.tab ?? "packages";
 

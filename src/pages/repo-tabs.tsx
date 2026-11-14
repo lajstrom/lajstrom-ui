@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { AlertTriangle, CheckCircle2, Clock, KeyRound, Loader2, RefreshCw, ShieldCheck, Upload } from "lucide-react";
 
-import { infoQuery, registriesQuery, reindexQuery, sessionsQuery, whoamiQuery } from "@/api/queries";
+import { callerQuery, infoQuery, registriesQuery, reindexQuery, sessionsQuery } from "@/api/queries";
 import type { Repo } from "@/api/types";
 import { ErrorState, Principal, RelativeTime } from "@/components/common";
 import { Badge } from "@/components/ui/badge";
@@ -21,7 +21,7 @@ const NOT_REPORTED = <span className="text-muted-foreground">not reported by thi
 
 export function RepoDetails({ repo }: { repo: Repo }) {
   const info = useQuery(infoQuery);
-  const who = useQuery(whoamiQuery);
+  const who = useQuery(callerQuery);
   const regs = useQuery({ ...registriesQuery, enabled: who.data?.admin ?? false });
   const registry = regs.data?.find((r) => r.name === repo.registry);
   const spec = formatSpec(repo.format);

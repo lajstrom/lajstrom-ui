@@ -3,7 +3,8 @@ import { sha256Hex } from "@/lib/sha256";
 
 import { ago, ahead, before, EXTERNAL_URL } from "./time";
 
-export const serverInfo: ServerInfo = {
+/** GET /api/v1/info but the caller, which the handler adds per request. */
+export const serverInfo: Omit<ServerInfo, "caller"> = {
   version: "dev",
   commit: "b9b19e6",
   date: ago(0, 2),
@@ -15,6 +16,7 @@ export const serverInfo: ServerInfo = {
     { name: "pypi", artifactType: "application/vnd.lajstrom.pypi.v1" },
     { name: "raw", artifactType: "application/vnd.lajstrom.raw.v1" },
   ],
+  authModes: ["password", "token"],
 };
 
 // Capabilities follow the matrix of docs/architecture.md §5; cells marked "verify" there are
@@ -166,12 +168,19 @@ export const repoSeeds: RepoSeed[] = [
   },
 ];
 
+/** A user's uid in the mock, stable across reloads: the server's are UUIDv7, these only look so. */
+export function uidOf(name: string): string {
+  const h = sha256Hex(`uid:${name}`);
+  const variant = (8 | (parseInt(h[16]!, 16) & 3)).toString(16);
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-7${h.slice(13, 16)}-${variant}${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
 export const users: User[] = [
-  { name: "admin", kind: "local", disabled: false, admin: true, createdAt: ago(420), lastSeenAt: before(0, 0, 3) },
-  { name: "alice", kind: "local", disabled: false, admin: false, createdAt: ago(300), lastSeenAt: before(0, 1) },
-  { name: "bob", kind: "local", disabled: false, admin: false, createdAt: ago(290), lastSeenAt: before(0, 6) },
-  { name: "carol", kind: "local", disabled: false, admin: false, createdAt: ago(150), lastSeenAt: before(2) },
-  { name: "dave", kind: "local", disabled: true, admin: false, createdAt: ago(240), lastSeenAt: before(64) },
+  { uid: uidOf("admin"), name: "admin", kind: "local", disabled: false, createdAt: ago(420) },
+  { uid: uidOf("alice"), name: "alice", kind: "local", disabled: false, createdAt: ago(300) },
+  { uid: uidOf("bob"), name: "bob", kind: "local", disabled: false, createdAt: ago(290) },
+  { uid: uidOf("carol"), name: "carol", kind: "local", disabled: false, createdAt: ago(150) },
+  { uid: uidOf("dave"), name: "dave", kind: "local", disabled: true, createdAt: ago(240) },
 ];
 
 // Deploy tokens are bound to exactly one repo (rbac.md §1); uploads in the seed use only the
@@ -190,7 +199,11 @@ export const tokens: Token[] = [
   { id: 22, kind: "deploy", name: "payments CI (pypi)", repo: "pypi/payments", scopes: ["write"], expiresAt: ahead(140), lastUsedAt: before(6, 3), createdAt: ago(60), revokedAt: null, hashPrefix: "9ab0bbe6" },
 ];
 
-export const bindings: Binding[] = [
+/** The mock's bindings name users as `user:<name>`; the API answers `user:<uid>` and the name
+ * (src/mocks/db.ts, bindingJson). */
+export type MockBinding = Omit<Binding, "name">;
+
+export const bindings: MockBinding[] = [
   { id: 1, principal: "user:admin", role: "admin", repoMask: "*/*", createdAt: ago(420) },
   { id: 2, principal: "user:alice", role: "reader", repoMask: "*/*", createdAt: ago(300) },
   { id: 3, principal: "user:alice", role: "writer", repoMask: "*/payments", createdAt: ago(80) },

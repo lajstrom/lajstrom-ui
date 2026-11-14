@@ -138,9 +138,6 @@ live; everything else comes from the index database.
 
 The mock fills these with plausible values; the real shapes are open:
 
-- audit actions beyond `push`, `delete`, `repo.create`, `token.create` (index-schema.md): the
-  mock adds `repo.update`, `repo.reindex`, `token.revoke`, `binding.create`, `user.create`,
-  `user.disable`, `key.rotate`, following `<resource>.<verb>`;
 - the key of the maven session expiry policy (`maven.sessionExpiry`: `seal` or `abort`);
 - the fields of the reindex report (`ociRepositories`, `manifests`, `added`, `updated`,
   `removed`, `degraded`, `foreign[]`);

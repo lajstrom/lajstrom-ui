@@ -18,7 +18,7 @@ function fail(status: number, code: ApiErrorBody["error"]["code"], message: stri
 function unauthorized(message: string, api = true) {
   const challenge = { "WWW-Authenticate": 'Basic realm="lajstrom"' };
   return api
-    ? HttpResponse.json<ApiErrorBody>({ error: { code: "FORBIDDEN", message } }, { status: 401, headers: challenge })
+    ? HttpResponse.json<ApiErrorBody>({ error: { code: "UNAUTHENTICATED", message } }, { status: 401, headers: challenge })
     : text(401, message, challenge);
 }
 
@@ -120,7 +120,7 @@ export const handlers = [
   }),
 
   get("*/api/v1/info", async () => {
-    return HttpResponse.json(db.serverInfo);
+    return HttpResponse.json({ ...db.serverInfo, caller: db.caller() });
   }),
 
   get("*/api/v1/whoami", async () => {
@@ -217,9 +217,10 @@ export const handlers = [
         repo: sp.get("repo") ?? undefined,
         principal: sp.get("principal") ?? undefined,
         action: sp.get("action") ?? undefined,
+        state: sp.get("state") ?? undefined,
         since: sp.get("since") ?? undefined,
         until: sp.get("until") ?? undefined,
-        limit: num(sp.get("limit"), 50),
+        limit: num(sp.get("limit"), 100),
         cursor: sp.get("cursor") ?? undefined,
       }),
     );
@@ -229,8 +230,8 @@ export const handlers = [
     return adminOr403() ?? HttpResponse.json({ users: db.users });
   }),
 
-  get("*/api/v1/bindings", async () => {
-    return adminOr403() ?? HttpResponse.json({ bindings: db.bindings });
+  get("*/api/v1/bindings", async ({ request }) => {
+    return adminOr403() ?? HttpResponse.json({ bindings: db.listBindings(new URL(request.url).searchParams.get("principal")) });
   }),
 
   get("*/api/v1/tokens", async () => {
@@ -238,16 +239,16 @@ export const handlers = [
   }),
 
   get("*/api/v1/users/:name/tokens", async ({ params }) => {
-    const user = decode(params.name);
-    if (!db.users.some((u) => u.name === user)) return fail(404, "NOT_FOUND", `user ${user} not found`);
+    const user = db.userByRef(decode(params.name))?.name;
+    if (!user) return fail(404, "NOT_FOUND", `user ${decode(params.name)} not found`);
     const denied = ownOr403(user);
     if (denied) return denied;
     return HttpResponse.json({ tokens: db.tokens.filter((t) => t.kind === "pat" && t.user === user) });
   }),
 
   post("*/api/v1/users/:name/tokens", async ({ params, request }) => {
-    const user = decode(params.name);
-    if (!db.users.some((u) => u.name === user)) return fail(404, "NOT_FOUND", `user ${user} not found`);
+    const user = db.userByRef(decode(params.name))?.name;
+    if (!user) return fail(404, "NOT_FOUND", `user ${decode(params.name)} not found`);
     const denied = ownOr403(user);
     if (denied) return denied;
     const created = createToken({ user }, await body(request));
@@ -256,8 +257,8 @@ export const handlers = [
   }),
 
   del("*/api/v1/users/:name/tokens/:id", async ({ params }) => {
-    const user = decode(params.name);
-    if (!db.users.some((u) => u.name === user)) return fail(404, "NOT_FOUND", `user ${user} not found`);
+    const user = db.userByRef(decode(params.name))?.name;
+    if (!user) return fail(404, "NOT_FOUND", `user ${decode(params.name)} not found`);
     const denied = ownOr403(user);
     if (denied) return denied;
     return revokeToken({ user }, Number(decode(params.id)))

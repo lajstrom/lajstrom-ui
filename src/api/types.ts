@@ -22,29 +22,16 @@ export type ApiErrorBody = {
   error: { code: "NOT_FOUND" | "CONFLICT" | "FORBIDDEN" | "INVALID" | "UNAVAILABLE" | string; message: string };
 };
 
-/** GET /api/v1/info (proposed): what the UI needs to know about the server. */
-export type ServerInfo = {
-  version: string;
-  commit: string;
-  date: string;
-  /** server.externalURL; snippets are built from it. */
-  externalURL: string;
-  /** auth.anonymousRead, the server-wide switch; unknown when the server does not have /info. */
-  anonymousRead?: boolean;
-  formats: { name: FormatName; artifactType: string }[];
-};
+/** GET /api/v1/info: the server's build, what snippets are built from, how a person signs in,
+ * and the caller. */
+export type ServerInfo = Schemas["Info"];
 
-/** Who is calling: GET /api/v1/whoami. Without credentials the server answers 401; the UI reads
- * that as `anonymous`. */
-export type WhoAmI = {
-  principal: string; // user:alice, token:12, anonymous
-  kind: "user" | "token" | "group" | "anonymous";
-  name: string;
-  /** Proposed: whether the principal has the admin role. Unknown until the server says. */
-  admin?: boolean;
-  /** Proposed: the principal's role bindings (come with role-based access control). */
-  bindings?: Binding[];
-};
+/** The caller as /api/v1/info answers it: who the request's credential is, and whether it
+ * reaches the admin role. Without credentials the kind is `anonymous`. */
+export type Caller = Schemas["Caller"];
+
+/** GET /api/v1/whoami; without credentials the server answers 401. */
+export type WhoAmI = Schemas["Whoami"];
 
 /** repos.policy. PATCH merges. The key of the session expiry policy is not named in the
  * plan yet; "maven.sessionExpiry" is this prototype's proposal. */
@@ -282,28 +269,13 @@ export type Registry = {
   repos: string[];
 };
 
-export type AuditEvent = {
-  id: number;
-  at: string;
-  principal: string;
-  action: string;
-  repo: string;
-  subject: string;
-  digest: string | null;
-  ip: string;
-  details: Record<string, unknown>;
-};
+export type AuditEvent = Schemas["AuditEntry"];
 
-export type AuditPage = Page & { events: AuditEvent[] };
+/** A page of the audit log, newest first; `next` is the cursor of the page after it. */
+export type AuditList = Schemas["AuditList"];
 
-export type User = {
-  name: string;
-  kind: "local" | "oidc";
-  disabled: boolean;
-  admin: boolean;
-  createdAt: string;
-  lastSeenAt: string | null;
-};
+/** A local user. Whether it is an admin follows from its bindings (rbac.md §3). */
+export type User = Schemas["User"];
 
 /** A personal access token or a deploy token (docs/api.md, Tokens). The secret is answered only
  * once, by the creation: CreatedToken. */
@@ -317,13 +289,9 @@ export type CreatedToken = Schemas["CreatedToken"];
 /** The body of POST /api/v1/users/{name}/tokens and …/deploy-tokens. */
 export type TokenRequest = Schemas["TokenRequest"];
 
-export type Binding = {
-  id: number;
-  principal: string;
-  role: "reader" | "writer" | "maintainer" | "admin";
-  repoMask: string;
-  createdAt: string;
-};
+/** A role binding; `principal` is canonical, `user:<uid>` or `group:<name>`, and `name` the
+ * user's name now. */
+export type Binding = Schemas["Binding"];
 
 /** An open publication session: maven deploys file by file until maven-metadata.xml. */
 export type PublishSession = {

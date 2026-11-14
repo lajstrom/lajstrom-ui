@@ -5,7 +5,7 @@ import { Boxes, FileSearch, Fingerprint, History, Moon, Search, Server, Sun, Use
 import { Dialog } from "radix-ui";
 import { useEffect, useMemo, useState } from "react";
 
-import { reposQuery, searchQuery, whoamiQuery } from "@/api/queries";
+import { callerQuery, reposQuery, searchQuery } from "@/api/queries";
 import type { SearchHit } from "@/api/types";
 import { FormatMark } from "@/components/common";
 import { Kbd } from "@/components/ui/misc";
@@ -30,7 +30,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   const [input, setInput] = useState("");
   const q = useDebounced(input.trim(), 120);
   const repos = useQuery(reposQuery);
-  const who = useQuery(whoamiQuery);
+  const who = useQuery(callerQuery);
   const search = useQuery({ ...searchQuery(q, undefined, 8), enabled: open && q.length > 0 });
   const { resolved } = useTheme();
 

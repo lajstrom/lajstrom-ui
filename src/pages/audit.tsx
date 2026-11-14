@@ -2,26 +2,33 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { History } from "lucide-react";
 
-import { auditQuery, reposQuery, type AuditParams } from "@/api/queries";
+import { auditQuery, reposQuery, usersQuery, type AuditParams } from "@/api/queries";
 import type { AuditEvent } from "@/api/types";
-import { ErrorState, PageHeader, Pagination, Principal, RelativeTime } from "@/components/common";
+import { CursorPagination, ErrorState, PageHeader, Principal, RelativeTime } from "@/components/common";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { CopyText } from "@/components/ui/code-block";
 import { EmptyState, Segmented, Skeleton } from "@/components/ui/misc";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Tooltip } from "@/components/ui/tooltip";
-import { auditActions } from "@/lib/audit";
-import { cursorStart } from "@/lib/cursor";
+import { auditActions, auditStates } from "@/lib/audit";
 import { shortDigest } from "@/lib/format";
 
 
 function actionTone(action: string): BadgeProps["tone"] {
   if (action === "push") return "primary";
-  if (action === "delete" || action.endsWith(".revoke") || action.endsWith(".disable")) return "danger";
+  if (action === "delete" || action === "proxy.reject" || /\.(delete|revoke|disable|drop)$/.test(action)) return "danger";
   if (action.startsWith("token.") || action.startsWith("binding.") || action.startsWith("key.")) return "warning";
   return "neutral";
 }
+
+/** What a row's state means (docs/operations.md, Audit). */
+const stateHelp: Record<AuditEvent["state"], string> = {
+  ok: "Done",
+  pending: "A write to the registry that is still running",
+  failed: "The write failed, and the client was answered with this error",
+  unknown: "Its writer stopped before it knew the outcome",
+};
 
 const ranges = [
   { value: "all", label: "Any time" },
@@ -38,14 +45,14 @@ function sinceOf(range: string | undefined): string | undefined {
   return new Date(t - (t % 60_000)).toISOString();
 }
 
-type AuditSearch = { action?: string; principal?: string; repo?: string; range?: string; cursor?: string };
+type AuditSearch = { action?: string; principal?: string; repo?: string; state?: string; range?: string; cursor?: string };
 
 export function AuditPage() {
   return (
     <>
       <PageHeader
         title="Audit log"
-        description="Every write, control-plane change and token issuance; append-only. Reads are not audited in the MVP."
+        description="Every write, control-plane change and token issuance, newest first; append-only. Reads are not audited."
       />
       <AuditTable />
     </>
@@ -60,6 +67,7 @@ export function AuditTable({ fixedRepo }: { fixedRepo?: string }) {
   const search = useSearch({ strict: false }) as AuditSearch;
   const navigate = useNavigate();
   const repos = useQuery({ ...reposQuery, enabled: !fixedRepo });
+  const users = useQuery(usersQuery);
   const set = (patch: Partial<AuditSearch>) =>
     void navigate({ to: ".", search: (p: AuditSearch) => ({ ...p, cursor: undefined, ...patch }), replace: true });
 
@@ -67,6 +75,7 @@ export function AuditTable({ fixedRepo }: { fixedRepo?: string }) {
     action: search.action,
     principal: search.principal,
     repo: fixedRepo ?? search.repo,
+    state: search.state,
     since: sinceOf(search.range),
     cursor: search.cursor,
   };
@@ -90,9 +99,17 @@ export function AuditTable({ fixedRepo }: { fixedRepo?: string }) {
           onChange={(e) => set({ principal: e.target.value || undefined })}
         >
           <option value="">Everyone</option>
-          {["user:admin", "user:alice", "user:bob", "user:carol", "token:12", "token:15", "token:16", "token:21", "token:22"].map((p) => (
+          {principalOptions(users.data?.map((u) => u.name) ?? [], search.principal).map((p) => (
             <option key={p} value={p}>
               {p}
+            </option>
+          ))}
+        </select>
+        <select aria-label="State" className={selectClass} value={search.state ?? ""} onChange={(e) => set({ state: e.target.value || undefined })}>
+          <option value="">Any state</option>
+          {auditStates.map((s) => (
+            <option key={s} value={s}>
+              {s}
             </option>
           ))}
         </select>
@@ -141,14 +158,12 @@ export function AuditTable({ fixedRepo }: { fixedRepo?: string }) {
         </Table>
       )}
       {audit.data ? (
-        <Pagination
-          total={audit.data.total}
-          limit={audit.data.limit}
+        <CursorPagination
           shown={audit.data.events.length}
           next={audit.data.next}
-          prev={audit.data.prev}
-          start={cursorStart(search.cursor)}
-          onCursor={(cursor) => void navigate({ to: ".", search: (p: AuditSearch) => ({ ...p, cursor }), replace: true })}
+          cursor={search.cursor}
+          // Pushed, not replaced: the browser's Back is the page before.
+          onCursor={(cursor) => void navigate({ to: ".", search: (p: AuditSearch) => ({ ...p, cursor }) })}
           noun="events"
         />
       ) : null}
@@ -156,8 +171,15 @@ export function AuditTable({ fixedRepo }: { fixedRepo?: string }) {
   );
 }
 
+/** Users by name, which the server takes as `user:<name>`, and anonymous; the filter set from a
+ * link, such as `token:12`, stays in the list. */
+function principalOptions(names: string[], current: string | undefined): string[] {
+  const options = [...names.map((n) => `user:${n}`), "anonymous"];
+  return current && !options.includes(current) ? [current, ...options] : options;
+}
+
 function AuditRow({ event: e, showRepo }: { event: AuditEvent; showRepo: boolean }) {
-  const details = Object.entries(e.details)
+  const details = Object.entries(e.details ?? {})
     .map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
     .join("\n");
   const [format, repo] = e.repo ? (e.repo.split("/") as [string, string]) : ["", ""];
@@ -167,16 +189,25 @@ function AuditRow({ event: e, showRepo }: { event: AuditEvent; showRepo: boolean
         <RelativeTime iso={e.at} />
       </TD>
       <TD>
-        <Principal value={e.principal} />
+        <Principal value={e.principal} name={e.principalName} />
       </TD>
       <TD>
-        <Tooltip content={details ? <pre className="font-mono text-[11px] whitespace-pre-wrap">{details}</pre> : null}>
-          <span>
-            <Badge tone={actionTone(e.action)} shape="square" className="font-mono">
-              {e.action}
-            </Badge>
-          </span>
-        </Tooltip>
+        <span className="flex items-center gap-1">
+          <Tooltip content={details ? <pre className="font-mono text-[11px] whitespace-pre-wrap">{details}</pre> : null}>
+            <span>
+              <Badge tone={actionTone(e.action)} shape="square" className="font-mono">
+                {e.action}
+              </Badge>
+            </span>
+          </Tooltip>
+          {e.state !== "ok" ? (
+            <Tooltip content={stateHelp[e.state] + (e.error ? `: ${e.error}` : "")}>
+              <span>
+                <Badge tone={e.state === "failed" ? "danger" : "warning"}>{e.state}</Badge>
+              </span>
+            </Tooltip>
+          ) : null}
+        </span>
       </TD>
       {showRepo ? (
         <TD>
@@ -190,12 +221,16 @@ function AuditRow({ event: e, showRepo }: { event: AuditEvent; showRepo: boolean
         </TD>
       ) : null}
       <TD className="max-w-[20rem]">
-        <span className="block truncate font-mono text-xs" title={e.subject}>
-          {e.subject}
-        </span>
+        {e.subject ? (
+          <span className="block truncate font-mono text-xs" title={e.subject}>
+            {e.subject}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
       </TD>
       <TD>{e.digest ? <CopyText value={e.digest} display={shortDigest(e.digest, 8)} label="digest" /> : <span className="text-muted-foreground">—</span>}</TD>
-      <TD className="font-mono text-xs text-muted-foreground">{e.ip}</TD>
+      <TD className="font-mono text-xs text-muted-foreground">{e.ip ?? "—"}</TD>
     </TR>
   );
 }
