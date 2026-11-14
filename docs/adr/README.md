@@ -8,3 +8,4 @@ format is the same (a trimmed-down MADR, see the template there).
 | ADR | Title | Status |
 | --- | --- | --- |
 | [0001](0001-web-ui-in-its-own-repository.md) | The web UI lives in its own repository and ships as its own images | proposed |
+| [0002](0002-stay-on-react.md) | The UI stays a React and TypeScript app built with npm | accepted |
