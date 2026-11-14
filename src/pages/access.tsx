@@ -4,7 +4,7 @@ import { Info } from "lucide-react";
 
 import { bindingsQuery, reposQuery, tokensQuery, usersQuery } from "@/api/queries";
 import type { Binding } from "@/api/types";
-import { ErrorState, PageHeader, RelativeTime } from "@/components/common";
+import { ErrorState, PageHeader, Principal, RelativeTime } from "@/components/common";
 import { TokenStatus } from "@/components/tokens";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -89,22 +89,23 @@ function UsersTable() {
               <TH>User</TH>
               <TH>Kind</TH>
               <TH>Bindings</TH>
-              <TH>Last seen</TH>
               <TH>Created</TH>
               <TH>Status</TH>
             </TR>
           </THead>
           <TBody>
             {users.data.map((u) => {
-              const own = bindings.data?.filter((b) => b.principal === `user:${u.name}`) ?? [];
+              const own = bindings.data?.filter((b) => b.principal === `user:${u.uid}`) ?? [];
               return (
-                <TR key={u.name} className={cn(u.disabled && "opacity-60")}>
+                <TR key={u.uid} className={cn(u.disabled && "opacity-60")}>
                   <TD>
-                    <span className="flex items-center gap-2 font-medium">
-                      <span className="flex size-6 items-center justify-center rounded-full bg-muted text-xs uppercase">{u.name[0]}</span>
-                      {u.name}
-                      {u.admin ? <Badge tone="warning">admin</Badge> : null}
-                    </span>
+                    <Tooltip content={`user:${u.uid}`}>
+                      <span className="flex items-center gap-2 font-medium">
+                        <span className="flex size-6 items-center justify-center rounded-full bg-muted text-xs uppercase">{u.name[0]}</span>
+                        {u.name}
+                        {own.some((b) => b.role === "admin") ? <Badge tone="warning">admin</Badge> : null}
+                      </span>
+                    </Tooltip>
                   </TD>
                   <TD className="text-muted-foreground">{u.kind}</TD>
                   <TD>
@@ -115,9 +116,6 @@ function UsersTable() {
                         </Badge>
                       ))}
                     </span>
-                  </TD>
-                  <TD className="text-muted-foreground">
-                    <RelativeTime iso={u.lastSeenAt} />
                   </TD>
                   <TD className="text-muted-foreground">
                     <RelativeTime iso={u.createdAt} />
@@ -232,7 +230,9 @@ function BindingsTable() {
               const matched = b.role === "admin" ? (repos.data ?? []) : (repos.data ?? []).filter((r) => maskMatches(b.repoMask, r.prefix));
               return (
                 <TR key={b.id}>
-                  <TD className="font-mono text-xs">{b.principal}</TD>
+                  <TD>
+                    <Principal value={b.principal} name={b.name} />
+                  </TD>
                   <TD>
                     <Tooltip content={roleActions[b.role]}>
                       <Badge tone={roleTone[b.role]}>{b.role}</Badge>

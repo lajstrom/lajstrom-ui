@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { Boxes, Database, HardDrive, Package, Upload } from "lucide-react";
 import { useMemo } from "react";
 
-import { reposQuery, whoamiQuery } from "@/api/queries";
+import { callerQuery, reposQuery } from "@/api/queries";
 import type { FormatName, Repo } from "@/api/types";
 import { AccessBadge, ErrorState, FormatMark, PageHeader, RelativeTime } from "@/components/common";
 import { Badge } from "@/components/ui/badge";
@@ -45,7 +45,7 @@ export function ReposPage() {
   const search = useSearch({ strict: false }) as Search;
   const navigate = useNavigate();
   const repos = useQuery(reposQuery);
-  const who = useQuery(whoamiQuery);
+  const who = useQuery(callerQuery);
   const format = search.format ?? "all";
   const q = search.q ?? "";
 

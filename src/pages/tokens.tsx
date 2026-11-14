@@ -4,7 +4,7 @@ import { KeyRound, LogIn } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { createUserToken, revokeUserToken } from "@/api/mutations";
-import { userTokensQuery, whoamiQuery } from "@/api/queries";
+import { callerQuery, userTokensQuery } from "@/api/queries";
 import { setSession } from "@/api/session";
 import type { Token } from "@/api/types";
 import { useSession } from "@/app/session";
@@ -21,7 +21,7 @@ type Search = { all?: string };
 const live = (t: Token) => tokenState(t) === "active" || tokenState(t) === "expiring";
 
 export function TokensPage() {
-  const who = useQuery(whoamiQuery);
+  const who = useQuery(callerQuery);
   const session = useSession();
   const search = useSearch({ strict: false }) as Search;
   const navigate = useNavigate();
