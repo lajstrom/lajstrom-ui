@@ -1,4 +1,4 @@
-import type { PackageSummary, Repo, RepoFormat, VersionDetail, VersionSummary } from "@/api/types";
+import type { Repo, RepoFormat } from "@/api/types";
 
 /** What snippets need to know about where and how the client talks to Lajstrom. */
 export type SnippetContext = {
@@ -27,6 +27,19 @@ export type Snippet = {
 
 export type SnippetGroup = { title: string; description?: string; snippets: Snippet[] };
 
+/** A package as the snippets need it: its name, and what the proposed package facts add. */
+export type InstallPackage = { name: string; latestVersion?: string | null; attrs?: Record<string, string> };
+
+/** One manifest of a version: its tag, digest, lajstrom.* attributes by their full key, and its
+ * metadata layer. */
+export type InstallVersion = {
+  version: string;
+  tag: string;
+  digest: string;
+  attrs?: Record<string, string>;
+  metadata?: Record<string, unknown> | null;
+};
+
 export type MetadataRow = { label: string; value: string | string[]; mono?: boolean; href?: string };
 
 export type FormatSpec = {
@@ -49,7 +62,10 @@ export type FormatSpec = {
   /** How to configure a client for the whole repo. */
   connect(ctx: SnippetContext): SnippetGroup[];
   /** How to install or fetch one package, optionally one version of it. */
-  install(ctx: SnippetContext, pkg: PackageSummary, version?: VersionSummary | VersionDetail): Snippet[];
+  install(ctx: SnippetContext, pkg: InstallPackage, version?: InstallVersion): Snippet[];
+  /** The path below externalURL a client downloads a file of a manifest from (http-routing.md
+   * §3); null for a format without one. `files` are the manifest's file layers, in order. */
+  filePath(repo: string, pkg: string, version: InstallVersion & { files: { digest: string }[] }, file: string): string | null;
   /** Human name of a file layer: "Wheel", "Sources jar", "Debian package". */
   fileRole(mediaType: string, attrs: Record<string, string>): string;
   /** The interesting fields of the metadata layer, in reading order. */

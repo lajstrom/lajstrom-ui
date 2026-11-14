@@ -3,8 +3,8 @@ import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { AlertTriangle, Info, Package as PackageIcon } from "lucide-react";
 import { useMemo } from "react";
 
-import { infoQuery, packageQuery, repoQuery, versionsQuery } from "@/api/queries";
-import type { PackageDetail, Repo } from "@/api/types";
+import { infoQuery, packageQuery, repoQuery, versionQuery, versionsQuery } from "@/api/queries";
+import type { Repo } from "@/api/types";
 import { ErrorState, FormatMark, PageHeader, Principal, RelativeTime, SignedBadge } from "@/components/common";
 import { SnippetTabs } from "@/components/snippets";
 import { Badge } from "@/components/ui/badge";
@@ -19,7 +19,7 @@ import { formatSpec, snippetContext, type FormatSpec } from "@/lib/formats";
 import { variantShort } from "@/lib/variants";
 
 import { MetadataRows } from "./metadata";
-import { groupVersions, packageCrumbs, type VersionGroup } from "./package-model";
+import { derivePackage, groupVersions, packageCrumbs, type PackageInfo, type VersionGroup } from "./package-model";
 import { VersionPage } from "./version";
 
 /** /$format/$repo/<package name>[/-/<version>]: the splat keeps raw paths and maven coordinates whole. */
@@ -42,20 +42,27 @@ function PackagePage({ format, repoName, name }: { format: string; repoName: str
   const versions = useQuery(versionsQuery(format, repoName, name));
   const groups = useMemo(() => groupVersions(versions.data ?? []), [versions.data]);
   const isRaw = format === "raw";
+  // A server without GET …/packages/{name}: the package is what its versions say, and the
+  // newest version in detail adds its metadata.
+  const derived = pkg.data === null;
+  const newest = versions.data?.[0]?.version;
+  const latest = useQuery({ ...versionQuery(format, repoName, name, newest ?? ""), enabled: derived && newest !== undefined });
+  const p: PackageInfo | undefined =
+    pkg.data ?? (derived && versions.data ? derivePackage(format, repoName, name, versions.data, latest.data, spec) : undefined);
+  const failed = pkg.isError ? pkg.error : derived && versions.isError ? versions.error : null;
 
-  if (pkg.isError) {
+  if (failed) {
     return (
       <>
         <PageHeader crumbs={packageCrumbs(format, repoName, name)} title={name} />
         <Card>
-          <ErrorState error={pkg.error} onRetry={() => void pkg.refetch()} />
+          <ErrorState error={failed} onRetry={() => void (pkg.isError ? pkg.refetch() : versions.refetch())} />
         </Card>
       </>
     );
   }
 
-  const p = pkg.data;
-  const nonstandard = versions.data?.some((v) => v.attrs["pypi.nonstandard"] === "true");
+  const nonstandard = versions.data?.some((v) => v.variants.some((x) => x.attrs?.["lajstrom.pypi.nonstandard"] === "true"));
   return (
     <>
       <PageHeader
@@ -90,7 +97,7 @@ function PackagePage({ format, repoName, name }: { format: string; repoName: str
             title="Versions"
             description={
               versions.data
-                ? `${pluralize(groups.length, "version")}${spec.variantLabel ? `, ${pluralize(versions.data.length, "manifest")} (one per ${spec.variantLabel.toLowerCase()})` : ""} · tags are immutable`
+                ? `${pluralize(groups.length, "version")}${spec.variantLabel ? `, ${pluralize(groups.reduce((n, g) => n + g.variants.length, 0), "manifest")} (one per ${spec.variantLabel.toLowerCase()})` : ""} · tags are immutable`
                 : null
             }
           />
@@ -132,6 +139,8 @@ function VersionsTable({
 }) {
   const navigate = useNavigate();
   const isRaw = format === "raw";
+  const sized = groups.some((g) => g.size !== null);
+  const byKnown = groups.some((g) => g.uploadedBy !== null);
   const open = (g: VersionGroup, variant?: string) =>
     void navigate({
       to: "/$format/$repo/$",
@@ -145,9 +154,9 @@ function VersionsTable({
           <TH>Version</TH>
           {spec.variantLabel ? <TH>{spec.variantLabel}</TH> : null}
           {format === "apt" ? <TH>Suite</TH> : null}
-          <TH className="text-right">Size</TH>
+          {sized ? <TH className="text-right">Size</TH> : null}
           <TH>Published</TH>
-          <TH>By</TH>
+          {byKnown ? <TH>By</TH> : null}
         </TR>
       </THead>
       <TBody>
@@ -170,7 +179,12 @@ function VersionsTable({
                   {isRaw ? shortDigest(g.version, 16) : g.version}
                 </Link>
                 {i === 0 ? <Badge tone="primary">{isRaw ? "current" : "latest"}</Badge> : null}
-                <SignedBadge count={g.signatures} compact />
+                {g.yanked ? (
+                  <Tooltip content={g.yanked.reason ? `Yanked: ${g.yanked.reason}` : "Yanked: installers skip it unless pinned (PEP 592)"}>
+                    <Badge tone="warning">yanked</Badge>
+                  </Tooltip>
+                ) : null}
+                <SignedBadge count={g.signatures ?? 0} compact />
                 {g.degraded ? (
                   <Tooltip content="Metadata layer missing or unreadable: indexed from annotations only">
                     <Badge tone="warning">degraded</Badge>
@@ -181,7 +195,7 @@ function VersionsTable({
             {spec.variantLabel ? (
               <TD>
                 <div className="flex flex-wrap gap-1">
-                  {g.manifests.map((m) => (
+                  {g.variants.map((m) => (
                     <Tooltip key={m.digest} content={`${m.variant} · tag ${m.tag}`}>
                       <button
                         type="button"
@@ -197,16 +211,18 @@ function VersionsTable({
             ) : null}
             {format === "apt" ? (
               <TD className="font-mono text-xs text-muted-foreground">
-                {g.manifests[0]?.attrs["deb.suite"]}/{g.manifests[0]?.attrs["deb.component"]}
+                {g.variants[0]?.attrs ? `${g.variants[0].attrs["lajstrom.deb.suite"] ?? ""}/${g.variants[0].attrs["lajstrom.deb.component"] ?? ""}` : "—"}
               </TD>
             ) : null}
-            <TD className="text-right tabular whitespace-nowrap">{formatBytes(g.size)}</TD>
+            {sized ? <TD className="text-right tabular whitespace-nowrap">{g.size === null ? "—" : formatBytes(g.size)}</TD> : null}
             <TD className="text-muted-foreground">
-              <RelativeTime iso={g.createdAt} />
+              <RelativeTime iso={g.publishedAt} />
             </TD>
-            <TD className="text-muted-foreground">
-              <Principal value={g.uploadedBy} />
-            </TD>
+            {byKnown ? (
+              <TD className="text-muted-foreground">
+                <Principal value={g.uploadedBy} />
+              </TD>
+            ) : null}
           </TR>
         ))}
       </TBody>
@@ -214,12 +230,12 @@ function VersionsTable({
   );
 }
 
-function InstallCard({ repo, pkg, spec }: { repo: Repo; pkg: PackageDetail; spec: FormatSpec }) {
+function InstallCard({ repo, pkg, spec }: { repo: Repo; pkg: PackageInfo; spec: FormatSpec }) {
   const info = useQuery(infoQuery);
   const ctx = snippetContext(info.data, repo);
   return (
     <Card>
-      <CardHeader title={repo.format === "raw" ? "Download" : "Install"} description={repo.format === "raw" ? "Always the current version" : `Latest: ${pkg.latestVersion}`} />
+      <CardHeader title={repo.format === "raw" ? "Download" : "Install"} description={repo.format === "raw" ? "Always the current version" : pkg.latestVersion ? `Latest: ${pkg.latestVersion}` : undefined} />
       <CardBody>
         <SnippetTabs snippets={spec.install(ctx, pkg)} />
       </CardBody>
@@ -227,7 +243,8 @@ function InstallCard({ repo, pkg, spec }: { repo: Repo; pkg: PackageDetail; spec
   );
 }
 
-function AboutCard({ pkg, spec, format }: { pkg: PackageDetail; spec: FormatSpec; format: string }) {
+function AboutCard({ pkg, spec, format }: { pkg: PackageInfo; spec: FormatSpec; format: string }) {
+  if (pkg.latestMetadata === undefined) return null;
   const rows = spec.metadataRows(pkg.latestMetadata);
   if (!rows.length) {
     return pkg.latestMetadata === null && format !== "raw" ? (
@@ -250,7 +267,7 @@ function AboutCard({ pkg, spec, format }: { pkg: PackageDetail; spec: FormatSpec
   );
 }
 
-function PackageFacts({ pkg, format, repoName, spec }: { pkg: PackageDetail; format: string; repoName: string; spec: FormatSpec }) {
+function PackageFacts({ pkg, format, repoName, spec }: { pkg: PackageInfo; format: string; repoName: string; spec: FormatSpec }) {
   const info = useQuery(infoQuery);
   const host = info.data ? new URL(info.data.externalURL).host : "";
   return (
@@ -261,7 +278,7 @@ function PackageFacts({ pkg, format, repoName, spec }: { pkg: PackageDetail; for
           <Property label="Name">
             <span className="font-mono text-[12.5px] break-all">{pkg.name}</span>
           </Property>
-          {pkg.nameOci !== pkg.name ? (
+          {pkg.nameOci && pkg.nameOci !== pkg.name ? (
             <Property label="OCI path">
               <Tooltip content="EscapeName of manifest-profile.md §4.1: lowercase, escaped">
                 <span className="font-mono text-[12.5px] break-all">{pkg.nameOci}</span>
@@ -271,17 +288,23 @@ function PackageFacts({ pkg, format, repoName, spec }: { pkg: PackageDetail; for
           <Property label="OCI repo">
             <CopyText value={`${host}/${pkg.ociRepository}`} display={pkg.ociRepository} label="OCI repository" />
           </Property>
-          <Property label="Versions">
-            {formatNumber(pkg.versions)}
-            {pkg.manifests !== pkg.versions ? <span className="text-muted-foreground"> ({pkg.manifests} manifests)</span> : null}
-          </Property>
-          <Property label="Total size">{formatBytes(pkg.size)}</Property>
+          {pkg.versions !== undefined ? (
+            <Property label="Versions">
+              {formatNumber(pkg.versions)}
+              {pkg.manifests !== undefined && pkg.manifests !== pkg.versions ? (
+                <span className="text-muted-foreground"> ({pkg.manifests} manifests)</span>
+              ) : null}
+            </Property>
+          ) : null}
+          {pkg.size !== undefined ? <Property label="Total size">{formatBytes(pkg.size)}</Property> : null}
           <Property label="First published">
             <RelativeTime iso={pkg.createdAt} />
           </Property>
-          <Property label="Updated">
-            <RelativeTime iso={pkg.updatedAt} />
-          </Property>
+          {pkg.updatedAt ? (
+            <Property label="Updated">
+              <RelativeTime iso={pkg.updatedAt} />
+            </Property>
+          ) : null}
           <Property label="Repository">
             <Link to="/$format/$repo" params={{ format, repo: repoName }} className="text-primary hover:underline">
               {format}/{repoName}
