@@ -3,6 +3,9 @@
 
 import type {
   AuditEvent,
+  AuditList,
+  Binding,
+  Caller,
   FacetValue,
   PackageDetail,
   PackageSummary,
@@ -24,7 +27,7 @@ import { buildVersion, type BuiltVersion } from "./data/builders";
 import { mavenVersions } from "./data/maven";
 import { pypiVersions } from "./data/pypi";
 import { rawVersions } from "./data/raw";
-import { bindings, registries, repoSeeds, roleActions, serverInfo, tokens, users, type RepoSeed } from "./data/system";
+import { bindings, registries, repoSeeds, roleActions, serverInfo, tokens, uidOf, users, type MockBinding, type RepoSeed } from "./data/system";
 import { ago, ahead, before, HOST } from "./data/time";
 import { getPersona, type Persona } from "./persona";
 import { keep, persist } from "./state";
@@ -83,15 +86,43 @@ export function isAdmin(persona = getPersona()): boolean {
   return bindings.some((b) => b.principal === `user:${persona}` && b.role === "admin");
 }
 
+// The mock names users `user:<name>` inside; the API answers the canonical `user:<uid>`, and
+// takes either (docs/auth.md, the uid and the name).
+
+/** `user:<name>` as the API answers it, `user:<uid>`; other principals as they are. */
+export function apiPrincipal(principal: string): string {
+  return principal.startsWith("user:") ? `user:${uidOf(principal.slice(5))}` : principal;
+}
+
+/** A principal of a request, `user:<name>` or `user:<uid>`, as the mock names it inside. */
+function mockPrincipal(principal: string): string {
+  const user = principal.startsWith("user:") ? userByRef(principal.slice(5)) : undefined;
+  return user ? `user:${user.name}` : principal;
+}
+
+/** A user by its name or its uid, as /api/v1/users/{user} takes it. */
+export function userByRef(ref: string) {
+  return users.find((u) => u.name === ref || u.uid === ref);
+}
+
+/** The caller of /api/v1/info. */
+export function caller(persona = getPersona()): Caller {
+  if (persona === "anonymous") return { principal: "anonymous", kind: "anonymous", name: "anonymous", admin: false };
+  return { principal: apiPrincipal(`user:${persona}`), kind: "user", name: persona, uid: uidOf(persona), admin: isAdmin(persona) };
+}
+
 export function whoami(persona = getPersona()): WhoAmI {
-  if (persona === "anonymous") return { principal: "anonymous", kind: "anonymous", name: "", admin: false, bindings: [] };
-  return {
-    principal: `user:${persona}`,
-    kind: "user",
-    name: persona,
-    admin: isAdmin(persona),
-    bindings: bindings.filter((b) => b.principal === `user:${persona}`),
-  };
+  return { principal: apiPrincipal(`user:${persona}`), kind: "user", name: persona, uid: uidOf(persona) };
+}
+
+function bindingJson(b: MockBinding): Binding {
+  return { ...b, principal: apiPrincipal(b.principal), name: b.principal.startsWith("user:") ? b.principal.slice(5) : undefined };
+}
+
+/** GET /api/v1/bindings, of every principal or of one. */
+export function listBindings(principal: string | null): Binding[] {
+  const of = principal ? mockPrincipal(principal) : null;
+  return bindings.filter((b) => !of || b.principal === of).map(bindingJson);
 }
 
 // --- Repos ----------------------------------------------------------------------------------
@@ -458,8 +489,23 @@ const clientOf: Record<string, string> = {
   maven: "Apache-Maven/3.9.9 (Java 21.0.4)",
 };
 
-function auditLog(): AuditEvent[] {
-  const events: Omit<AuditEvent, "id">[] = [];
+/** An audit row as the mock keeps it: users by name, empty fields as "" and null. The API
+ * answers it as an AuditEvent (auditJson). */
+type MockEvent = {
+  at: string;
+  principal: string;
+  action: string;
+  repo: string;
+  subject: string;
+  digest: string | null;
+  ip: string;
+  details: Record<string, unknown>;
+  state?: AuditEvent["state"];
+  error?: string;
+};
+
+function auditLog(): (MockEvent & { id: number })[] {
+  const events: MockEvent[] = [];
   for (const v of allVersions) {
     const format = v.format;
     const principal = v.uploadedBy ?? "user:admin";
@@ -500,6 +546,18 @@ function auditLog(): AuditEvent[] {
     { at: ago(12, 3), principal: "user:admin", action: "repo.update", repo: "maven/payments", subject: "maven/payments", digest: null, ip: ipOf["user:admin"]!, details: { "policy.maven.sessionTimeout": ["30m", "45m"], "policy.maven.sessionExpiry": ["abort", "seal"] } },
     { at: ago(1, 1), principal: "user:bob", action: "delete", repo: "raw/scratch", subject: "tmp/build-4702.log@3b0c4f1a9e2d7c55", digest: `sha256:${sha256Hex("deleted:build-4702")}`, ip: ipOf["user:bob"]!, details: { versions: 1 } },
     { at: ago(2, 6), principal: "user:admin", action: "repo.reindex", repo: "raw/scratch", subject: "raw/scratch", digest: null, ip: ipOf["user:admin"]!, details: { removed: 1, foreign: 1 } },
+    {
+      at: ago(0, 7),
+      principal: "user:bob",
+      action: "push",
+      repo: "raw/scratch",
+      subject: "tmp/heapdump-2026-11-05.hprof",
+      digest: `sha256:${sha256Hex("failed:heapdump")}`,
+      ip: ipOf["user:bob"]!,
+      details: { client: "curl/8.5.0" },
+      state: "failed",
+      error: "the registry refused the blob: 413 Request Entity Too Large",
+    },
   );
   events.push(...demoEvents);
   events.sort((a, b) => b.at.localeCompare(a.at));
@@ -507,20 +565,51 @@ function auditLog(): AuditEvent[] {
 }
 
 /** The audit log, computed again after a change in the demo. */
-let auditCache: AuditEvent[] | null = null;
+let auditCache: (MockEvent & { id: number })[] | null = null;
 const audit = () => (auditCache ??= auditLog());
 
-export type AuditQuery = { repo?: string; principal?: string; action?: string; since?: string; until?: string; limit?: number; cursor?: string };
+/** A row as the API answers it: canonical principals, empty fields left out. */
+function auditJson(e: MockEvent & { id: number }): AuditEvent {
+  return {
+    id: e.id,
+    at: e.at,
+    principal: apiPrincipal(e.principal),
+    principalName: e.principal.startsWith("user:") ? e.principal.slice(5) : undefined,
+    action: e.action,
+    repo: e.repo || undefined,
+    subject: e.subject ? apiPrincipal(e.subject) : undefined,
+    digest: e.digest ?? undefined,
+    ip: e.ip || undefined,
+    details: Object.keys(e.details).length ? e.details : undefined,
+    state: e.state ?? "ok",
+    error: e.error,
+  };
+}
 
-export function listAudit(q: AuditQuery) {
+export type AuditQuery = {
+  repo?: string;
+  principal?: string;
+  action?: string;
+  state?: string;
+  since?: string;
+  until?: string;
+  limit?: number;
+  cursor?: string;
+};
+
+export function listAudit(q: AuditQuery): AuditList {
   let rows = audit();
   if (q.repo) rows = rows.filter((e) => e.repo === q.repo);
-  if (q.principal) rows = rows.filter((e) => e.principal === q.principal);
+  if (q.principal) {
+    const of = mockPrincipal(q.principal);
+    rows = rows.filter((e) => e.principal === of);
+  }
   if (q.action) rows = rows.filter((e) => e.action === q.action);
+  if (q.state) rows = rows.filter((e) => (e.state ?? "ok") === q.state);
   if (q.since) rows = rows.filter((e) => e.at >= q.since!);
-  if (q.until) rows = rows.filter((e) => e.at <= q.until!);
-  const { page, ...info } = paginate(rows, q.limit ?? 50, q.cursor);
-  return { events: page, ...info };
+  if (q.until) rows = rows.filter((e) => e.at < q.until!);
+  const { page, next } = paginate(rows, q.limit ?? 100, q.cursor);
+  return { events: page.map(auditJson), next: next ?? undefined };
 }
 
 
@@ -533,11 +622,11 @@ export function listAudit(q: AuditQuery) {
 /** Repos of the seed deleted in the demo: their seeded versions go when it reloads. */
 const deletedRepos = new Set<string>();
 /** Audit events of changes the data does not show by itself: updates and deletes. */
-const demoEvents: Omit<AuditEvent, "id">[] = [];
+const demoEvents: MockEvent[] = [];
 
 const DEMO_IP = "192.0.2.10";
 
-function changed(event?: Omit<AuditEvent, "id">): void {
+function changed(event?: MockEvent): void {
   if (event) demoEvents.push(event);
   auditCache = null;
   persist();
@@ -562,7 +651,7 @@ function dropRepoData(repoKey: string): number {
 keep("db", {
   save: () => ({ repos: repoSeeds, deletedRepos: [...deletedRepos], events: demoEvents }),
   load: (data) => {
-    const d = data as { repos?: RepoSeed[]; deletedRepos?: string[]; events?: Omit<AuditEvent, "id">[] };
+    const d = data as { repos?: RepoSeed[]; deletedRepos?: string[]; events?: MockEvent[] };
     if (!Array.isArray(d.repos)) return;
     repoSeeds.splice(0, repoSeeds.length, ...d.repos);
     for (const k of d.deletedRepos ?? []) {

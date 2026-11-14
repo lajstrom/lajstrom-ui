@@ -4,7 +4,7 @@ import { Boxes, Braces, Check, FlaskConical, History, KeyRound, LogIn, LogOut, M
 import { useEffect, useState } from "react";
 
 import { signOut } from "@/api/auth";
-import { infoQuery, whoamiQuery } from "@/api/queries";
+import { callerQuery, infoQuery } from "@/api/queries";
 import { RelativeTime } from "@/components/common";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -77,7 +77,7 @@ function ThemeMenu() {
 }
 
 function UserMenu() {
-  const who = useQuery(whoamiQuery);
+  const who = useQuery(callerQuery);
   const session = useSession();
   const navigate = useNavigate();
   const here = useRouterState({ select: (s) => s.location.href });
@@ -111,18 +111,12 @@ function UserMenu() {
       </MenuTrigger>
       <MenuContent className="w-72">
         <MenuLabel>
-          Signed in as <span className="font-mono text-foreground">{me.principal}</span>
+          Signed in as{" "}
+          <Tooltip content={me.principal}>
+            <span className="font-mono text-foreground">{me.name}</span>
+          </Tooltip>
           {me.admin ? <Badge tone="primary" className="ml-1.5">admin</Badge> : null}
         </MenuLabel>
-        {me.bindings?.length ? (
-          <div className="px-2 pb-1.5 text-xs text-muted-foreground">
-            {me.bindings.map((b) => (
-              <div key={b.id} className="font-mono">
-                {b.role} on {b.repoMask}
-              </div>
-            ))}
-          </div>
-        ) : null}
         {session?.expiresAt ? (
           <div className="px-2 pb-1.5 text-xs text-muted-foreground">
             Session ends <RelativeTime iso={session.expiresAt} />
@@ -164,7 +158,7 @@ function DemoBar({ forced }: { forced: boolean }) {
 
 export function AppShell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const who = useQuery(whoamiQuery);
+  const who = useQuery(callerQuery);
   const info = useQuery(infoQuery);
   const demo = demoMode();
   const session = useSession();
