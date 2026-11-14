@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { AlertTriangle, ChevronRight, Construction, FlaskConical, Globe, KeyRound, Lock, RefreshCw, ShieldCheck, User, UserX } from "lucide-react";
+import { AlertTriangle, ChevronRight, Construction, FlaskConical, Globe, KeyRound, Lock, RefreshCw, ShieldCheck, User, Users, UserX } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { ApiError, isUnavailable, isUnreachable } from "@/api/client";
@@ -43,11 +43,13 @@ export function RelativeTime({ iso, className }: { iso: string | null | undefine
 }
 
 /** A principal in canonical form (rbac.md §1): user:alice, token:12, anonymous. */
-export function Principal({ value, className }: { value: string | null | undefined; className?: string }) {
+/** A principal: `user:<uid>` with the user's name when the answer has it, `group:<name>`,
+ * `token:<id>` or `anonymous`. The canonical form is in the tooltip. */
+export function Principal({ value, name, className }: { value: string | null | undefined; name?: string; className?: string }) {
   if (!value) return <span className="text-muted-foreground">—</span>;
-  const [kind, name] = value.includes(":") ? (value.split(":", 2) as [string, string]) : [value, ""];
-  const Icon = kind === "token" ? KeyRound : kind === "anonymous" ? UserX : User;
-  const label = kind === "token" ? `deploy token #${name}` : kind === "anonymous" ? "anonymous" : name;
+  const [kind, id] = value.includes(":") ? (value.split(":", 2) as [string, string]) : [value, ""];
+  const Icon = kind === "token" ? KeyRound : kind === "anonymous" ? UserX : kind === "group" ? Users : User;
+  const label = kind === "token" ? `deploy token #${id}` : kind === "anonymous" ? "anonymous" : (name ?? id);
   return (
     <Tooltip content={value}>
       <span className={cn("inline-flex items-center gap-1 whitespace-nowrap", className)}>
@@ -227,6 +229,39 @@ type PaginationProps = {
   onCursor: (cursor: string | undefined) => void;
   noun?: string;
 };
+
+type CursorPaginationProps = {
+  shown: number;
+  /** The server's cursor of the page after this one; absent on the last page. */
+  next: string | undefined;
+  /** The cursor this page was asked with; absent on the first page. */
+  cursor: string | undefined;
+  onCursor: (cursor: string | undefined) => void;
+  noun?: string;
+};
+
+/** Paging of the server's lists, which go forward only: a cursor holds the place of the last
+ * row, and there is no total (docs/api.md, Conventions). The way back is the first page, or the
+ * browser's Back when the page pushes each cursor to the history. */
+export function CursorPagination({ shown, next, cursor, onCursor, noun = "items" }: CursorPaginationProps) {
+  if (!next && !cursor) return null;
+  return (
+    <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-2 text-xs text-muted-foreground">
+      <span className="tabular">
+        {shown} {noun}
+        {cursor ? " on this page" : " on the first page"}
+      </span>
+      <div className="flex items-center gap-1">
+        <Button size="sm" disabled={!cursor} onClick={() => onCursor(undefined)}>
+          First page
+        </Button>
+        <Button size="sm" disabled={!next} onClick={() => onCursor(next)}>
+          Next
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 export function Pagination({ total, shown, next, prev, start, onCursor, noun = "items" }: PaginationProps) {
   if (total === 0 || (!next && !prev)) return null;

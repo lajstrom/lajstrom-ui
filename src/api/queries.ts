@@ -1,8 +1,8 @@
 import { keepPreviousData, queryOptions } from "@tanstack/react-query";
 
-import { ApiError, apiGet, apiPath, isUnavailable } from "./client";
+import { apiGet, apiPath } from "./client";
 import type {
-  AuditPage,
+  AuditList,
   Binding,
   PackageDetail,
   PackageList,
@@ -16,7 +16,6 @@ import type {
   User,
   VersionDetail,
   VersionSummary,
-  WhoAmI,
 } from "./types";
 
 /** A repo as the server answers it: everything but `prefix`, which the UI derives. */
@@ -27,36 +26,30 @@ export function normalizeRepo(r: RepoAnswer): Repo {
   return { ...r, prefix: r.prefix ?? `${r.format}/${r.name}` };
 }
 
-/** GET /api/v1/info (proposed), or, from a server without it, what /-/version tells. */
+/** Every page of one of the server's lists, following `next`: users and bindings, which an
+ * admin reads whole. */
+async function allPages<T>(path: string, key: string, signal: AbortSignal): Promise<T[]> {
+  const items: T[] = [];
+  let cursor: string | undefined;
+  for (let pages = 0; pages < 100; pages++) {
+    const page = await apiGet<Record<string, unknown> & { next?: string }>(path, { cursor }, signal);
+    items.push(...((page[key] as T[] | undefined) ?? []));
+    cursor = page.next;
+    if (!cursor) break;
+  }
+  return items;
+}
+
+/** GET /api/v1/info. It answers without credentials too, so it is also who the caller is: a
+ * change of session resets every query (main.tsx). */
 export const infoQuery = queryOptions({
   queryKey: ["info"],
-  queryFn: async ({ signal }): Promise<ServerInfo> => {
-    try {
-      return await apiGet<ServerInfo>(apiPath("info"), undefined, signal);
-    } catch (err) {
-      if (!isUnavailable(err)) throw err;
-    }
-    const v = await apiGet<Pick<ServerInfo, "version" | "commit" | "date">>("/-/version", undefined, signal);
-    return { ...v, externalURL: window.location.origin, formats: [] };
-  },
+  queryFn: ({ signal }) => apiGet<ServerInfo>(apiPath("info"), undefined, signal),
   staleTime: Infinity,
 });
 
-const anonymous: WhoAmI = { principal: "anonymous", kind: "anonymous", name: "" };
-
-/** The caller. The server answers 401 to a request without credentials: that is anonymous. */
-export const whoamiQuery = queryOptions({
-  queryKey: ["whoami"],
-  queryFn: async ({ signal }) => {
-    try {
-      return await apiGet<WhoAmI>(apiPath("whoami"), undefined, signal);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) return anonymous;
-      throw err;
-    }
-  },
-  staleTime: 5 * 60_000,
-});
+/** The caller, from /api/v1/info: its principal, and whether it reaches the admin role. */
+export const callerQuery = queryOptions({ ...infoQuery, select: (info: ServerInfo) => info.caller });
 
 export const reposQuery = queryOptions({
   queryKey: ["repos"],
@@ -145,23 +138,23 @@ export const registriesQuery = queryOptions({
   queryFn: ({ signal }) => apiGet<{ registries: Registry[] }>(apiPath("registries"), undefined, signal).then((r) => r.registries),
 });
 
-export type AuditParams = { repo?: string; principal?: string; action?: string; since?: string; cursor?: string };
+export type AuditParams = { repo?: string; principal?: string; action?: string; state?: string; since?: string; cursor?: string };
 
 export const auditQuery = (params: AuditParams) =>
   queryOptions({
     queryKey: ["audit", params],
-    queryFn: ({ signal }) => apiGet<AuditPage>(apiPath("audit"), { ...params, limit: 50 }, signal),
+    queryFn: ({ signal }) => apiGet<AuditList>(apiPath("audit"), { ...params, limit: 50 }, signal),
     placeholderData: keepPreviousData,
   });
 
 export const usersQuery = queryOptions({
   queryKey: ["users"],
-  queryFn: ({ signal }) => apiGet<{ users: User[] }>(apiPath("users"), undefined, signal).then((r) => r.users),
+  queryFn: ({ signal }) => allPages<User>(apiPath("users"), "users", signal),
 });
 
 export const bindingsQuery = queryOptions({
   queryKey: ["bindings"],
-  queryFn: ({ signal }) => apiGet<{ bindings: Binding[] }>(apiPath("bindings"), undefined, signal).then((r) => r.bindings),
+  queryFn: ({ signal }) => allPages<Binding>(apiPath("bindings"), "bindings", signal),
 });
 
 /** The personal access tokens of a user, the revoked and expired ones included. */
