@@ -33,14 +33,8 @@ export type Caller = Schemas["Caller"];
 /** GET /api/v1/whoami; without credentials the server answers 401. */
 export type WhoAmI = Schemas["Whoami"];
 
-/** repos.policy. PATCH merges. The key of the session expiry policy is not named in the
- * plan yet; "maven.sessionExpiry" is this prototype's proposal. */
-export type RepoPolicy = {
-  maxFileSize?: number;
-  blobRedirect?: "auto" | "never";
-  "maven.sessionTimeout"?: string;
-  "maven.sessionExpiry"?: "seal" | "abort";
-};
+/** repos.policy, with the keys the server reads; an absent key takes its default. */
+export type RepoPolicy = Schemas["Policy"];
 
 /** Reindex and reconcile status of a repo (the plan's `reindex: {state, started, done, errors}`). */
 export type ReindexStatus = {
@@ -71,21 +65,13 @@ export type RepoStats = {
   lastPushAt: string | null;
 };
 
-/** A repo as GET /api/v1/repos answers it (control plane, index-schema.md `repos`), plus
- * `prefix`, which the UI derives, and the proposed fields of api-proposal.md §3.2. */
-export type Repo = {
-  format: RepoFormat;
-  name: string;
-  kind: "hosted" | "proxy" | "group";
-  registry: string;
+/** A repo as GET /api/v1/repos answers it, plus `prefix`, which the UI derives, and the
+ * proposed fields of api-proposal.md §3.2 (lajstrom/lajstrom#957). A group has no registry and
+ * no policy; a proxy has its upstream, a group its members. */
+export type Repo = Schemas["Repo"] & {
   /** <format>/<name>: the repo's path on every protocol and its OCI path below the instance
    * prefix. Not in the answer: src/api/queries.ts derives it. */
   prefix: string;
-  anonymousRead: boolean;
-  /** null when the repo has no policy. */
-  policy: RepoPolicy | null;
-  createdAt: string;
-  updatedAt: string;
   /** Proposed: derived counts. */
   stats?: RepoStats;
   /** Proposed: what the caller may do here (rbac.md §2). Absent: the UI offers the actions and
@@ -305,17 +291,24 @@ export type PublishSession = {
   expiresAt: string;
 };
 
-/** The report of `lajstrom reindex --report` / POST …/reindex. The plan names no
- * fields; these are the prototype's proposal. */
-export type ReindexReport = {
-  repo: string;
-  startedAt: string;
-  finishedAt: string;
-  ociRepositories: number;
-  manifests: number;
-  added: number;
-  updated: number;
-  removed: number;
-  degraded: number;
-  foreign: { path: string; tag: string; digest: string; reason: string }[];
+/** GET …/repos/{format}/{repo}/reindex: the latest run that covered the repo. */
+export type ReindexRun = Omit<Schemas["ReindexRun"], "report"> & { report: ReindexReport | null };
+
+/** The repo's part of a run's report. The server's openapi.yaml names two of its fields; the
+ * others are those docs/api.md shows (Reindex), optional until the description has them. */
+export type ReindexReport = NonNullable<Schemas["ReindexRun"]["report"]> & {
+  repo?: string;
+  ociRepositories?: number;
+  manifests?: number;
+  added?: number;
+  updated?: number;
+  unchanged?: number;
+  removed?: number;
+  pending?: number;
+  degraded?: number;
+  referrers?: number;
+  /** Manifests under the repo's path that Lajstrom did not write: not indexed. */
+  foreign?: { repository: string; tag: string; digest: string; mediaType: string }[];
+  errors?: unknown[];
+  truncated?: boolean;
 };
