@@ -163,7 +163,8 @@ alone.
 
 ```
 src/
-  api/          types of /api/v1, fetch client, session and sign-in, queries and mutations
+  api/          types of /api/v1 (server.gen.ts from openapi/server.yaml), fetch client, session
+                and sign-in, queries and mutations
   app/          bootstrap, runtime config, demo mode, router, shell (header, menus), palette, theme
   pages/        one file per screen; package-model.ts groups versions and builds breadcrumbs
   components/   shared pieces; ui/ holds the primitives (button, table, tooltip, …)
@@ -172,6 +173,8 @@ src/
     profile.ts  Escape, EscapeComponent, tags and package paths (manifest profile §4)
   mocks/        the demo's API: handlers, authentication and tokens (auth.ts), an in-memory
                 "server" (db.ts), seed data per format
+openapi/        server.yaml: the server's OpenAPI description, vendored at a commit
+scripts/        vendoring it and generating src/api/server.gen.ts; the Pages build
 docker/         nginx.conf and the start script of the image
 deploy/         Kubernetes and compose examples
 docs/           the API proposal and the ADRs of the UI
