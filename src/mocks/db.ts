@@ -35,6 +35,7 @@ import { buildVersion, type BuiltVersion } from "./data/builders";
 import { mavenVersions } from "./data/maven";
 import { pypiVersions } from "./data/pypi";
 import { rawVersions } from "./data/raw";
+import { reindexFindings } from "./data/reindex";
 import { bindings, registries, repoSeeds, roleActions, serverInfo, tokens, uidOf, users, type MockBinding, type RepoSeed } from "./data/system";
 import { ago, ahead, before, HOST } from "./data/time";
 import { getPersona, type Persona } from "./persona";
@@ -536,7 +537,10 @@ export function listSessions(repo: Repo): PublishSession[] {
 
 function reindexReport(repo: MockRepo): ReindexReport {
   const pkgs = byRepo.get(repo.prefix) ?? new Map<string, Row[]>();
-  const manifests = [...pkgs.values()].flat();
+  const found = reindexFindings(repo.prefix, pkgs);
+  // The rows of an OCI repository the registry does not know were not seen.
+  const unknown = new Set(found.repositoryUnknown.map((u) => u.digest));
+  const manifests = [...pkgs.values()].flat().filter((v) => !unknown.has(v.digest));
   const foreign: NonNullable<ReindexReport["foreign"]> = [];
   let removed = 0;
   if (repo.prefix === "raw/assets") {
@@ -556,27 +560,38 @@ function reindexReport(repo: MockRepo): ReindexReport {
     });
     removed = 1;
   }
+  foreign.push(...found.foreign);
+  // The run read the tags of the rows and those its lists name. It reads a degraded row again
+  // and writes it (updated), and sees a drifted one under another digest (not unchanged).
+  const tagged = [...foreign, ...found.orphanReferrers, ...found.orphanJournal, ...found.errors];
+  const repositories = new Set([
+    ...manifests.map((v) => packagePath(repo.format, v.packageName)),
+    ...tagged.map((f) => f.repository).filter(Boolean),
+    ...found.split.map((s) => s.other),
+  ]);
+  const degraded = manifests.filter((v) => v.degraded).length;
+  const attachments = manifests.reduce((n, v) => n + v.referrers.signatures + v.referrers.sboms + v.referrers.attestations, 0);
   return {
     repo: repo.prefix,
-    ociRepositories: pkgs.size + foreign.length,
-    manifests: manifests.length + foreign.length,
+    ociRepositories: repositories.size,
+    manifests: manifests.length + tagged.filter((f) => f.tag).length + found.split.reduce((n, s) => n + s.otherTags.length, 0),
     added: 0,
-    updated: 0,
-    unchanged: manifests.length,
+    updated: degraded,
+    unchanged: manifests.length - degraded - found.drift.length,
     removed,
     pending: 0,
     deletedPending: 0,
-    degraded: manifests.filter((v) => v.degraded).length,
-    referrers: manifests.reduce((n, v) => n + v.referrers.signatures + v.referrers.sboms + v.referrers.attestations, 0),
-    attachments: manifests.reduce((n, v) => n + v.referrers.signatures + v.referrers.sboms + v.referrers.attestations, 0),
+    degraded,
+    referrers: attachments + found.orphanReferrers.length,
+    attachments,
     foreign,
-    orphanReferrers: [],
-    orphanJournal: null,
-    drift: [],
-    split: null,
-    repositoryUnknown: null,
+    orphanReferrers: found.orphanReferrers,
+    orphanJournal: found.orphanJournal,
+    drift: found.drift,
+    split: found.split,
+    repositoryUnknown: found.repositoryUnknown,
     repairedReferrers: [],
-    errors: [],
+    errors: found.errors,
     truncated: false,
   };
 }

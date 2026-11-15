@@ -157,6 +157,21 @@ export type PublishSession = Schemas["PublishSession"];
 /** GET …/repos/{format}/{repo}/reindex: the latest run that covered the repo. */
 export type ReindexRun = Schemas["ReindexRun"];
 
-/** The repo's part of a run's report. The server's openapi.yaml names two of its fields; the
- * others, proposed, are those docs/api.md shows (lajstrom/lajstrom#1128). */
+/** The repo's part of a run's report (lajstrom/lajstrom#1128): counts, and lists of at most
+ * 1000 entries each. */
 export type ReindexReport = NonNullable<ReindexRun["report"]>;
+
+/** A manifest, or a failure, of a report's list: foreign, orphans, errors. */
+export type ReindexFinding = Schemas["ReindexFinding"];
+
+/** A tag that names another digest in the registry than in the index. */
+export type ReindexDrift = Schemas["ReindexDrift"];
+
+/** A package at two forms of its OCI name (ADR 0017 of the server). */
+export type ReindexSplit = Schemas["ReindexSplit"];
+
+/** A version of the index whose OCI repository the registry does not know. */
+export type ReindexRepositoryUnknown = Schemas["ReindexRepositoryUnknown"];
+
+/** A referrers index that a run pushed again with the referrers it lacked. */
+export type RepairedReferrersIndex = Schemas["RepairedReferrersIndex"];

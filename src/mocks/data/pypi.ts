@@ -234,6 +234,24 @@ export function pypiVersions(): VersionSpec[] {
       },
       [{ version: "2019.3-hotfix", files: { sdist: 88_412 }, at: ago(410), by: "user:admin", nonstandard: true, degraded: true, zipSdist: true }],
     ),
+    // Stored at acme-blobs, the form of its OCI name before ADR 0017 (blob_73 now): the last
+    // reindex finds 1.2.0 at the newest form too, a split (src/mocks/data/reindex.ts).
+    ...project(
+      internal,
+      "acme-blobs",
+      {
+        summary: "Client for the Acme blob store, on S3 and GCS",
+        requiresPython: ">=3.10",
+        requiresDist: ["boto3>=1.34", "google-cloud-storage>=2.16", "tenacity>=8.2"],
+        license: "LicenseRef-Acme-Proprietary",
+        author: "Storage Team",
+        urls: ACME_URLS("storage/acme-blobs"),
+      },
+      [
+        { version: "1.1.0", files: { "py3-none-any": 21_904, sdist: 18_337 }, at: ago(140, 2), by: "user:carol" },
+        { version: "1.2.0", files: { "py3-none-any": 23_118, sdist: 19_026 }, at: ago(64, 1), by: "user:carol" },
+      ],
+    ),
     ...project(
       payments,
       "payments-sdk",
