@@ -176,6 +176,124 @@ everything else to the Lajstrom server on the same host. One origin means no COR
 server does not answer. [deploy/compose.yaml](deploy/compose.yaml) runs the image
 alone.
 
+## Releases
+
+A tag `vX.Y.Z` releases the UI: [.github/workflows/release.yml](.github/workflows/release.yml)
+builds one bundle and publishes it twice, as a tar.gz for any static origin and as the image.
+
+| Artifact | Where |
+| --- | --- |
+| `lajstrom-ui-X.Y.Z.tar.gz`: one directory with `index.html`, `assets/`, `build.json` and the rest of the build, relative asset paths, no `config.json` | the GitHub release |
+| `lajstrom-ui-X.Y.Z.tar.gz.sbom.json`, an SPDX SBOM of the npm packages in the bundle | the GitHub release |
+| `checksums.txt` (SHA-256 of both) and `checksums.txt.sigstore.json`, its cosign bundle | the GitHub release |
+| the image: the same files behind nginx, linux/amd64 and linux/arm64, with SBOM and provenance attestations, the bundle's SBOM as an attestation and a cosign signature | `ghcr.io/lajstrom/lajstrom-ui:vX.Y.Z`; `:latest` too on a stable version |
+
+The signatures are keyless, as the server's: cosign gets a certificate for the identity of the
+release workflow at the tag. A tag with a suffix (`v0.1.0-rc.1`) is a pre-release, without
+`latest`. The notes list the changes since the previous stable tag.
+
+Every build knows what it is and which server API it was built for. `build.json` next to
+`index.html` says it (`curl https://<host>/ui/build.json`), and so do the About dialog (in the
+footer), the image's label `io.lajstrom.ui.server-api` and the release notes:
+
+```json
+{
+  "version": "v0.1.0",
+  "commit": "8d05e41",
+  "date": "2026-11-15T21:52:08Z",
+  "contract": { "api": "v1", "serverCommit": "f0d887d5…", "serverVersion": "v0.0.1-959-gf0d887d" }
+}
+```
+
+### Cutting a release
+
+1. `main` is green, e2e included. For a stable version, vendor the server's API at the server
+   release this UI is for: `npm run update:openapi -- vA.B.C`.
+2. Tag and push the tag; the run takes about five minutes:
+
+   ```sh
+   TAG=v0.1.0-rc.1
+   git switch main && git pull --ff-only
+   git tag -a "$TAG" -m "$TAG" && git push origin "$TAG"
+   gh run watch "$(gh run list --workflow release.yml --branch "$TAG" --limit 1 --json databaseId --jq '.[0].databaseId')"
+   ```
+
+3. Read the draft, `gh release view "$TAG" --web`: four assets and the server API it was built
+   for. Add the version to [Compatibility](#compatibility).
+4. The first release only: `gh api orgs/lajstrom/packages/container/lajstrom-ui --jq .visibility`
+   prints `public`; otherwise make the package public in its settings.
+5. Publish the draft: `gh release edit "$TAG" --draft=false`.
+
+A failed run: rerun it. A published release keeps its tag; fix forward with the next version.
+
+Every pull request and push to `main` runs the same workflow as a dry run. It builds the bundle,
+tries the tar.gz at the root of a static origin and below `/ui/` of the image made of it, in
+Chromium (`scripts/try-bundle.ts`), builds the image for both platforms, and keeps the bundle as
+the run's artifact `release`. It pushes, signs and releases nothing. Locally:
+
+```sh
+npm run build:release                              # dist/release/, as the workflow builds it
+node scripts/try-bundle.ts http://localhost:8081/  # a served bundle, with "mock": true
+```
+
+Verifying a release, with cosign 3:
+
+```sh
+TAG=v0.1.0-rc.1
+ID="https://github.com/lajstrom/lajstrom-ui/.github/workflows/release.yml@refs/tags/${TAG}"
+ISSUER=https://token.actions.githubusercontent.com
+gh release download "$TAG" --repo lajstrom/lajstrom-ui --dir "$(mktemp -d)" && cd "$_"
+cosign verify-blob checksums.txt --bundle checksums.txt.sigstore.json \
+  --certificate-identity "$ID" --certificate-oidc-issuer "$ISSUER"
+sha256sum -c checksums.txt   # shasum -a 256 -c on macOS
+cosign verify "ghcr.io/lajstrom/lajstrom-ui:${TAG}" \
+  --certificate-identity "$ID" --certificate-oidc-issuer "$ISSUER" > /dev/null
+```
+
+### Deploying the bundle
+
+The bundle is static files whose paths are relative to `<base href="/">` in its `index.html`:
+that one tag says where it lives, and the code finds the rest from where its files came. It
+reads `config.json` next to `index.html`; without one it takes the defaults, the API on the
+same origin. Answer `index.html` for a path below the bundle that has no file, so that links
+into the app open; serve `config.json` and `index.html` with `Cache-Control: no-cache` and
+`assets/` as immutable.
+
+- **The image, below `/ui/`** behind the edge of Lajstrom ([Kubernetes](#kubernetes)): nothing
+  to do. Its nginx serves `index.html` with `<base href="/ui/">` and writes `config.json` from
+  the environment.
+- **Below `/ui/` of a web server you run**, such as the edge itself: unpack the tar.gz into
+  `<root>/ui/` and set the base as the image does, for nginx:
+
+  ```nginx
+  location /ui/ {
+    try_files $uri /ui/index.html;
+    sub_filter '<base href="/">' '<base href="/ui/">';
+  }
+  ```
+
+  A server that cannot rewrite answers takes the tag changed once after unpacking:
+  `sed -i 's|<base href="/">|<base href="/ui/">|' index.html`.
+- **At the root of a static origin**, such as object storage behind a CDN: upload the files as
+  they are, with `config.json`, and let the CDN answer a path without a file with `/index.html`
+  and status 200. The base `/` is right there. An API on another origin needs CORS, which the
+  server does not answer yet ([lajstrom/lajstrom#949](https://github.com/lajstrom/lajstrom/issues/949)):
+  until then such a UI runs the demo (`"mock": true`), or the CDN also routes `/api/` and `/-/`
+  to Lajstrom.
+
+### Compatibility
+
+The UI reads one major version of the server's API, `/api/v1`, and is built against the
+server's `openapi.yaml` at one commit, `openapi/server.yaml`: that commit is its contract.
+e2e runs the UI against the server at that commit on every pull request, and against the
+server's main every night. Before 1.0 a minor version of the server may change the API, so a UI
+release works with the server release that contains its contract and that release's patch
+versions. Against an older server some screens say that the server has no endpoint yet.
+
+| UI | Built for the server's API at | Works with |
+| --- | --- | --- |
+| `main` | lajstrom/lajstrom@f0d887d (v0.0.1-959-gf0d887d) | the server at that commit; its `main`, checked every night |
+
 ## Layout
 
 ```
@@ -193,7 +311,7 @@ src/
 openapi/        server.yaml: the server's OpenAPI description, vendored at a commit;
                 proposed.yaml: what the UI adds to it (docs/api-proposal.md)
 scripts/        vendoring it, generating public/openapi.yaml and src/api/openapi.gen.ts; the
-                Pages build
+                Pages build; the release bundle and its try in a browser
 e2e/            the end-to-end test against a real server: the server and its packages
                 (server.sh, fixtures.py), the screens in Playwright (*.e2e.ts)
 docker/         nginx.conf and the start script of the image
@@ -232,7 +350,10 @@ the snippet scan has nothing to match.
 ## Not done yet
 
 - **Images per environment**: dev, test and prod images are a requirement; one image configured
-  by environment variables exists today. What differs between them is still open.
+  by environment variables exists today. What differs between them is still open
+  ([#16](https://github.com/lajstrom/lajstrom-ui/issues/16)). A release builds one tar.gz and
+  one image of it; images per environment would be built from that same tar.gz in the release's
+  job `publish`, so that no environment gets a bundle of its own.
 - **Management screens** (repositories, users, bindings): after the read-only UI. The server's
   endpoints can be tried on the API page meanwhile.
 - Code splitting per page (the main chunk is about 190 KiB gzipped).

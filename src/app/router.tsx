@@ -14,6 +14,7 @@ import { SearchPage } from "@/pages/search";
 import { SignInPage } from "@/pages/sign-in";
 import { TokensPage } from "@/pages/tokens";
 
+import { basePath } from "./base";
 import { AppShell } from "./shell";
 
 type Ctx = { queryClient: QueryClient };
@@ -48,7 +49,7 @@ const routeTree = rootRoute.addChildren([
 export function makeRouter(queryClient: QueryClient) {
   return createRouter({
     routeTree,
-    basepath: import.meta.env.BASE_URL.replace(/\/$/, ""),
+    basepath: basePath().replace(/\/$/, ""),
     context: { queryClient },
     defaultPreload: "intent",
     scrollRestoration: true,

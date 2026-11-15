@@ -1,4 +1,4 @@
-# Vendored from lajstrom/lajstrom@f0d887d5ebd9b34f49c9a1d528af6c6b60df2531, internal/api/openapi.yaml. Do not edit:
+# Vendored from lajstrom/lajstrom@f0d887d5ebd9b34f49c9a1d528af6c6b60df2531 (v0.0.1-959-gf0d887d), internal/api/openapi.yaml. Do not edit:
 # npm run update:openapi -- <ref> replaces it and regenerates public/openapi.yaml and src/api/openapi.gen.ts.
 openapi: 3.1.0
 info:

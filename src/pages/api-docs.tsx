@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { getSession } from "@/api/session";
+import { basePath } from "@/app/base";
 import { config } from "@/app/config";
 import { demoMode } from "@/app/demo";
 import { PageHeader } from "@/components/common";
@@ -15,7 +16,7 @@ import { EmptyState, Skeleton } from "@/components/ui/misc";
  */
 export function ApiDocsPage() {
   const demo = demoMode().active;
-  const spec = demo ? `${import.meta.env.BASE_URL}openapi.yaml` : `${config().apiBaseUrl}/api/v1/openapi.yaml`;
+  const spec = demo ? `${basePath()}openapi.yaml` : `${config().apiBaseUrl}/api/v1/openapi.yaml`;
   const host = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
 

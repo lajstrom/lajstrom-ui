@@ -183,6 +183,7 @@ scanoss-py inspect undeclared --input /tmp/scanoss-results.json
 | `snippet-scan` | ScanOSS match against public open source code |
 | `dco` | `Signed-off-by:` on every commit of the pull request |
 | `codeql` | CodeQL static analysis of JavaScript and TypeScript (separate workflow) |
+| `bundle` | the release bundle, tried at the root of a static origin and below `/ui/` of its image (Release workflow, a dry run) |
 | `CLAAssistant` | CLA signature (separate workflow) |
 
 ## License

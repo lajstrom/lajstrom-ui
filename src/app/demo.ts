@@ -7,6 +7,7 @@
 // demo" or ?demo=1 enters it, "Exit demo" or ?demo=0 leaves it. Both reload the page, so that the
 // mock starts before the first request, and stops for good.
 
+import { basePath } from "./base";
 import type { UiConfig } from "./config";
 
 const FLAG = "lajstrom.demo";
@@ -57,7 +58,7 @@ export function demoMode(): DemoMode {
 }
 
 function reload(): void {
-  window.location.assign(import.meta.env.BASE_URL);
+  window.location.assign(basePath());
 }
 
 export function enterDemo(): void {

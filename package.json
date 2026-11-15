@@ -12,6 +12,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "build:pages": "sh scripts/build-pages.sh",
+    "build:release": "sh scripts/build-release.sh",
     "gen:api": "node scripts/gen-api-types.ts",
     "update:openapi": "sh scripts/update-server-openapi.sh",
     "preview": "vite preview",
