@@ -13,8 +13,26 @@ type CodeBlockProps = {
   shell?: boolean;
 };
 
+/** The lines of a shell snippet that are the body of a here-document and its delimiter: input,
+ * not commands, so they get no prompt. */
+function hereDocuments(lines: string[]): Set<number> {
+  const input = new Set<number>();
+  let end: string | null = null;
+  lines.forEach((line, i) => {
+    if (end !== null) {
+      input.add(i);
+      if (line.trim() === end) end = null;
+      return;
+    }
+    end = /(?<!<)<<-?\s*['"]?([A-Za-z_]\w*)['"]?/.exec(line)?.[1] ?? null;
+  });
+  return input;
+}
+
 /** A copyable block of code or configuration. */
 export function CodeBlock({ code, caption, className, shell = false }: CodeBlockProps) {
+  const lines = code.split("\n");
+  const hereDocs = shell ? hereDocuments(lines) : new Set<number>();
   return (
     <div className={cn("group relative overflow-hidden rounded-md border border-border bg-code", className)}>
       {caption ? (
@@ -30,12 +48,15 @@ export function CodeBlock({ code, caption, className, shell = false }: CodeBlock
       <pre className={cn("overflow-x-auto px-3 py-2.5 font-mono text-[12.5px] leading-relaxed scrollbar-thin", !caption && "pr-10")}>
         <code>
           {shell
-            ? code.split("\n").map((line, i, lines) => {
-                const comment = line.trimStart().startsWith("#");
+            ? lines.map((line, i) => {
+                const input = hereDocs.has(i);
+                const comment = !input && line.trimStart().startsWith("#");
                 const continued = i > 0 && lines[i - 1]!.trimEnd().endsWith("\\");
                 return (
                   <span key={i} className={cn("block", comment && "text-muted-foreground")}>
-                    {comment || continued || line === "" ? (
+                    {input ? (
+                      line || " "
+                    ) : comment || continued || line === "" ? (
                       continued ? `  ${line}` : line || " "
                     ) : (
                       <>
