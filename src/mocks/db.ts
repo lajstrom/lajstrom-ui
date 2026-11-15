@@ -866,6 +866,15 @@ const invalid = (message: string): Refusal => ({ status: 400, code: "INVALID", m
 /** Repo names: lowercase letters and digits separated by single '.', '_' or '-' (manifest-profile.md §4.1). */
 const REPO_NAME = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 const FORMATS = ["raw", "pypi", "apt", "maven", "oci"] as const;
+
+/** Why a repo mask is not one (rbac.md §3: <format>/<repo>, * for a whole segment); null when it is. */
+export function maskRefusal(mask: unknown): Refusal | null {
+  const [format, repo, ...rest] = typeof mask === "string" ? mask.split("/") : [];
+  if (format === undefined || repo === undefined || rest.length) return invalid("repoMask: <format>/<repo>, * for a whole segment, such as oci/* or */talos");
+  if (format !== "*" && !(FORMATS as readonly string[]).includes(format)) return invalid(`repoMask: ${format} is not a format of this server (${FORMATS.join(", ")})`);
+  if (repo !== "*" && !REPO_NAME.test(repo)) return invalid(`repoMask: ${repo} is not a repo name`);
+  return null;
+}
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** The keys of a policy (Policy in the server's openapi.yaml); a merge patch may also set any of

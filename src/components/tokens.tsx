@@ -61,11 +61,13 @@ type TokenTableProps = {
 export function TokenTable({ tokens, currentId, onRevoke, changes }: TokenTableProps) {
   // A deploy token is a principal of its own, token:<id>: what the audit log and whoami name.
   const deploy = tokens.some((t) => t.kind === "deploy");
+  const masked = tokens.some((t) => t.repoMask !== undefined);
   return (
     <Table>
       <THead>
         <TR>
           <TH>Name</TH>
+          {masked ? <TH>Mask</TH> : null}
           {deploy ? <TH>Principal</TH> : null}
           <TH>Scopes</TH>
           <TH>Created</TH>
@@ -95,6 +97,7 @@ export function TokenTable({ tokens, currentId, onRevoke, changes }: TokenTableP
                 ) : null}
                 {change?.error ? <div className="mt-0.5 text-xs font-normal text-danger">Not revoked. {errorText(change.error)}</div> : null}
               </TD>
+              {masked ? <TD className="font-mono text-xs">{t.repoMask}</TD> : null}
               {deploy ? <TD className="font-mono text-xs">token:{t.id}</TD> : null}
               <TD>
                 <TokenScopes token={t} />
@@ -137,41 +140,54 @@ const accessScopes: Record<Access, TokenScope[]> = { full: [], read: ["read"], w
 
 type CreateTokenDialogProps = {
   kind: "pat" | "deploy";
-  create: (req: TokenRequest) => Promise<CreatedToken>;
+  /** Creates it; `over`, the mask and the admin's password, for a deploy token over a mask. */
+  create: (req: TokenRequest, over?: { repoMask: string; password: string }) => Promise<CreatedToken>;
   /** What the secret is for, shown with it: the user name for a personal access token, `deploy`
    * for a deploy token (Basic deploy:<token>, docs/auth.md). */
   login: string;
   /** The query of the list the token joins. */
   list: QueryKey;
+  /** A deploy token over a mask: the form asks for the mask and the admin's password. */
+  mask?: boolean;
 };
 
 /** Creates a token and shows its secret, the one time the server answers it. Realistic: the
  * secret exists only in the answer, and the dialog waits for the list to have the token. */
-export function CreateTokenDialog({ kind, create, login, list }: CreateTokenDialogProps) {
-  const ids = { name: useId(), access: useId(), expiry: useId() };
+export function CreateTokenDialog({ kind, create, login, list, mask = false }: CreateTokenDialogProps) {
+  const ids = { name: useId(), access: useId(), expiry: useId(), mask: useId(), password: useId() };
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
+  const [repoMask, setRepoMask] = useState("");
+  const [password, setPassword] = useState("");
   const [access, setAccess] = useState<Access>(kind === "pat" ? "full" : "read-write");
   const [expiry, setExpiry] = useState(kind === "pat" ? "90d" : "never");
   const mutation = useMutation({
     mutationFn: () =>
-      create({
-        name: name.trim(),
-        ...(accessScopes[access].length ? { scopes: accessScopes[access] } : {}),
-        ...(expiry === "never" ? {} : { expiresIn: expiry }),
-      }),
+      create(
+        {
+          name: name.trim(),
+          ...(accessScopes[access].length ? { scopes: accessScopes[access] } : {}),
+          ...(expiry === "never" ? {} : { expiresIn: expiry }),
+        },
+        mask ? { repoMask: repoMask.trim(), password } : undefined,
+      )
+        // The password is not kept once it is sent: a refused one is typed again.
+        .finally(() => setPassword("")),
     ...realistic(list),
   });
+  const ready = name.trim() !== "" && (!mask || (repoMask.trim() !== "" && password !== ""));
 
   const reset = () => {
     setName("");
+    setRepoMask("");
+    setPassword("");
     setAccess(kind === "pat" ? "full" : "read-write");
     setExpiry(kind === "pat" ? "90d" : "never");
     mutation.reset();
   };
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (name.trim()) mutation.mutate();
+    if (ready) mutation.mutate();
   };
 
   const accessOptions: { value: Access; label: string }[] =
@@ -204,28 +220,39 @@ export function CreateTokenDialog({ kind, create, login, list }: CreateTokenDial
     >
       <Button variant="primary" onClick={() => setOpen(true)}>
         <Plus />
-        {kind === "pat" ? "New token" : "New deploy token"}
+        {kind === "pat" ? "New token" : mask ? "New token over a mask" : "New deploy token"}
       </Button>
       <DialogContent
-        title={created ? "Copy the token now" : kind === "pat" ? "New personal access token" : "New deploy token"}
+        title={created ? "Copy the token now" : kind === "pat" ? "New personal access token" : mask ? "New deploy token over a mask" : "New deploy token"}
         description={
           created
             ? "This is the only time the server shows the secret. Store it in your password manager or your CI's secrets."
             : kind === "pat"
               ? "A token acts as you, for clients that cannot sign in: pip, apt, Maven, scripts."
-              : "A deploy token is a principal of its own, bound to this repository: for CI jobs that publish or read here."
+              : mask
+                ? "A principal of its own that reaches every repo the mask matches, those created later too: for a CI job that reads or publishes across repos."
+                : "A deploy token is a principal of its own, bound to this repository: for CI jobs that publish or read here."
         }
       >
         {created ? (
           <SecretReveal token={created} login={login} />
         ) : (
           <form onSubmit={submit} className="space-y-4">
-            <Field label="Name" htmlFor={ids.name} hint="1 to 64 characters, unique among your live tokens: what it is for, or where it lives.">
+            {mask ? (
+              <Field label="Mask" htmlFor={ids.mask} hint="<format>/<repo>, * for a whole segment: oci/*, */payments. It need not match a repo yet.">
+                <Input id={ids.mask} value={repoMask} autoFocus spellCheck={false} placeholder="*/payments" className="font-mono" onChange={(e) => setRepoMask(e.target.value)} />
+              </Field>
+            ) : null}
+            <Field
+              label="Name"
+              htmlFor={ids.name}
+              hint={`1 to 64 characters, unique among ${mask ? "the live tokens over the mask" : kind === "pat" ? "your live tokens" : "the repo's live tokens"}: what it is for, or where it lives.`}
+            >
               <Input
                 id={ids.name}
                 value={name}
                 maxLength={64}
-                autoFocus
+                autoFocus={!mask}
                 placeholder={kind === "pat" ? "laptop" : "github-actions"}
                 onChange={(e) => setName(e.target.value)}
               />
@@ -243,12 +270,17 @@ export function CreateTokenDialog({ kind, create, login, list }: CreateTokenDial
             <Field label="Expires" hint={kind === "pat" ? "Personal access tokens always expire, at most a year ahead." : undefined}>
               <Segmented aria-label="Expires" value={expiry} onChange={setExpiry} options={expiryOptions} />
             </Field>
+            {mask ? (
+              <Field label="Your password" htmlFor={ids.password} hint="The server creates a token over a mask with the admin's password only, never with a token.">
+                <Input id={ids.password} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+              </Field>
+            ) : null}
             <FormError error={errorText(mutation.error)} />
             <DialogActions>
               <DialogClose asChild>
                 <Button type="button">Cancel</Button>
               </DialogClose>
-              <Button type="submit" variant="primary" disabled={!name.trim() || mutation.isPending}>
+              <Button type="submit" variant="primary" disabled={!ready || mutation.isPending}>
                 <KeyRound />
                 {mutation.isPending ? "Creating…" : "Create token"}
               </Button>

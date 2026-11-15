@@ -96,6 +96,16 @@ export function authenticate(request: Request): Authn {
   return { principal: "anonymous" };
 }
 
+/** Whether the request's credential is a user's password rather than a token: what creating a
+ * deploy token over a mask takes (docs/api.md, Deploy tokens over a mask). authenticate has
+ * checked the password already. */
+export function byPassword(request: Request): boolean {
+  const header = request.headers.get("Authorization") ?? "";
+  if (!/^basic /i.test(header)) return false;
+  const creds = decodeBasic(header.slice(6).trim());
+  return creds !== null && !creds.secret.startsWith("ljs_");
+}
+
 /** A failure the handler answers with the error envelope. */
 export type Refusal = { status: number; code: string; message: string };
 
@@ -114,9 +124,22 @@ function randomSecret(prefix: string): string {
   return prefix + [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Creates a personal access token of a user or a deploy token of a repo, with the rules of
- * docs/api.md (Tokens): the name, the scopes, the expiry and the uniqueness of the name. */
-export function createToken(owner: { user: string } | { repo: string }, body: unknown): CreatedToken | Refusal {
+/** Whose a token is: a user's personal access token, a repo's deploy token, or a deploy token
+ * over a mask of repos. */
+type Owner = { user: string } | { repo: string } | { repoMask: string };
+
+function owns(owner: Owner, t: Token): boolean {
+  if ("user" in owner) return t.kind === "pat" && t.user === owner.user;
+  if ("repo" in owner) return t.kind === "deploy" && t.repo === owner.repo;
+  return t.kind === "deploy" && t.repoMask === owner.repoMask;
+}
+
+const ownerName = (owner: Owner) => ("user" in owner ? owner.user : "repo" in owner ? owner.repo : owner.repoMask);
+
+/** Creates a personal access token of a user, or a deploy token of a repo or over a mask, with
+ * the rules of docs/api.md (Tokens): the name, the scopes, the expiry and the uniqueness of the
+ * name. */
+export function createToken(owner: Owner, body: unknown): CreatedToken | Refusal {
   const invalid = (message: string): Refusal => ({ status: 400, code: "INVALID", message });
   if (typeof body !== "object" || body === null) return invalid("the body must be a JSON object");
   const req = body as Partial<TokenRequest> & Record<string, unknown>;
@@ -124,7 +147,7 @@ export function createToken(owner: { user: string } | { repo: string }, body: un
   const unknown = Object.keys(req).find((k) => !known.has(k));
   if (unknown) return invalid(`${unknown}: not a field of a token`);
 
-  const deploy = "repo" in owner;
+  const deploy = !("user" in owner);
   const name = typeof req.name === "string" ? req.name : "";
   if (new TextEncoder().encode(name).length < 1 || new TextEncoder().encode(name).length > 64 || /[\p{Cc}]/u.test(name)) {
     return invalid("name: 1 to 64 bytes of printable UTF-8");
@@ -150,9 +173,8 @@ export function createToken(owner: { user: string } | { repo: string }, body: un
   }
   if (expiresAt && Date.parse(expiresAt) > now + 365 * DAY) return invalid("expiresAt: at most 365 days ahead");
 
-  const mine = (t: Token) => ("user" in owner ? t.kind === "pat" && t.user === owner.user : t.kind === "deploy" && t.repo === owner.repo);
-  if (tokens.some((t) => mine(t) && live(t, now) && t.name === name)) {
-    return { status: 409, code: "CONFLICT", message: `a live token of ${"user" in owner ? owner.user : owner.repo} is named ${name}` };
+  if (tokens.some((t) => owns(owner, t) && live(t, now) && t.name === name)) {
+    return { status: 409, code: "CONFLICT", message: `a live token of ${ownerName(owner)} is named ${name}` };
   }
 
   const secret = randomSecret(deploy ? "ljs_dep_" : "ljs_pat_");
@@ -160,7 +182,7 @@ export function createToken(owner: { user: string } | { repo: string }, body: un
     id: nextId++,
     kind: deploy ? "deploy" : "pat",
     name,
-    ...("user" in owner ? { user: owner.user } : { repo: owner.repo }),
+    ...owner,
     scopes: [...new Set(scopes)].sort() as TokenScope[],
     expiresAt,
     lastUsedAt: null,
@@ -174,9 +196,10 @@ export function createToken(owner: { user: string } | { repo: string }, body: un
   return { ...token, secret };
 }
 
-/** Revokes a token of the owner: true when the id is one of its tokens (revoked already too). */
-export function revokeToken(owner: { user: string } | { repo: string }, id: number): boolean {
-  const t = tokens.find((x) => x.id === id && ("user" in owner ? x.kind === "pat" && x.user === owner.user : x.kind === "deploy" && x.repo === owner.repo));
+/** Revokes a token of the owner: true when the id is one of its tokens (revoked already too);
+ * owner "mask" for any deploy token over a mask. */
+export function revokeToken(owner: Exclude<Owner, { repoMask: string }> | "mask", id: number): boolean {
+  const t = tokens.find((x) => x.id === id && (owner === "mask" ? x.kind === "deploy" && x.repoMask !== undefined : owns(owner, x)));
   if (!t) return false;
   if (t.revokedAt === null) {
     t.revokedAt = new Date().toISOString();

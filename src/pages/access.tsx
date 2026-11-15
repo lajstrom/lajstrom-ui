@@ -13,7 +13,9 @@ import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
 
-type Tab = "users" | "tokens" | "bindings";
+import { MaskTokens } from "./mask-tokens";
+
+type Tab = "users" | "tokens" | "masks" | "bindings";
 
 const roleTone: Record<Binding["role"], "primary" | "success" | "warning" | "neutral"> = {
   admin: "warning",
@@ -55,10 +57,11 @@ export function AccessPage() {
         options={[
           { value: "users", label: "Users" },
           { value: "tokens", label: "Tokens" },
+          { value: "masks", label: "Tokens over a mask" },
           { value: "bindings", label: "Bindings" },
         ]}
       />
-      {tab === "users" ? <UsersTable /> : tab === "tokens" ? <TokensTable /> : <BindingsTable />}
+      {tab === "users" ? <UsersTable /> : tab === "tokens" ? <TokensTable /> : tab === "masks" ? <MaskTokens /> : <BindingsTable />}
     </>
   );
 }
