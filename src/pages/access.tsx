@@ -161,7 +161,7 @@ function TokensTable() {
                     content={
                       t.kind === "pat"
                         ? "Personal access token: acts as its user, optionally narrowed by scopes; expiry is mandatory (90 days by default, at most a year)"
-                        : "Deploy token: a principal of its own (token:<id>), bound to one repo, never delete or manage"
+                        : "Deploy token: a principal of its own (token:<id>), bound to one repo or a mask of repos, never delete or manage"
                     }
                   >
                     <Badge tone={t.kind === "pat" ? "primary" : "neutral"} shape="square">
@@ -169,7 +169,7 @@ function TokensTable() {
                     </Badge>
                   </Tooltip>
                 </TD>
-                <TD className="font-mono text-xs">{t.kind === "pat" ? `user:${t.user}` : `token:${t.id} → ${t.repo}`}</TD>
+                <TD className="font-mono text-xs">{t.kind === "pat" ? `user:${t.user}` : `token:${t.id} → ${t.repo ?? t.repoMask}`}</TD>
                 <TD>
                   {t.scopes.length ? (
                     <span className="flex gap-1">

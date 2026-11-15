@@ -34,7 +34,6 @@ offer the demo.
 | One package | lajstrom/lajstrom#958 | `GET …/packages/{name}`, `PackageDetail` |
 | The facts of a variant in the version list | lajstrom/lajstrom#1132 | `Variant`: `artifactType`, `attrs`, `size`, `fileCount`, `degraded`, `referrers` |
 | A version's manifest and annotations | lajstrom/lajstrom#951 | `VariantDetail`: `manifest`, `annotations` |
-| The report of a reindex run, as docs/api.md shows it | lajstrom/lajstrom#1128 | `ReindexRun.report` |
 | A maven repo's open deploys | lajstrom/lajstrom#960 | `GET …/sessions`, `PublishSession` |
 | Search | lajstrom/lajstrom#956 | `GET /api/v1/search`, `SearchResult` |
 | The registries, their capabilities and health | lajstrom/lajstrom#952, #953 | `GET /api/v1/registries`, `Registry` |

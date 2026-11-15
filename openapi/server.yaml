@@ -1,4 +1,4 @@
-# Vendored from lajstrom/lajstrom@a49fac3ec3dfab43067c7e9812d9c968a5834e1e, internal/api/openapi.yaml. Do not edit:
+# Vendored from lajstrom/lajstrom@f0d887d5ebd9b34f49c9a1d528af6c6b60df2531, internal/api/openapi.yaml. Do not edit:
 # npm run update:openapi -- <ref> replaces it and regenerates public/openapi.yaml and src/api/openapi.gen.ts.
 openapi: 3.1.0
 info:
@@ -8,9 +8,11 @@ info:
     The REST interface to Lajstrom's control plane: repos, users, bindings, tokens and the audit
     log. docs/api.md is the guide; this document is checked against the server's routes by
     TestOpenAPIRoutes, its error codes against the server's and docs/api.md's by
-    TestErrorCodes, and the statuses of each operation against those its handler answers in
-    the tests of internal/api (statuses_test.go). Any operation may also answer 408 and 413 to
-    a body, 500 and 503, as the Errors of docs/api.md say.
+    TestErrorCodes, the keys of its schemas against the keywords of JSON Schema by
+    TestOpenAPIKeywords, ReindexRun against the server's type by TestOpenAPIReindexRun, and the
+    statuses of each operation against those its handler answers in the tests of internal/api
+    (statuses_test.go). Any operation may also answer 408 and 413 to a body, 500 and 503, as
+    the Errors of docs/api.md say.
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -27,6 +29,8 @@ tags:
     description: Roles of users on the repos of a mask.
   - name: audit
     description: The audit log.
+  - name: webhooks
+    description: Where the events of the repos of a mask are sent, and the delivery log.
   - name: meta
     description: Who is asking, the server, and this document.
 security:
@@ -522,6 +526,337 @@ paths:
       summary: Revoke a deploy token (manage); a revoked one again is 204.
       responses:
         "204": {description: Revoked.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/deploy-tokens:
+    get:
+      tags: [tokens]
+      operationId: listMaskTokens
+      summary: The deploy tokens over a mask (admin).
+      parameters:
+        - name: repoMask
+          in: query
+          description: Only the tokens over this mask, as it was written (oci/* does not list a token over */*).
+          schema: {type: string}
+      responses:
+        "200":
+          description: The tokens, in the order of their creation; never a secret.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TokenList"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [tokens]
+      operationId: createMaskToken
+      summary: Create a deploy token over a mask (admin, with its password only, checked before the body); the answer has its secret, once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/MaskTokenRequest"}
+      responses:
+        "201":
+          description: The token and its secret.
+          headers:
+            Location: {$ref: "#/components/headers/Location"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreatedToken"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /api/v1/deploy-tokens/{id}:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    delete:
+      tags: [tokens]
+      operationId: revokeMaskToken
+      summary: Revoke a deploy token over a mask (admin); a revoked one again is 204.
+      responses:
+        "204": {description: Revoked.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/repos/{format}/{repo}/webhooks:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+    get:
+      tags: [webhooks]
+      operationId: listRepoWebhooks
+      summary: The webhooks whose mask is the repo, by id (manage).
+      responses:
+        "200":
+          description: The webhooks; never a secret.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/WebhookList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      tags: [webhooks]
+      operationId: createRepoWebhook
+      summary: Create a webhook (manage); the answer has its secret, once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/WebhookRequest"}
+      responses:
+        "201":
+          description: The webhook and its secret.
+          headers:
+            Location: {$ref: "#/components/headers/Location"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreatedWebhook"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "501": {$ref: "#/components/responses/Unavailable"}
+  /api/v1/repos/{format}/{repo}/webhooks/{id}:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/id"
+    get:
+      tags: [webhooks]
+      operationId: getRepoWebhook
+      summary: One webhook (manage).
+      responses:
+        "200":
+          description: The webhook; never its secret.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Webhook"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      tags: [webhooks]
+      operationId: updateRepoWebhook
+      summary: Change the URL, the events, active and the description (manage); the mask cannot change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/WebhookRequest"}
+      responses:
+        "200":
+          description: The webhook as it is now.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Webhook"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      tags: [webhooks]
+      operationId: deleteRepoWebhook
+      summary: Delete a webhook and its delivery log (manage).
+      responses:
+        "204": {description: Deleted.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/repos/{format}/{repo}/webhooks/{id}/secret:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/id"
+    post:
+      tags: [webhooks]
+      operationId: rotateRepoWebhookSecret
+      summary: Give the webhook a new secret (manage); the answer has it, once, and the old one signs nothing more.
+      responses:
+        "200":
+          description: The new secret.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/WebhookSecret"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "501": {$ref: "#/components/responses/Unavailable"}
+  /api/v1/repos/{format}/{repo}/webhooks/{id}/test:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/id"
+    post:
+      tags: [webhooks]
+      operationId: testRepoWebhook
+      summary: Send a webhook.ping to the webhook now, once (manage).
+      responses:
+        "200":
+          description: The row of the delivery log of the ping, delivered or failed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Delivery"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "501": {$ref: "#/components/responses/Unavailable"}
+  /api/v1/repos/{format}/{repo}/webhooks/{id}/deliveries:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/id"
+    get:
+      tags: [webhooks]
+      operationId: listRepoWebhookDeliveries
+      summary: A page of the webhook's delivery log, newest first (manage).
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: The page.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DeliveryList"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/webhooks:
+    get:
+      tags: [webhooks]
+      operationId: listWebhooks
+      summary: The webhooks of every mask, by id (admin).
+      responses:
+        "200":
+          description: The webhooks; never a secret.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/WebhookList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      tags: [webhooks]
+      operationId: createWebhook
+      summary: Create a webhook (admin); the answer has its secret, once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/WebhookRequest"}
+      responses:
+        "201":
+          description: The webhook and its secret.
+          headers:
+            Location: {$ref: "#/components/headers/Location"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreatedWebhook"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "501": {$ref: "#/components/responses/Unavailable"}
+  /api/v1/webhooks/{id}:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    get:
+      tags: [webhooks]
+      operationId: getWebhook
+      summary: One webhook (admin).
+      responses:
+        "200":
+          description: The webhook; never its secret.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Webhook"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      tags: [webhooks]
+      operationId: updateWebhook
+      summary: Change the URL, the events, active and the description (admin); the mask cannot change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/WebhookRequest"}
+      responses:
+        "200":
+          description: The webhook as it is now.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Webhook"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      tags: [webhooks]
+      operationId: deleteWebhook
+      summary: Delete a webhook and its delivery log (admin).
+      responses:
+        "204": {description: Deleted.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/webhooks/{id}/secret:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    post:
+      tags: [webhooks]
+      operationId: rotateWebhookSecret
+      summary: Give the webhook a new secret (admin); the answer has it, once, and the old one signs nothing more.
+      responses:
+        "200":
+          description: The new secret.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/WebhookSecret"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "501": {$ref: "#/components/responses/Unavailable"}
+  /api/v1/webhooks/{id}/test:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    post:
+      tags: [webhooks]
+      operationId: testWebhook
+      summary: Send a webhook.ping to the webhook now, once (admin).
+      responses:
+        "200":
+          description: The row of the delivery log of the ping, delivered or failed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Delivery"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "501": {$ref: "#/components/responses/Unavailable"}
+  /api/v1/webhooks/{id}/deliveries:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    get:
+      tags: [webhooks]
+      operationId: listWebhookDeliveries
+      summary: A page of the webhook's delivery log, newest first (admin).
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: The page.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DeliveryList"}
+        "400": {$ref: "#/components/responses/Invalid"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
@@ -1115,7 +1450,7 @@ components:
       properties:
         format: {type: string}
         name: {type: string}
-        registry: {type: string, description: Required but on a group, which has none.}
+        registry: {type: string, description: "Required but on a group, which has none."}
         kind: {type: string, enum: [hosted, proxy, group]}
         anonymousRead: {type: boolean}
         policy:
@@ -1189,35 +1524,149 @@ components:
         report:
           description: >-
             The repo's part of the run's report; null while the run is running, and for a run of
-            every repo that stopped before it reached the repo.
+            every repo that stopped before it reached the repo. Each list holds at most 1000
+            entries, after which truncated is true; the counts stay exact. In the report of a run
+            of an earlier release, a count it did not write is 0 and a list it did not write null.
           type: [object, "null"]
+          required: [repo, ociRepositories, manifests, added, updated, unchanged, removed, pending, deletedPending, degraded, referrers, attachments, foreign, orphanReferrers, orphanJournal, drift, split, repositoryUnknown, repairedReferrers, errors, truncated]
           properties:
+            repo: {type: string, description: "The repo, <format>/<name>."}
+            ociRepositories: {type: integer, description: "The OCI repositories under the repo's path."}
+            manifests: {type: integer, description: The tags read.}
+            added: {type: integer, description: "The rows written, of versions and journal entries, that the index did not have."}
+            updated: {type: integer, description: "The rows read again, with verify or degraded, and written."}
+            unchanged: {type: integer, description: The rows seen with the digest the index has.}
+            removed: {type: integer, description: "The rows removed, their manifests gone from the registry (prune)."}
+            pending:
+              description: >-
+                The rows whose manifest the registry answered unknown (prune), kept until it answers
+                so twice at least 10 minutes apart and the row is reconcile.graceAge old
+                (docs/spec/guarantees.md, INV-5).
+              type: integer
             deletedPending:
               description: >-
                 The tags the registry still lists whose manifests were deleted through Lajstrom
                 less than reconcile.graceAge before the run, on a registry not classified strong:
-                not indexed again. Absent from the report of a run of a release before it.
+                not indexed again.
               type: integer
+            degraded: {type: integer, description: "The versions written from their annotations, their metadata layer unreadable."}
+            referrers: {type: integer, description: "The referrers listed, each digest once."}
+            attachments: {type: integer, description: The attachment rows of the versions seen or written.}
+            foreign:
+              description: "The manifests under the repo's path that are not Lajstrom's: never indexed, never served."
+              type: array
+              items: {$ref: "#/components/schemas/ReindexFinding"}
+            orphanReferrers:
+              description: The referrers whose subject no version has.
+              type: array
+              items: {$ref: "#/components/schemas/ReindexFinding"}
+            orphanJournal:
+              description: >-
+                The npm and pypi journal entries of an OCI repository without versions
+                (docs/spec/manifest-profile.md §8): not indexed, adopted by the next append to the
+                package.
+              type: [array, "null"]
+              items: {$ref: "#/components/schemas/ReindexFinding"}
+            drift:
+              description: The tags that name another digest in the registry than in the index.
+              type: array
+              items: {$ref: "#/components/schemas/ReindexDrift"}
+            split:
+              description: >-
+                The packages found at two forms of their OCI name (ADR 0017), one entry per other
+                form.
+              type: [array, "null"]
+              items: {$ref: "#/components/schemas/ReindexSplit"}
+            repositoryUnknown:
+              description: >-
+                The versions of the index whose OCI repository the registry does not know: prune
+                keeps their rows, a delete through the API removes them.
+              type: [array, "null"]
+              items: {$ref: "#/components/schemas/ReindexRepositoryUnknown"}
             repairedReferrers:
               description: >-
                 The sha256-<hex> indexes that lacked referrers the audit log has as pushed and the
                 registry still has, or were missing, and that Lajstrom pushed again with them: runs of
-                the reconcile loop and with verify, on a registry without the referrers API. null in
-                the report of a run of a release before it.
+                the reconcile loop and with verify, on a registry without the referrers API.
               type: [array, "null"]
               items: {$ref: "#/components/schemas/RepairedReferrersIndex"}
+            errors:
+              description: What the run could not read, check or write, each with its error.
+              type: array
+              items: {$ref: "#/components/schemas/ReindexFinding"}
+            truncated: {type: boolean, description: A list stopped at 1000 entries.}
     RepairedReferrersIndex:
       description: A subject's sha256-<hex> index that a reindex run pushed again with the referrers it lacked.
       type: object
       required: [repository, subject, index, added]
       properties:
-        repository: {type: string, description: The OCI repository of the subject, below the repo's base.}
+        repository: {type: string, description: "The OCI repository of the subject, below the repo's base."}
         subject: {type: string}
         index: {type: string, description: The digest of the index pushed.}
         added:
           description: The referrers it lacked, in the order of their pushes.
           type: array
           items: {type: string}
+    ReindexFinding:
+      description: A manifest, or a failure, that a reindex report lists; a key without a value is left out.
+      type: object
+      required: [repository]
+      properties:
+        repository: {type: string, description: "The OCI repository, below the repo's base; empty for a failure of the whole repo."}
+        tag: {type: string}
+        digest: {type: string}
+        mediaType: {type: string}
+        artifactType: {type: string}
+        subject: {type: string, description: The digest of a referrer's subject.}
+        error: {type: string, description: What failed (errors).}
+    ReindexDrift:
+      description: A tag that names another digest in the registry than in the index; the index keeps its digest.
+      type: object
+      required: [package, tag, index, registry]
+      properties:
+        package: {type: string}
+        tag: {type: string}
+        index: {type: string, description: The digest the index has.}
+        registry: {type: string, description: The digest the registry's tag names.}
+    ReindexSplit:
+      description: >-
+        A package whose manifests are at two forms of its OCI name (ADR 0017): the index has the
+        package at indexed; a run copies or moves nothing in the registry.
+      type: object
+      required: [package, indexed, indexedTags, other, otherTags]
+      properties:
+        package: {type: string}
+        indexed: {type: string, description: "The package's OCI name in the index, below the repo's base."}
+        indexedTags:
+          description: The tags of its versions in the index.
+          type: array
+          items: {type: string}
+        other: {type: string, description: "The other form, below the repo's base."}
+        otherTags:
+          description: The tags of the profile manifests at the other form.
+          type: array
+          items: {type: string}
+    ReindexRepositoryUnknown:
+      description: >-
+        A version of the index whose OCI repository the registry does not know: its tag does not
+        resolve, its manifest by digest and the repository's tag list are a 404 without
+        MANIFEST_UNKNOWN. The row stays until it is deleted through the API or the repository
+        comes back; a run deletes nothing in the registry.
+      type: object
+      required: [repository, package, version, tag, digest, delete]
+      properties:
+        repository: {type: string, description: "The OCI repository, below the repo's base."}
+        package: {type: string}
+        version: {type: string}
+        variant: {type: string, description: The variant of a version with variants.}
+        tag: {type: string}
+        digest: {type: string}
+        delete:
+          description: >-
+            The request that deletes the version's rows, the variant alone when it has one:
+            DELETE /api/v1/repos/<format>/<name>/packages/<package>/versions/<version>, with
+            ?variant=<variant> for a variant, the package and the version path-escaped.
+          type: string
     Token:
       type: object
       required: [id, kind, name, scopes, expiresAt, lastUsedAt, createdAt, revokedAt, hashPrefix]
@@ -1225,7 +1674,8 @@ components:
         id: {type: integer, format: int64}
         kind: {type: string, enum: [pat, deploy]}
         user: {type: string, description: The owner of a personal access token.}
-        repo: {type: string, description: The <format>/<name> of a deploy token.}
+        repo: {type: string, description: The <format>/<name> of a deploy token of one repo.}
+        repoMask: {type: string, description: "The mask of a deploy token over a mask, oci/* or */talos."}
         name: {type: string}
         scopes:
           type: array
@@ -1254,6 +1704,18 @@ components:
       required: [name]
       additionalProperties: false
       properties:
+        name: {type: string}
+        scopes:
+          type: array
+          items: {type: string, enum: [read, write]}
+        expiresAt: {type: string, format: date-time}
+        expiresIn: {type: string, description: A number of days (30d) or a duration (12h).}
+    MaskTokenRequest:
+      type: object
+      required: [repoMask, name, scopes]
+      additionalProperties: false
+      properties:
+        repoMask: {type: string, description: "<format>/<repo>, each segment a name or * for any: oci/*, */talos."}
         name: {type: string}
         scopes:
           type: array
@@ -1416,7 +1878,7 @@ components:
       properties:
         variant: {type: string, description: Empty for a format without variants.}
         tag: {type: string}
-        digest: {type: string, description: The manifest digest, the entity tag of If-Match.}
+        digest: {type: string, description: "The manifest digest, the entity tag of If-Match."}
         publishedAt: {type: string, format: date-time}
     Pointer:
       type: object
@@ -1472,7 +1934,7 @@ components:
         tag: {type: string, description: "cosign's legacy tag, sha256-<hex>.sig, .att or .sbom; absent for a referrer pushed by digest."}
         layer: {type: string, description: The digest of the attachment's layer; empty for a manifest without layers.}
         mediaType: {type: string, description: The layer's media type.}
-        artifactType: {type: string, description: The referrer's artifactType, else its config's media type.}
+        artifactType: {type: string, description: "The referrer's artifactType, else its config's media type."}
         kind:
           type: string
           description: What it is; a value this list does not name is shown as it is.
@@ -1483,20 +1945,21 @@ components:
           type: object
           description: The referrer manifest's annotations.
           additionalProperties: {type: string}
-        tool: {type: string, description: lajstrom.attachment.tool, when set.}
-        toolVersion: {type: string, description: lajstrom.attachment.toolVersion, when set.}
-        database: {type: string, description: lajstrom.attachment.database, when set.}
-        input: {type: string, description: lajstrom.attachment.input, the SBOM a scan was computed from, when it is a digest.}
+        tool: {type: string, description: "lajstrom.attachment.tool, when set."}
+        toolVersion: {type: string, description: "lajstrom.attachment.toolVersion, when set."}
+        database: {type: string, description: "lajstrom.attachment.database, when set."}
+        input: {type: string, description: "lajstrom.attachment.input, the SBOM a scan was computed from, when it is a digest."}
         verification:
           type: string
           description: >-
-            verified (a trusted key signed it, for its predicate type, and what it signed names the
-            variant), untrusted, unsigned, invalid or unsupported (keyless, notation, a message
-            signature, a layer above attachments.maxBlobSize).
+            verified (a trusted key or keyless identity signed it, for its predicate type, and what it
+            signed names the variant), untrusted, unsigned, invalid or unsupported (keyless without
+            attachments.keyless, cosign's legacy keyless layers, notation, a message signature, a
+            layer above attachments.maxBlobSize).
           enum: [verified, untrusted, unsigned, invalid, unsupported]
-        signedBy: {type: string, description: The name of the trust entry whose key verified it.}
+        signedBy: {type: string, description: The name of the key or keyless identity that verified it.}
         reason: {type: string, description: Why it is not verified.}
-        createdAt: {type: string, format: date-time, description: The referrer's org.opencontainers.image.created, when it has one.}
+        createdAt: {type: string, format: date-time, description: "The referrer's org.opencontainers.image.created, when it has one."}
         indexedAt: {type: string, format: date-time, description: When ingest or reindex last wrote or saw the row.}
     VariantDetail:
       description: One manifest of a version, with its row of the index and its files.
@@ -1596,7 +2059,7 @@ components:
         status:
           type: string
           enum: [deleted, changed, protected, young, gone, error]
-        message: {type: string, description: Why, for every status but deleted.}
+        message: {type: string, description: "Why, for every status but deleted."}
         digests:
           type: array
           description: The digests of the version now, for changed.
@@ -1662,15 +2125,15 @@ components:
         httpStatus:
           type: integer
           description: For failed, the status a request of the file would have had.
-        message: {type: string, description: Why, for failed.}
+        message: {type: string, description: "Why, for failed."}
         kind:
           type: string
           enum: [index, manifest, blob]
           description: >-
             Of an oci repo: what a reference names, an index or a manifest; a platform's
             manifest; a blob. Absent for an image that failed before what it names was known.
-        platform: {type: string, description: Of an oci repo, the platform of a manifest or a blob of an index.}
-        digest: {type: string, description: Of an oci repo, the digest of the index, manifest or blob.}
+        platform: {type: string, description: "Of an oci repo, the platform of a manifest or a blob of an index."}
+        digest: {type: string, description: "Of an oci repo, the digest of the index, manifest or blob."}
         bytes:
           type: integer
           format: int64
@@ -1726,3 +2189,75 @@ components:
         name: {type: string}
         uid: {type: string, format: uuid}
         admin: {type: boolean, description: Whether the request's credential reaches the admin role.}
+    Webhook:
+      type: object
+      required: [id, mask, url, events, active, description, createdBy, createdAt, updatedAt]
+      properties:
+        id: {type: integer, format: int64}
+        mask: {type: string, description: "A repo mask of rbac.md §3, such as apt/ubuntu-internal, apt/* or */*."}
+        url: {type: string}
+        events:
+          type: array
+          description: The types it gets; empty, every type.
+          items: {type: string, enum: [version.published, version.deleted, repo.created, repo.deleted]}
+        active: {type: boolean}
+        description: {type: string}
+        createdBy: {type: string, description: The principal that created it.}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    CreatedWebhook:
+      allOf:
+        - $ref: "#/components/schemas/Webhook"
+        - type: object
+          required: [secret]
+          properties:
+            secret: {type: string, description: "whsec_ and the base64 of the key: shown this once."}
+    WebhookList:
+      type: object
+      required: [webhooks]
+      properties:
+        webhooks:
+          type: array
+          items: {$ref: "#/components/schemas/Webhook"}
+    WebhookRequest:
+      type: object
+      additionalProperties: false
+      description: >-
+        Create: url is required, and under /api/v1/webhooks the mask too; active is true by
+        default. Change: the fields given change; a mask is refused.
+      properties:
+        mask: {type: string}
+        url: {type: string, maxLength: 2048}
+        events:
+          type: array
+          items: {type: string, enum: [version.published, version.deleted, repo.created, repo.deleted]}
+        active: {type: boolean}
+        description: {type: string, maxLength: 256}
+    WebhookSecret:
+      type: object
+      required: [secret]
+      properties:
+        secret: {type: string, description: Shown this once.}
+    Delivery:
+      type: object
+      required: [id, eventId, eventType, state, attempts, createdAt]
+      properties:
+        id: {type: integer, format: int64}
+        eventId: {type: string, description: "The CloudEvents id, the same on every attempt."}
+        eventType: {type: string}
+        state: {type: string, enum: [pending, delivered, failed]}
+        attempts: {type: integer}
+        nextAt: {type: string, format: date-time, description: When a pending delivery is due.}
+        lastAt: {type: string, format: date-time}
+        lastStatus: {type: integer, description: The status of the last answer; absent when none came.}
+        lastError: {type: string, description: "Lajstrom's words, never the receiver's body."}
+        createdAt: {type: string, format: date-time}
+        deliveredAt: {type: string, format: date-time}
+    DeliveryList:
+      type: object
+      required: [deliveries]
+      properties:
+        deliveries:
+          type: array
+          items: {$ref: "#/components/schemas/Delivery"}
+        next: {type: string, description: The cursor of the next page; absent on the last.}

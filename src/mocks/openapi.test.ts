@@ -40,6 +40,26 @@ const notMocked = new Set([
   "delete /api/v1/bindings/{id}",
   "post /api/v1/bootstrap",
   "get /api/v1/openapi.yaml",
+  // Deploy tokens over a mask, and webhooks.
+  "get /api/v1/deploy-tokens",
+  "post /api/v1/deploy-tokens",
+  "delete /api/v1/deploy-tokens/{id}",
+  "get /api/v1/repos/{format}/{repo}/webhooks",
+  "post /api/v1/repos/{format}/{repo}/webhooks",
+  "get /api/v1/repos/{format}/{repo}/webhooks/{id}",
+  "patch /api/v1/repos/{format}/{repo}/webhooks/{id}",
+  "delete /api/v1/repos/{format}/{repo}/webhooks/{id}",
+  "post /api/v1/repos/{format}/{repo}/webhooks/{id}/secret",
+  "post /api/v1/repos/{format}/{repo}/webhooks/{id}/test",
+  "get /api/v1/repos/{format}/{repo}/webhooks/{id}/deliveries",
+  "get /api/v1/webhooks",
+  "post /api/v1/webhooks",
+  "get /api/v1/webhooks/{id}",
+  "patch /api/v1/webhooks/{id}",
+  "delete /api/v1/webhooks/{id}",
+  "post /api/v1/webhooks/{id}/secret",
+  "post /api/v1/webhooks/{id}/test",
+  "get /api/v1/webhooks/{id}/deliveries",
 ]);
 
 describe("public/openapi.yaml against the mock", () => {
