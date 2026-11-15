@@ -332,6 +332,8 @@ export const handlers = [
   // Any other request under /api/ gets the server's answer to a path it does not know.
   http.all(
     "*/api/v1/*",
-    answered(({ request }) => fail(404, "NOT_FOUND", `${request.method} ${new URL(request.url).pathname} is not in this version`)),
+    answered(({ request }) =>
+      fail(404, "NOT_FOUND", `${request.method} ${new URL(request.url).pathname} is not an endpoint of this version (docs/api.md)`),
+    ),
   ),
 ];

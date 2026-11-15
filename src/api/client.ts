@@ -28,12 +28,12 @@ export function isUnreachable(err: unknown): boolean {
 /**
  * Whether an error means the server does not have the endpoint yet, as opposed to a resource
  * that does not exist: 501 UNAVAILABLE for an endpoint the server knows but does not serve yet,
- * or the 404 it answers for every path under /api/ it does not know ("GET /api/v1/… is not in
- * this version", docs/api.md in lajstrom/lajstrom).
+ * or the 404 it answers for every path under /api/ it does not know ("GET /api/v1/… is not an
+ * endpoint of this version (docs/api.md)", notFound in internal/api/http.go of lajstrom/lajstrom).
  */
 export function isUnavailable(err: unknown): boolean {
   if (!(err instanceof ApiError)) return false;
-  return err.status === 501 || (err.status === 404 && err.code === "NOT_FOUND" && err.message.includes(" is not in this version"));
+  return err.status === 501 || (err.status === 404 && err.code === "NOT_FOUND" && err.message.includes(" is not an endpoint of this version"));
 }
 
 type Query = Record<string, string | number | boolean | string[] | undefined | null>;
