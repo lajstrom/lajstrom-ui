@@ -39,7 +39,8 @@ server's state if the server refuses. Safe means all three:
 | send a webhook a ping | realistic | the outcome, delivered or failed, is the answer |
 | delete a webhook | confirm, then realistic | cannot be undone; its delivery log goes with it |
 | create a user, a binding or a repo | realistic | the server assigns ids and checks the name |
-| delete a version or a repo | confirm, then realistic | cannot be undone |
+| rename a user, set a user's password | realistic | the server checks the name or the password; a rename moves the user's page |
+| delete a version, a repo or a user | confirm, then realistic | cannot be undone |
 | reindex, prefetch, purge the upstream cache | realistic, polled | a job on the server; progress comes from its status |
 
 **A refusal is shown where the change was made.** A realistic change shows the server's error in

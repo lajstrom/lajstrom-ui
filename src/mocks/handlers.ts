@@ -4,6 +4,7 @@
 import { delay, http, HttpResponse, type PathParams } from "msw";
 
 import type { ApiErrorBody } from "@/api/types";
+import type { User } from "@/api/types";
 
 import { authenticate, byPassword, createToken, revokeToken, type Refusal } from "./auth";
 import { bootstrapOpen, exchangeBootstrapToken } from "./bootstrap";
@@ -99,6 +100,17 @@ function repoOr404(params: PathParams): db.MockRepo | Response {
 
 function adminOr403(): Response | null {
   return db.isAdmin() ? null : fail(403, "FORBIDDEN", "this needs the admin role (system resource, rbac.md §2)");
+}
+
+/** The admin role, for users and bindings: 401 without credentials, 403 without the role. */
+function adminOnly(): Response | null {
+  return getPersona() === "anonymous" ? unauthorized("credentials are needed") : adminOr403();
+}
+
+/** The live user of the path, by its name or its uid, or the server's 404. */
+function liveUser(params: PathParams): User | Response {
+  const ref = decode(params.user);
+  return db.userByRef(ref) ?? fail(404, "NOT_FOUND", `user ${ref} does not exist`);
 }
 
 /** A repo the caller may act on through the API: 404 when it may not read it, 403 when it may
@@ -377,11 +389,61 @@ export const handlers = [
   }),
 
   get("*/api/v1/users", async () => {
-    return adminOr403() ?? HttpResponse.json({ users: db.users });
+    return adminOr403() ?? HttpResponse.json({ users: db.listUsers() });
   }),
 
   get("*/api/v1/bindings", async ({ request }) => {
     return adminOr403() ?? HttpResponse.json({ bindings: db.listBindings(new URL(request.url).searchParams.get("principal")) });
+  }),
+
+  // Users and bindings: the admin role only, asked before the body is read (docs/api.md).
+  post("*/api/v1/users", async ({ request }) => {
+    const denied = adminOnly();
+    if (denied) return denied;
+    const created = db.createUser(await body(request), `user:${getPersona()}`);
+    if ("status" in created) return refusal(created);
+    return HttpResponse.json(created, { status: 201, headers: { Location: `/api/v1/users/${created.name}` } });
+  }),
+
+  get("*/api/v1/users/:user", async ({ params }) => {
+    const user = adminOnly() ?? liveUser(params);
+    return user instanceof Response ? user : HttpResponse.json(user);
+  }),
+
+  patch("*/api/v1/users/:user", async ({ params, request }) => {
+    const user = adminOnly() ?? liveUser(params);
+    if (user instanceof Response) return user;
+    const updated = db.updateUser(user, await body(request), `user:${getPersona()}`);
+    return "status" in updated ? refusal(updated) : HttpResponse.json(updated);
+  }),
+
+  del("*/api/v1/users/:user", async ({ params }) => {
+    const user = adminOnly() ?? liveUser(params);
+    if (user instanceof Response) return user;
+    const refused = db.deleteUser(user, `user:${getPersona()}`);
+    return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
+  }),
+
+  post("*/api/v1/users/:user/password", async ({ params, request }) => {
+    const user = adminOnly() ?? liveUser(params);
+    if (user instanceof Response) return user;
+    const refused = db.setPassword(user, await body(request), `user:${getPersona()}`);
+    return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
+  }),
+
+  post("*/api/v1/bindings", async ({ request }) => {
+    const denied = adminOnly();
+    if (denied) return denied;
+    const created = db.createBinding(await body(request), `user:${getPersona()}`);
+    if ("status" in created) return refusal(created);
+    return HttpResponse.json(created, { status: 201, headers: { Location: `/api/v1/bindings/${created.id}` } });
+  }),
+
+  del("*/api/v1/bindings/:id", async ({ params }) => {
+    const denied = adminOnly();
+    if (denied) return denied;
+    const refused = db.deleteBinding(decode(params.id), `user:${getPersona()}`);
+    return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
   }),
 
   get("*/api/v1/tokens", async () => {

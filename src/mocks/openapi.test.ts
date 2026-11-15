@@ -28,13 +28,6 @@ const mockOps = new Set(
 const notMocked = new Set([
   "delete /api/v1/repos/{format}/{repo}/upstream-cache",
   "post /api/v1/repos/{format}/{repo}/prefetch",
-  "post /api/v1/users",
-  "get /api/v1/users/{user}",
-  "patch /api/v1/users/{user}",
-  "delete /api/v1/users/{user}",
-  "post /api/v1/users/{user}/password",
-  "post /api/v1/bindings",
-  "delete /api/v1/bindings/{id}",
   "get /api/v1/openapi.yaml",
 ]);
 

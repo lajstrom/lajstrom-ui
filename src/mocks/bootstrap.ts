@@ -13,8 +13,8 @@
 import type { User } from "@/api/types";
 import { DEMO_BOOTSTRAP_TOKEN } from "@/app/demo";
 
-import { setPassword, type Refusal } from "./auth";
-import { makeFirstAdmin, userByRef } from "./db";
+import type { Refusal } from "./auth";
+import { makeFirstAdmin, nameRefusal, passwordRefusal, userByRef } from "./db";
 import { keep, persist } from "./state";
 
 /** When the token was used; null while the server takes it. */
@@ -72,30 +72,6 @@ function decode(body: unknown): Record<(typeof FIELDS)[number], string> | Refusa
   return { token: text("token"), name: text("name"), password: text("password") };
 }
 
-const UID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const bytes = (s: string) => new TextEncoder().encode(s).length;
-
-/** The server's rules of a user name (auth.CheckName); null when it keeps them. */
-function nameRefusal(name: string): Refusal | null {
-  if (name === "") return invalid("name: must not be empty");
-  if (name === "deploy") return invalid(`name: "deploy" is reserved: Basic credentials deploy:<token> are a deploy token`);
-  if (UID.test(name)) return invalid(`name: ${JSON.stringify(name)} has the form of a uid, which user:<uid> means; a name may not (docs/spec/rbac.md §1)`);
-  if (bytes(name) > 64 || !/^[a-z0-9][a-z0-9._-]*$/.test(name)) {
-    return invalid(`name: ${JSON.stringify(name)} must be lowercase letters, digits, '.', '_' and '-', starting with a letter or a digit, at most 64 bytes`);
-  }
-  return null;
-}
-
-/** The server's rules of a password (auth.CheckPassword); null when it keeps them. */
-function passwordRefusal(password: string): Refusal | null {
-  if (bytes(password) < 8) return invalid("password: must be at least 8 bytes");
-  if (bytes(password) > 1024) return invalid("password: must be at most 1024 bytes");
-  if (password.startsWith("ljs_pat_") || password.startsWith("ljs_dep_")) {
-    return invalid("password: must not start with ljs_pat_ or ljs_dep_: a secret with either is a token's");
-  }
-  return null;
-}
-
 /** A refusal of the exchange; a throttled client is told when to try again (Retry-After). */
 export type BootstrapRefusal = Refusal & { retryAfter?: number };
 
@@ -121,8 +97,7 @@ export function exchangeBootstrapToken(body: unknown, now = Date.now()): User | 
   if (userByRef(req.name)) return { status: 409, code: "CONFLICT", message: `user ${req.name} already exists` };
 
   usedAt = new Date(now).toISOString();
-  setPassword(req.name, req.password);
-  const user = makeFirstAdmin(req.name);
+  const user = makeFirstAdmin(req.name, req.password);
   persist();
   return user;
 }

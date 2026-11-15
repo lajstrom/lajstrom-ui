@@ -180,6 +180,14 @@ export const usersQuery = queryOptions({
   queryFn: ({ signal }) => allPages<User>(apiPath("users"), "users", signal),
 });
 
+/** One live user, by its name or its uid (admin). Below usersQuery's key: a change that fetches
+ * the users again fetches it too. */
+export const userQuery = (user: string) =>
+  queryOptions({
+    queryKey: ["users", user],
+    queryFn: ({ signal }) => apiGet<User>(apiPath("users", user), undefined, signal),
+  });
+
 export const bindingsQuery = queryOptions({
   queryKey: ["bindings"],
   queryFn: ({ signal }) => allPages<Binding>(apiPath("bindings"), "bindings", signal),

@@ -404,6 +404,21 @@ components:
             message: {type: [string, "null"]}
         repos: {type: array, items: {type: string}}
 
+    User:
+      properties:
+        kind:
+          description: >-
+            Proposed: oidc, a user made by its first OIDC login, without a password
+            (docs/spec/rbac.md §8). The server makes them; its description names local only.
+          enum: [oidc]
+        groups:
+          type: array
+          description: >-
+            An OIDC user's groups that count now, from its latest login (docs/spec/rbac.md §8), as
+            whoami answers the caller's; absent for a local user. The admin sees through which
+            groups a user reaches a repo (lajstrom/lajstrom#69).
+          items: {type: string}
+
     PublishSession:
       type: object
       required: [id, key, principal, state, files, createdAt, updatedAt, expiresAt]
