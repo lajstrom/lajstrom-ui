@@ -28,6 +28,8 @@ const defaultMaxFileSize: Record<string, number> = {
   apt: 8 * 1024 ** 3,
   raw: 8 * 1024 ** 3,
   oci: 16 * 1024 ** 3,
+  // A format the list does not name, rpm among them.
+  rpm: 8 * 1024 ** 3,
 };
 
 export function RepoDetails({ repo }: { repo: Repo }) {
@@ -182,7 +184,11 @@ export function RepoDetails({ repo }: { repo: Repo }) {
           <CardHeader
             icon={<KeyRound />}
             title="Signing keys"
-            description="apt checks Release/InRelease with this key (signed-by); retired keys are still served for a grace period"
+            description={
+              repo.format === "rpm"
+                ? "dnf checks repomd.xml with this key (repo_gpgcheck, repodata/repomd.xml.asc); retired keys are still served for a grace period"
+                : "apt checks Release/InRelease with this key (signed-by); retired keys are still served for a grace period"
+            }
           />
           <Table>
             <THead>

@@ -58,8 +58,10 @@ and, for apt, the signing keys (public fingerprints only).
   with `facets` tells the UI that the server takes the parameters above.
 - A row adds `nameOci`, `latestVersion`, `versions` (distinct), `manifests`, `latestVariants`,
   `size`, `summary`, `attrs` (of the newest manifest) and `updatedAt`. `summary` is one line from
-  the metadata layer (pypi `summary`, deb `Description`, maven POM `name`); it can be a derived
-  column of `packages`, rebuilt by reindex.
+  the metadata layer (pypi `summary`, deb `Description`, maven POM `name`, npm `description`, rpm
+  `summary`); it can be a derived column of `packages`, rebuilt by reindex. For npm,
+  `latestVersion` is the version the dist-tag `latest` names, when the package has one, as npm
+  installs it; the newest otherwise.
 
 ### 2.3 One package
 

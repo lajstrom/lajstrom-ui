@@ -16,6 +16,7 @@ import { ApiError, isUnavailable } from "@/api/client";
 import { attachmentsQuery, infoQuery, packageQuery, repoQuery, versionQuery, versionsQuery } from "@/api/queries";
 import type { Attachment, Repo, VariantDetail, VersionDetail } from "@/api/types";
 import { ErrorState, FormatMark, PageHeader, Principal, RelativeTime } from "@/components/common";
+import { PointerBadges } from "@/components/pointers";
 import { SnippetTabs } from "@/components/snippets";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,7 +34,7 @@ import { variantShort } from "@/lib/variants";
 import { ociSnippets, referrerKinds } from "@/lib/formats/common";
 
 import { MetadataRows } from "./metadata";
-import { packageCrumbs } from "./package-model";
+import { latestByPointer, packageCrumbs } from "./package-model";
 import { VersionActions } from "./version-dialogs";
 
 type Props = { format: string; repoName: string; name: string; version: string };
@@ -70,8 +71,9 @@ export function VersionPage({ format, repoName, name, version }: Props) {
   const d = detail.data;
   const variant = d?.variants.find((v) => v.variant === search.variant) ?? d?.variants[0];
   const view = d && variant ? viewOf(d, variant) : undefined;
-  const latest = pkg.data?.latestVersion ?? versions.data?.[0]?.version;
-  const isLatest = latest === version;
+  const latest = pkg.data?.latestVersion ?? (versions.data ? (latestByPointer(versions.data) ?? versions.data[0]?.version) : undefined);
+  // npm's dist-tag latest is a badge of its own among the pointers.
+  const isLatest = latest === version && !d?.pointers.some((p) => p.name === "latest");
   const isRaw = format === "raw";
 
   const crumbs = packageCrumbs(format, repoName, name, version);
@@ -112,13 +114,7 @@ export function VersionPage({ format, repoName, name, version }: Props) {
                 <Badge tone="warning">yanked</Badge>
               </Tooltip>
             ) : null}
-            {d?.pointers.map((ptr) => (
-              <Tooltip key={ptr.name} content={`The ${ptr.kind} ${ptr.name} names this version`}>
-                <Badge tone="outline" className="font-mono">
-                  {ptr.name}
-                </Badge>
-              </Tooltip>
-            ))}
+            {d ? <PointerBadges pointers={d.pointers} /> : null}
             {view?.attrs["lajstrom.pypi.nonstandard"] === "true" ? (
               <Tooltip content="Not a PEP 440 version: accepted and flagged lajstrom.pypi.nonstandard=true">
                 <Badge tone="warning">non-standard version</Badge>

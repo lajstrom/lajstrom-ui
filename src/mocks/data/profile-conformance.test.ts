@@ -9,14 +9,16 @@ import { sha256Hex } from "@/lib/sha256";
 import { aptVersions } from "./apt";
 import { buildVersion, EMPTY_CONFIG } from "./builders";
 import { mavenVersions } from "./maven";
+import { npmDistTags, npmVersions } from "./npm";
 import { pypiVersions } from "./pypi";
 import { rawVersions } from "./raw";
+import { rpmVersions } from "./rpm";
 
-const specs = [...rawVersions(), ...pypiVersions(), ...aptVersions(), ...mavenVersions()];
+const specs = [...rawVersions(), ...pypiVersions(), ...aptVersions(), ...mavenVersions(), ...npmVersions(), ...rpmVersions()];
 const built = specs.map((s) => ({ spec: s, v: buildVersion(s, "art.example.com") }));
 
 const required = ["lajstrom.schema", "lajstrom.format", "lajstrom.repo", "lajstrom.name", "lajstrom.version", "org.opencontainers.image.created"];
-const artifactType = { raw: "raw", pypi: "pypi", apt: "deb", maven: "maven" } as const;
+const artifactType = { raw: "raw", pypi: "pypi", apt: "deb", maven: "maven", npm: "npm", rpm: "rpm" } as const;
 
 describe("mock manifests follow the manifest profile", () => {
   it.each(built.map(({ spec, v }) => [`${spec.format}/${spec.repo} ${spec.name} ${spec.version} ${spec.variant ?? ""}`, spec, v] as const))(
@@ -65,6 +67,94 @@ describe("mock manifests follow the manifest profile", () => {
     for (const { spec } of built.filter(({ spec }) => spec.format === "raw")) {
       expect(spec.version).toMatch(/^[0-9a-f]{16}$/);
       expect((spec.metadata as { sha256: string }).sha256.startsWith(spec.version)).toBe(true);
+    }
+  });
+
+  it("has npm and rpm versions to check", () => {
+    expect(built.filter(({ spec }) => spec.format === "npm").length).toBeGreaterThan(0);
+    expect(built.filter(({ spec }) => spec.format === "rpm").length).toBeGreaterThan(0);
+  });
+
+  // §1–§3, npm: one tarball, titled with the name without its scope; integrity and shasum on the
+  // layer; no variant and no lajstrom.npm.* on a version; a SemVer version without build metadata.
+  it.each(built.filter(({ spec }) => spec.format === "npm").map(({ spec, v }) => [`${spec.name}@${spec.version}`, spec, v] as const))(
+    "npm %s",
+    (_label, spec, v) => {
+      const m = v.manifest;
+      const files = m.layers.filter((l) => !l.mediaType.endsWith(".metadata.v1+json"));
+      expect(files).toHaveLength(1);
+      const tarball = files[0]!;
+      expect(tarball.mediaType).toBe("application/vnd.lajstrom.npm.tarball.v1.tar+gzip");
+      const base = spec.name.startsWith("@") ? spec.name.slice(spec.name.indexOf("/") + 1) : spec.name;
+      expect(tarball.annotations?.["org.opencontainers.image.title"]).toBe(`${base}-${spec.version}.tgz`);
+      expect(tarball.annotations?.["lajstrom.npm.integrity"]).toMatch(/^sha512-[A-Za-z0-9+/]{86}==$/);
+      expect(tarball.annotations?.["lajstrom.npm.shasum"]).toMatch(/^[0-9a-f]{40}$/);
+      expect(m.annotations["lajstrom.variant"]).toBeUndefined();
+      expect(Object.keys(m.annotations).filter((k) => k.startsWith("lajstrom.npm."))).toEqual([]);
+      expect(spec.version).toMatch(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$/);
+      // §2: the metadata layer agrees with the annotations and the tarball layer.
+      const md = spec.metadata as Record<string, unknown>;
+      expect(md).toMatchObject({
+        name: spec.name,
+        version: spec.version,
+        filename: tarball.annotations?.["org.opencontainers.image.title"],
+        size: tarball.size,
+        integrity: tarball.annotations?.["lajstrom.npm.integrity"],
+        shasum: tarball.annotations?.["lajstrom.npm.shasum"],
+      });
+      expect(typeof md.hasShrinkwrap).toBe("boolean");
+      expect(typeof md.hasInstallScript).toBe("boolean");
+      const doc = md.manifest as Record<string, unknown>;
+      expect(doc).toMatchObject({ name: spec.name, version: spec.version });
+      expect(Object.keys(doc).filter((k) => k === "dist" || k === "readme" || k.startsWith("_"))).toEqual([]);
+    },
+  );
+
+  // §8: a dist-tag is a name that never begins with a digit, and names a version of its package.
+  it("names only versions the package has with its dist-tags", () => {
+    for (const { repo, name, tags } of npmDistTags()) {
+      const versions = specs.filter((s) => s.format === "npm" && s.repo === repo && s.name === name).map((s) => s.version);
+      for (const [tag, version] of Object.entries(tags)) {
+        expect(tag).toMatch(/^[A-Za-z][A-Za-z0-9._-]{0,127}$/);
+        expect(versions, `${name} ${tag}`).toContain(version);
+      }
+    }
+  });
+
+  // §1–§3, rpm: one .rpm per manifest, the arch its variant (src for a source package), the
+  // version [epoch:]version-release with the epoch only when it is not 0, no lajstrom.rpm.*.
+  it.each(built.filter(({ spec }) => spec.format === "rpm").map(({ spec, v }) => [`${spec.name} ${spec.version} ${spec.variant}`, spec, v] as const))(
+    "rpm %s",
+    (_label, spec, v) => {
+      const m = v.manifest;
+      const md = spec.metadata as Record<string, unknown>;
+      const files = m.layers.filter((l) => !l.mediaType.endsWith(".metadata.v1+json"));
+      expect(files).toHaveLength(1);
+      expect(files[0]!.mediaType).toBe("application/vnd.lajstrom.rpm.package.v1");
+      expect(m.annotations["lajstrom.variant"]).toBe(md.arch);
+      expect(Object.keys(m.annotations).filter((k) => k.startsWith("lajstrom.rpm."))).toEqual([]);
+      const epoch = md.epoch as number;
+      expect(spec.version).toBe(`${epoch ? `${epoch}:` : ""}${md.version}-${md.release}`);
+      const title = `${md.name}-${md.version}-${md.release}.${md.arch}.rpm`;
+      expect(files[0]!.annotations?.["org.opencontainers.image.title"]).toBe(title);
+      expect(md).toMatchObject({ name: spec.name, filename: title, size: files[0]!.size });
+      // §2: every key of the metadata layer, the relations as lists of their six fields.
+      const keys = ["name", "epoch", "version", "release", "arch", "summary", "description", "packager", "url", "license", "vendor", "group", "buildhost", "sourcerpm", "buildtime", "installedSize", "archiveSize", "headerStart", "headerEnd", "provides", "requires", "conflicts", "obsoletes", "recommends", "suggests", "supplements", "enhances", "files", "changelogs", "filename", "size", "sha256"];
+      expect(Object.keys(md).sort()).toEqual([...keys].sort());
+      for (const r of ["provides", "requires", "conflicts", "obsoletes", "recommends", "suggests", "supplements", "enhances"]) {
+        expect(Array.isArray(md[r]), r).toBe(true);
+        for (const x of md[r] as Record<string, unknown>[]) expect(Object.keys(x).sort()).toEqual(["epoch", "flags", "name", "pre", "release", "version"]);
+      }
+      expect(md.sha256).toMatch(/^[0-9a-f]{64}$/);
+    },
+  );
+
+  it("holds one content per rpm file name in a repo, whatever the epoch (http-routing.md, rpm)", () => {
+    const names = new Map<string, string>();
+    for (const { spec, v } of built.filter(({ spec }) => spec.format === "rpm")) {
+      const key = `${spec.repo}/${v.files[0]!.name}`;
+      expect(names.get(key), key).toBeUndefined();
+      names.set(key, spec.version);
     }
   });
 });

@@ -13,6 +13,7 @@ import type {
   FacetValue,
   PackageDetail,
   PackageList,
+  Pointer,
   PublishSession,
   VariantDetail,
   VersionDetail,
@@ -33,9 +34,11 @@ import { sha256Hex } from "@/lib/sha256";
 import { aptVersions } from "./data/apt";
 import { buildVersion, type BuiltVersion } from "./data/builders";
 import { mavenVersions } from "./data/maven";
+import { npmDistTags, npmVersions } from "./data/npm";
 import { pypiVersions } from "./data/pypi";
 import { rawVersions } from "./data/raw";
 import { reindexFindings } from "./data/reindex";
+import { rpmVersions } from "./data/rpm";
 import { bindings, registries, repoSeeds, roleActions, serverInfo, tokens, uidOf, users, type MockBinding, type RepoSeed } from "./data/system";
 import { ago, ahead, before, HOST } from "./data/time";
 import { getPersona, type Persona } from "./persona";
@@ -48,7 +51,7 @@ export type MockRepo = Repo & Required<Pick<Repo, "stats" | "permissions" | "rei
 
 type Row = BuiltVersion & { repoKey: string; format: string };
 
-const allVersions: Row[] = [...rawVersions(), ...pypiVersions(), ...aptVersions(), ...mavenVersions()].map((spec) => ({
+const allVersions: Row[] = [...rawVersions(), ...pypiVersions(), ...aptVersions(), ...mavenVersions(), ...npmVersions(), ...rpmVersions()].map((spec) => ({
   ...buildVersion(spec, HOST),
   repoKey: `${spec.format}/${spec.repo}`,
   format: spec.format,
@@ -68,6 +71,33 @@ for (const pkgs of byRepo.values()) {
 }
 
 const keyOf = (r: { format: string; name: string }) => `${r.format}/${r.name}`;
+
+// --- npm dist-tags (manifest-profile.md §8) -------------------------------------------------
+
+/** The journal state of the seed's npm packages, by `<repoKey> <name>`: dist-tag → version. */
+const distTags = new Map(npmDistTags().map((d) => [`npm/${d.repo} ${d.name}`, d.tags]));
+
+/** The pointers that name a manifest's version: its package's dist-tags, sorted by name, as
+ * format.PointersOf answers them. A tag of a deleted version names nothing the list has. */
+function pointersOf(v: Row): Pointer[] {
+  const tags = distTags.get(`${v.repoKey} ${v.packageName}`) ?? {};
+  return Object.entries(tags)
+    .filter(([, version]) => version === v.version)
+    .map(([name]): Pointer => ({ kind: "dist-tag", name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** The version the dist-tag latest names, while the package has it. */
+function latestTagged(list: Row[]): Row | undefined {
+  const latest = list[0] ? distTags.get(`${list[0].repoKey} ${list[0].packageName}`)?.latest : undefined;
+  return latest === undefined ? undefined : list.find((v) => v.version === latest);
+}
+
+/** The refusal of a delete of a version that pointers name (format.RefusedProtected). */
+function protectedMessage(repo: Repo, v: Row, pointers: Pointer[]): string {
+  const names = pointers.map((p) => `${p.kind} ${p.name}`).join(", ");
+  return `version ${v.version} of "${v.packageName}" in ${keyOf(repo)} is what ${names} points to; move it, or force the delete; nothing was deleted`;
+}
 
 // --- RBAC (docs/spec/rbac.md §3) ---------------------------------------------------------
 
@@ -190,6 +220,9 @@ function summaryLine(v: BuiltVersion): string | null {
   const m = v.metadata as Record<string, unknown> | null;
   if (!m) return null;
   if (typeof m.summary === "string") return m.summary;
+  // npm: the description of the version document.
+  const manifest = m.manifest as Record<string, unknown> | undefined;
+  if (typeof manifest?.description === "string") return manifest.description;
   const control = m.control as Record<string, string> | undefined;
   if (control?.Description) return control.Description;
   const pom = m.pom as Record<string, string> | undefined;
@@ -203,7 +236,8 @@ function summaryLine(v: BuiltVersion): string | null {
 type Summary = Omit<PackageDetail, "ociRepository" | "latestMetadata">;
 
 function summarize(name: string, list: Row[]): Summary {
-  const latest = list[0]!;
+  // npm: the version the dist-tag latest names, which npm installs; else the newest.
+  const latest = latestTagged(list) ?? list[0]!;
   const latestVariants = list.filter((v) => v.version === latest.version).map((v) => v.variant).filter(Boolean);
   const attrs = { ...latest.attrs };
   const pyMeta = latest.metadata as Record<string, unknown> | null;
@@ -221,7 +255,7 @@ function summarize(name: string, list: Row[]): Summary {
     summary: summaryLine(latest),
     attrs,
     createdAt: list[list.length - 1]!.createdAt,
-    updatedAt: latest.createdAt,
+    updatedAt: list[0]!.createdAt,
   };
 }
 
@@ -334,7 +368,7 @@ export function getPackage(repo: Repo, name: string): PackageDetail | null {
   return {
     ...summary,
     ociRepository: `${repo.format}/${repo.name}/${summary.nameOci}`,
-    latestMetadata: list[0]!.metadata,
+    latestMetadata: (latestTagged(list) ?? list[0]!).metadata,
   };
 }
 
@@ -353,9 +387,9 @@ function byVersion(list: Row[]): Row[][] {
 }
 
 /** The fields every version answer shares: the first variant's publish time orders, the
- * newest one's is lastModified. */
+ * newest one's is lastModified; the pointers are npm's dist-tags that name it. */
 function versionHead(rows: Row[]) {
-  return { version: rows[0]!.version, publishedAt: rows[0]!.createdAt, lastModified: rows.at(-1)!.createdAt, pointers: [] };
+  return { version: rows[0]!.version, publishedAt: rows[0]!.createdAt, lastModified: rows.at(-1)!.createdAt, pointers: pointersOf(rows[0]!) };
 }
 
 export function listVersions(repo: Repo, name: string): VersionSummary[] | null {
@@ -1099,7 +1133,7 @@ const after = (v: Row, cutoff: number) => Math.floor(Date.parse(v.createdAt) / 1
 export type VersionDelete = { variant: string | null; force: boolean; ifMatch: string | null; ifUnmodifiedSince: string | null };
 
 /** DELETE …/versions/{version} (docs/api.md, Delete a version): a compare-and-delete with
- * If-Match and If-Unmodified-Since. The mock has no pointers, so force changes nothing. */
+ * If-Match and If-Unmodified-Since; a version an npm dist-tag names is a 409 unless forced. */
 export function deleteVersion(repo: MockRepo, name: string, version: string, opts: VersionDelete, by: string): Refusal | null {
   const all = manifestsOf(repo, name)?.filter((v) => v.version === version) ?? [];
   if (!all.length) return notFound(`${name} has no version ${version} in ${repo.prefix}`);
@@ -1117,6 +1151,8 @@ export function deleteVersion(repo: MockRepo, name: string, version: string, opt
     if (cutoff === null) return invalid(`If-Unmodified-Since: an HTTP-date, not ${opts.ifUnmodifiedSince}`);
     if (rows.some((v) => after(v, cutoff))) return { status: 412, code: "CONFLICT", message: `${name} ${version} was published after the cut-off` };
   }
+  const pointers = opts.force ? [] : pointersOf(rows[0]!);
+  if (pointers.length) return { status: 409, code: "CONFLICT", message: protectedMessage(repo, rows[0]!, pointers) };
   const unavailable = deletes(repo);
   if (unavailable) return unavailable;
   deleteRows(repo, rows, by);
@@ -1153,6 +1189,8 @@ export function deleteVersions(repo: MockRepo, body: unknown, by: string): Batch
     if (cut !== null && rows.some((v) => after(v, cut))) {
       return { ...head, status: "young", message: "published after the cut-off", lastModified: rows.at(-1)!.createdAt };
     }
+    const pointers = pointersOf(rows[0]!);
+    if (pointers.length) return { ...head, status: "protected", message: protectedMessage(repo, rows[0]!, pointers), pointers };
     if (unavailable) return { ...head, status: "error", message: unavailable.message };
     if (!dryRun) deleteRows(repo, rows, by, { job });
     return { ...head, status: "deleted" };

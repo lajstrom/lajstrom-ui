@@ -176,11 +176,21 @@ function ConnectTab({ repo, spec }: { repo: Repo; spec: FormatSpec }) {
   const info = useQuery(infoQuery);
   const facets = useQuery({ ...packagesQuery(repo.format, repo.name, { limit: 1 }), select: (d: PackageList) => d.facets });
   const ctx = snippetContext(info.data, repo, facets.data);
+  const groups = spec.connect(ctx);
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
       <div className="space-y-4">
-        <DemoCommandsNote host={ctx.host} />
-        {spec.connect(ctx).map((g) => (
+        {groups.length ? <DemoCommandsNote host={ctx.host} /> : null}
+        {groups.length ? null : (
+          // A format the UI has no module for (src/lib/formats/generic.ts).
+          <Card>
+            <EmptyState icon={<Plug />} title={`No client snippets for ${spec.label}`} className="py-10">
+              This version of the UI does not know the {spec.label} format. Its clients use the endpoint on the right, and any OCI
+              client reaches the packages through the facade.
+            </EmptyState>
+          </Card>
+        )}
+        {groups.map((g) => (
           <Card key={g.title}>
             <CardHeader title={g.title} description={g.description} />
             <CardBody>

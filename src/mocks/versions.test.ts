@@ -149,3 +149,32 @@ describe("delete versions in a batch", () => {
     await expect(deleteVersions("apt", "ubuntu-internal", { items: [] })).rejects.toMatchObject({ status: 400 });
   });
 });
+
+describe("npm dist-tags as the pointers of a version", () => {
+  const name = "@acme/widgets";
+
+  it("lists the dist-tags that name each version, in the list and in the detail", async () => {
+    signIn("alice");
+    const list = await apiGet<VersionList>(apiPath("repos", "npm", "internal", "packages", name, "versions"));
+    const pointed = Object.fromEntries(list.versions.map((v) => [v.version, v.pointers.map((p) => p.name)]));
+    expect(pointed).toEqual({ "2.0.0-beta.1": ["beta"], "2.0.0-beta.0": [], "1.2.0": ["latest"], "1.1.0": ["stable"], "1.0.0": [] });
+    expect((await detail("npm", "internal", name, "1.2.0")).pointers).toEqual([{ kind: "dist-tag", name: "latest" }]);
+    // A version pushed with oras has no dist-tag.
+    const [jsonstream] = (await apiGet<VersionList>(apiPath("repos", "npm", "internal", "packages", "JSONStream", "versions"))).versions;
+    expect(jsonstream!.pointers).toEqual([]);
+  });
+
+  it("refuses to delete a version a dist-tag names unless forced", async () => {
+    signIn("admin");
+    const list = await apiGet<VersionList>(apiPath("repos", "npm", "internal", "packages", name, "versions"));
+    const digests = list.versions.find((v) => v.version === "1.1.0")!.variants.map((x) => x.digest);
+
+    await expect(deleteVersion("npm", "internal", name, "1.1.0", digests)).rejects.toMatchObject({ status: 409, code: "CONFLICT" });
+    const batch = await deleteVersions("npm", "internal", { items: [{ package: name, version: "1.1.0", digests }] });
+    expect(batch.results[0]).toMatchObject({ status: "protected", pointers: [{ kind: "dist-tag", name: "stable" }] });
+    expect((await detail("npm", "internal", name, "1.1.0")).version).toBe("1.1.0");
+
+    await deleteVersion("npm", "internal", name, "1.1.0", digests, true);
+    await expect(detail("npm", "internal", name, "1.1.0")).rejects.toMatchObject({ status: 404 });
+  });
+});
