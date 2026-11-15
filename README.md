@@ -97,6 +97,10 @@ LAJSTROM_UI_MOCK=false LAJSTROM_API_UPSTREAM=http://localhost:8080 npm run dev
 The dev server forwards `/api` and `/-` to the server, so the browser sees one origin: the server
 does not answer cross-origin requests. `LAJSTROM_UI_DEMO=false` hides the demo.
 
+`npm run e2e` runs the UI image against a real server and opens every screen in a browser
+([e2e/README.md](e2e/README.md)). CI does it on every pull request, against the server's commit
+of `openapi/server.yaml`, and every night against the server's main.
+
 ## The demo on GitHub Pages
 
 The demo is a static site: no server, nothing to run. `npm run build:pages` builds it into
@@ -180,6 +184,8 @@ openapi/        server.yaml: the server's OpenAPI description, vendored at a com
                 proposed.yaml: what the UI adds to it (docs/api-proposal.md)
 scripts/        vendoring it, generating public/openapi.yaml and src/api/openapi.gen.ts; the
                 Pages build
+e2e/            the end-to-end test against a real server: the server and its packages
+                (server.sh, fixtures.py), the screens in Playwright (*.e2e.ts)
 docker/         nginx.conf and the start script of the image
 deploy/         Kubernetes and compose examples
 docs/           the API proposal and the ADRs of the UI
