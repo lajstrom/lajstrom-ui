@@ -20,6 +20,8 @@ const artifactTypes: Record<FormatName, string> = {
   pypi: "application/vnd.lajstrom.pypi.v1",
   apt: "application/vnd.lajstrom.deb.v1",
   maven: "application/vnd.lajstrom.maven.v1",
+  npm: "application/vnd.lajstrom.npm.v1",
+  rpm: "application/vnd.lajstrom.rpm.v1",
 };
 
 const metadataTypes: Record<FormatName, string> = {
@@ -27,6 +29,8 @@ const metadataTypes: Record<FormatName, string> = {
   pypi: "application/vnd.lajstrom.pypi.metadata.v1+json",
   apt: "application/vnd.lajstrom.deb.metadata.v1+json",
   maven: "application/vnd.lajstrom.maven.metadata.v1+json",
+  npm: "application/vnd.lajstrom.npm.metadata.v1+json",
+  rpm: "application/vnd.lajstrom.rpm.metadata.v1+json",
 };
 
 export type FileSpec = {

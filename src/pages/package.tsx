@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { infoQuery, packageQuery, repoQuery, versionQuery, versionsQuery } from "@/api/queries";
 import type { Repo } from "@/api/types";
 import { ErrorState, FormatMark, PageHeader, Principal, RelativeTime, SignedBadge } from "@/components/common";
+import { PointerBadges } from "@/components/pointers";
 import { SnippetTabs } from "@/components/snippets";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,7 @@ import { formatSpec, snippetContext, type FormatSpec } from "@/lib/formats";
 import { variantShort } from "@/lib/variants";
 
 import { MetadataRows } from "./metadata";
-import { derivePackage, groupVersions, packageCrumbs, type PackageInfo, type VersionGroup } from "./package-model";
+import { derivePackage, groupVersions, latestByPointer, packageCrumbs, type PackageInfo, type VersionGroup } from "./package-model";
 import { VersionPage } from "./version";
 import { deletes } from "./version-changes";
 import { DeleteVersionsDialog } from "./version-dialogs";
@@ -48,7 +49,8 @@ function PackagePage({ format, repoName, name }: { format: string; repoName: str
   // A server without GET …/packages/{name}: the package is what its versions say, and the
   // newest version in detail adds its metadata.
   const derived = pkg.data === null;
-  const newest = versions.data?.[0]?.version;
+  // The latest version: the one npm's dist-tag latest names, else the newest.
+  const newest = versions.data ? (latestByPointer(versions.data) ?? versions.data[0]?.version) : undefined;
   const latest = useQuery({ ...versionQuery(format, repoName, name, newest ?? ""), enabled: derived && newest !== undefined });
   const p: PackageInfo | undefined =
     pkg.data ?? (derived && versions.data ? derivePackage(format, repoName, name, versions.data, latest.data, spec) : undefined);
@@ -190,6 +192,8 @@ function VersionsTable({
   const isRaw = format === "raw";
   const sized = groups.some((g) => g.size !== null);
   const byKnown = groups.some((g) => g.uploadedBy !== null);
+  // npm's dist-tag latest says which version is the latest; without one, the newest is.
+  const tagged = latestByPointer(groups) !== undefined;
   const open = (g: VersionGroup, variant?: string) =>
     void navigate({
       to: "/$format/$repo/$",
@@ -249,7 +253,8 @@ function VersionsTable({
                 >
                   {isRaw ? shortDigest(g.version, 16) : g.version}
                 </Link>
-                {i === 0 ? <Badge tone="primary">{isRaw ? "current" : "latest"}</Badge> : null}
+                {i === 0 && !tagged ? <Badge tone="primary">{isRaw ? "current" : "latest"}</Badge> : null}
+                <PointerBadges pointers={g.pointers} />
                 {g.yanked ? (
                   <Tooltip content={g.yanked.reason ? `Yanked: ${g.yanked.reason}` : "Yanked: installers skip it unless pinned (PEP 592)"}>
                     <Badge tone="warning">yanked</Badge>
@@ -304,11 +309,14 @@ function VersionsTable({
 function InstallCard({ repo, pkg, spec }: { repo: Repo; pkg: PackageInfo; spec: FormatSpec }) {
   const info = useQuery(infoQuery);
   const ctx = snippetContext(info.data, repo);
+  const snippets = spec.install(ctx, pkg);
+  // A format the UI has no module for has no snippets (src/lib/formats/generic.ts).
+  if (!snippets.length) return null;
   return (
     <Card>
       <CardHeader title={repo.format === "raw" ? "Download" : "Install"} description={repo.format === "raw" ? "Always the current version" : pkg.latestVersion ? `Latest: ${pkg.latestVersion}` : undefined} />
       <CardBody>
-        <SnippetTabs snippets={spec.install(ctx, pkg)} />
+        <SnippetTabs snippets={snippets} />
       </CardBody>
     </Card>
   );
@@ -332,7 +340,10 @@ function AboutCard({ pkg, spec, format }: { pkg: PackageInfo; spec: FormatSpec; 
     <Card>
       <CardHeader title="About" description="From the metadata layer of the newest manifest" />
       <CardBody>
-        <MetadataRows rows={rows.filter((r) => !["Summary", "Description", "File", "Package type"].includes(r.label))} compact />
+        <MetadataRows
+          rows={rows.filter((r) => !["Summary", "Description", "File", "Package type", "Integrity", "Shasum"].includes(r.label))}
+          compact
+        />
       </CardBody>
     </Card>
   );

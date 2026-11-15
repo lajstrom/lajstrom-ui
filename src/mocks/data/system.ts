@@ -13,8 +13,10 @@ export const serverInfo: Omit<ServerInfo, "caller"> = {
   formats: [
     { name: "apt", artifactType: "application/vnd.lajstrom.deb.v1" },
     { name: "maven", artifactType: "application/vnd.lajstrom.maven.v1" },
+    { name: "npm", artifactType: "application/vnd.lajstrom.npm.v1" },
     { name: "pypi", artifactType: "application/vnd.lajstrom.pypi.v1" },
     { name: "raw", artifactType: "application/vnd.lajstrom.raw.v1" },
+    { name: "rpm", artifactType: "application/vnd.lajstrom.rpm.v1" },
   ],
   authModes: ["password", "token"],
 };
@@ -84,7 +86,7 @@ export const registries: Omit<Registry, "repos">[] = [
 ];
 
 export type RepoSeed = {
-  format: "raw" | "pypi" | "apt" | "maven" | "oci";
+  format: "raw" | "pypi" | "apt" | "maven" | "npm" | "rpm" | "oci";
   name: string;
   registry: string;
   anonymousRead: boolean;
@@ -166,6 +168,26 @@ export const repoSeeds: RepoSeed[] = [
     createdAt: ago(80),
     reindex: "running",
   },
+  // npm and rpm (#7): the repos of the server's quick starts, npm/internal and rpm/el9.
+  {
+    format: "npm",
+    name: "internal",
+    registry: "zot",
+    anonymousRead: false,
+    policy: {},
+    createdAt: ago(100),
+    reindex: "idle",
+  },
+  {
+    format: "rpm",
+    name: "el9",
+    registry: "ecr-prod",
+    anonymousRead: true,
+    policy: { blobRedirect: "auto" },
+    createdAt: ago(75),
+    reindex: "idle",
+    signingKeys: [{ algorithm: "rsa4096", fingerprint: fingerprint("rpm-key-1"), createdAt: ago(75), retiredAt: null }],
+  },
 ];
 
 /** A user's uid in the mock, stable across reloads: the server's are UUIDv7, these only look so. */
@@ -198,6 +220,9 @@ export const tokens: Token[] = [
   { id: 21, kind: "deploy", name: "billing CI", repo: "pypi/internal", scopes: ["read", "write"], expiresAt: ahead(45), lastUsedAt: before(4, 2), createdAt: ago(100), revokedAt: null, hashPrefix: "82a21d7c" },
   { id: 22, kind: "deploy", name: "payments CI (pypi)", repo: "pypi/payments", scopes: ["write"], expiresAt: ahead(140), lastUsedAt: before(6, 3), createdAt: ago(60), revokedAt: null, hashPrefix: "9ab0bbe6" },
   { id: 24, kind: "deploy", name: "payments audit mirror", repoMask: "*/payments", scopes: ["read"], expiresAt: null, lastUsedAt: before(0, 2), createdAt: ago(25), revokedAt: null, hashPrefix: "c4e81f07" },
+  // npm and rpm (#7): the CI of the npm and rpm seeds.
+  { id: 41, kind: "deploy", name: "github-actions web (npm)", repo: "npm/internal", scopes: ["read", "write"], expiresAt: ahead(120), lastUsedAt: before(1, 5), createdAt: ago(98), revokedAt: null, hashPrefix: "7f04c2a9" },
+  { id: 42, kind: "deploy", name: "github-actions acme-agent (rpm)", repo: "rpm/el9", scopes: ["write"], expiresAt: ahead(180), lastUsedAt: before(1, 3), createdAt: ago(60), revokedAt: null, hashPrefix: "b83e6d10" },
 ];
 
 /** The mock's bindings name users as `user:<name>`; the API answers `user:<uid>` and the name

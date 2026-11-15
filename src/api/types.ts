@@ -7,7 +7,7 @@
 import type { Schemas } from "./openapi.gen";
 
 /** The formats the UI has a spec for (src/lib/formats). */
-export type FormatName = "raw" | "pypi" | "apt" | "maven";
+export type FormatName = "raw" | "pypi" | "apt" | "maven" | "npm" | "rpm";
 
 /** A repo's format as the server answers it: `oci` repos are the pass-through repos of the
  * OCI facade, which need no plugin and get no format pages. */
@@ -95,6 +95,10 @@ export type VersionDetail = Schemas["VersionDetail"];
 
 /** The yank of a pypi version (PEP 592), absent when it is not yanked. */
 export type Yank = Schemas["Yank"];
+
+/** What names a version and can move to another: an npm dist-tag, from the package's journal
+ * (manifest-profile.md §8). */
+export type Pointer = Schemas["Pointer"];
 
 export type BatchDeleteRequest = Schemas["BatchDeleteRequest"];
 

@@ -28,12 +28,14 @@ server's specs. The read endpoints the UI needs are proposed in
 - **A repository**: packages with search, sorting and the format's filters (apt suite,
   component, architecture; maven packaging), a file tree for raw repos, a "connect a client"
   page with copyable snippets for pip, uv, twine, apt (sources.list, deb822, auth.conf), Maven,
-  Gradle, curl and oras, the repo's policy, index state and signing keys, and for maintainers the
-  last reindex report (its counts, and the errors, drift, split packages, versions of unknown OCI
-  repositories, foreign manifests and orphans it found), open maven deploy sessions and deploy
-  tokens.
-- **A package**: versions grouped with their variants (architectures, wheel tags), install
-  snippets, what the metadata layer says.
+  Gradle, npm, pnpm and yarn (`.npmrc`, a scoped registry, `.yarnrc.yml`), dnf, yum and zypper
+  (a `.repo` file with the repo's key), curl and oras, the repo's policy, index state and signing
+  keys, and for maintainers the last reindex report (its counts, and the errors, drift, split
+  packages, versions of unknown OCI repositories, foreign manifests and orphans it found), open
+  maven deploy sessions and deploy tokens. A format this UI does not know yet shows its packages,
+  versions and files, without snippets.
+- **A package**: versions grouped with their variants (architectures, wheel tags), npm's
+  dist-tags on the versions they name, install snippets, what the metadata layer says.
 - **A version**: files with digests and download URLs, install and `oras`/`cosign` snippets,
   signatures, SBOMs and attestations (OCI referrers), the metadata layer, the manifest
   annotations and the raw OCI manifest.

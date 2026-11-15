@@ -1,4 +1,4 @@
-import type { Repo, RepoFormat } from "@/api/types";
+import type { Repo } from "@/api/types";
 
 /** What snippets need to know about where and how the client talks to Lajstrom. */
 export type SnippetContext = {
@@ -34,6 +34,8 @@ export type InstallPackage = { name: string; latestVersion?: string | null; attr
  * metadata layer. */
 export type InstallVersion = {
   version: string;
+  /** The variant shown, when the page shows one: an rpm's arch. */
+  variant?: string;
   tag: string;
   digest: string;
   attrs?: Record<string, string>;
@@ -43,7 +45,8 @@ export type InstallVersion = {
 export type MetadataRow = { label: string; value: string | string[]; mono?: boolean; href?: string };
 
 export type FormatSpec = {
-  name: RepoFormat;
+  /** The repo's format (RepoFormat), or the name of one the UI has no module for (generic.ts). */
+  name: string;
   /** Display name of the format: "PyPI", "APT", "Maven", "Raw". */
   label: string;
   /** Short mark for the format badge. */
