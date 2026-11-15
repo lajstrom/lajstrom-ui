@@ -1,7 +1,9 @@
 // The changes the UI makes, against the endpoints the server has (docs/api.md).
 
 import { apiPath, apiSend, basicAuth } from "./client";
+import { webhooksPath, type WebhookScope } from "./queries";
 import type { BatchDeleteRequest, BatchDeleteResult, CreatedToken, MaskTokenRequest, TokenRequest } from "./types";
+import type { CreatedWebhook, Delivery, Webhook, WebhookRequest, WebhookSecret } from "./types";
 
 export function createUserToken(user: string, req: TokenRequest): Promise<CreatedToken> {
   return apiSend<CreatedToken>("POST", apiPath("users", user, "tokens"), { body: req });
@@ -50,4 +52,32 @@ export function deleteVersion(format: string, repo: string, name: string, versio
 /** Deletes versions in a batch: each item on its own, with a result per item. */
 export function deleteVersions(format: string, repo: string, req: BatchDeleteRequest): Promise<BatchDeleteResult> {
   return apiSend<BatchDeleteResult>("POST", `${apiPath("repos", format, repo)}/versions:delete`, { body: req });
+}
+
+// Webhooks (docs/api.md, Webhooks): under a repo, or under /api/v1/webhooks (WebhookScope).
+
+/** Creates a webhook; the answer has its secret, the one time it is shown. Under /api/v1/webhooks
+ * the request names the mask. */
+export function createWebhook(scope: WebhookScope, req: WebhookRequest): Promise<CreatedWebhook> {
+  return apiSend<CreatedWebhook>("POST", webhooksPath(scope), { body: req });
+}
+
+/** Changes the fields given of url, events, active and description; the mask never changes. */
+export function updateWebhook(scope: WebhookScope, id: number, req: WebhookRequest): Promise<Webhook> {
+  return apiSend<Webhook>("PATCH", webhooksPath(scope, id), { body: req });
+}
+
+/** Deletes a webhook and its delivery log; its pending deliveries are not sent. */
+export function deleteWebhook(scope: WebhookScope, id: number): Promise<void> {
+  return apiSend("DELETE", webhooksPath(scope, id));
+}
+
+/** Gives a webhook a new secret, answered this once; the old one signs nothing from then on. */
+export function rotateWebhookSecret(scope: WebhookScope, id: number): Promise<WebhookSecret> {
+  return apiSend<WebhookSecret>("POST", webhooksPath(scope, id, "secret"));
+}
+
+/** Sends a webhook.ping now, once, active or not; the answer is its row of the delivery log. */
+export function testWebhook(scope: WebhookScope, id: number): Promise<Delivery> {
+  return apiSend<Delivery>("POST", webhooksPath(scope, id, "test"));
 }

@@ -5,6 +5,7 @@ import type {
   AttachmentList,
   AuditList,
   Binding,
+  DeliveryList,
   PackageDetail,
   PackageList,
   PublishSession,
@@ -17,6 +18,7 @@ import type {
   User,
   VersionDetail,
   VersionSummary,
+  Webhook,
 } from "./types";
 
 /** A repo as the server answers it: everything but `prefix`, which the UI derives. */
@@ -203,3 +205,33 @@ export const tokensQuery = queryOptions({
   queryKey: ["tokens"],
   queryFn: ({ signal }) => apiGet<{ tokens: Token[] }>(apiPath("tokens"), undefined, signal).then((r) => r.tokens),
 });
+
+// Webhooks (docs/api.md, Webhooks): a repo's under the repo, for manage on it; every mask's
+// under /api/v1/webhooks, for the admin role. The routes below each are the same.
+
+/** Where the routes of webhooks are: under a repo, the webhooks whose mask is the repo; null,
+ * /api/v1/webhooks, those of every mask. */
+export type WebhookScope = { format: string; repo: string } | null;
+
+/** The path of the scope's webhooks, or of one of them and what is below it. */
+export function webhooksPath(scope: WebhookScope, ...rest: (string | number)[]): string {
+  return scope ? apiPath("repos", scope.format, scope.repo, "webhooks", ...rest) : apiPath("webhooks", ...rest);
+}
+
+/** The query key of the scope's list; the delivery logs of its webhooks are below it. */
+export const webhooksKey = (scope: WebhookScope): string[] => (scope ? ["repos", scope.format, scope.repo, "webhooks"] : ["webhooks"]);
+
+/** The webhooks of the scope, by id; never a secret. */
+export const webhooksQuery = (scope: WebhookScope) =>
+  queryOptions({
+    queryKey: webhooksKey(scope),
+    queryFn: ({ signal }) => apiGet<{ webhooks: Webhook[] }>(webhooksPath(scope), undefined, signal).then((r) => r.webhooks),
+  });
+
+/** One page of a webhook's delivery log, newest first. */
+export const deliveriesQuery = (scope: WebhookScope, id: number, cursor: string | undefined) =>
+  queryOptions({
+    queryKey: [...webhooksKey(scope), id, "deliveries", cursor ?? ""],
+    queryFn: ({ signal }) => apiGet<DeliveryList>(webhooksPath(scope, id, "deliveries"), { cursor, limit: 20 }, signal),
+    placeholderData: keepPreviousData,
+  });

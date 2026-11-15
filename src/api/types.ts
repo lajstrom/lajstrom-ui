@@ -179,3 +179,26 @@ export type ReindexRepositoryUnknown = Schemas["ReindexRepositoryUnknown"];
 
 /** A referrers index that a run pushed again with the referrers it lacked. */
 export type RepairedReferrersIndex = Schemas["RepairedReferrersIndex"];
+
+// Webhooks (docs/api.md, Webhooks; docs/spec/webhooks.md).
+
+/** A webhook: the events of the repos its mask matches, sent to its URL. Never its secret. */
+export type Webhook = Schemas["Webhook"];
+
+/** A type of event a webhook gets; a webhook whose `events` is empty gets every type. */
+export type WebhookEvent = Webhook["events"][number];
+
+/** The answer of a creation: the webhook and its secret, shown this one time. */
+export type CreatedWebhook = Schemas["CreatedWebhook"];
+
+/** The body of a creation, and of a change: the fields given change, never the mask. */
+export type WebhookRequest = Schemas["WebhookRequest"];
+
+/** The answer of a rotation: the new secret, shown this one time. */
+export type WebhookSecret = Schemas["WebhookSecret"];
+
+/** A row of a webhook's delivery log: pending (due at nextAt), delivered or failed. */
+export type Delivery = Schemas["Delivery"];
+
+/** A page of a delivery log, newest first; `next` is the cursor of the page after it. */
+export type DeliveryList = Schemas["DeliveryList"];

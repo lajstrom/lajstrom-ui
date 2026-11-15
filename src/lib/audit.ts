@@ -25,6 +25,10 @@ export const auditActions = [
   "token.revoke",
   "key.rotate",
   "key.drop",
+  "webhook.create",
+  "webhook.update",
+  "webhook.delete",
+  "webhook.secret",
   "reconcile",
   "referrers.repair",
 ];

@@ -846,6 +846,12 @@ function changed(event?: MockEvent): void {
   persist();
 }
 
+/** The audit row of a change that another part of the mock makes, such as a webhook's
+ * (src/mocks/webhooks.ts): now, from the demo's address. */
+export function audited(event: Pick<MockEvent, "principal" | "action" | "repo" | "subject" | "details">): void {
+  changed({ ...event, at: new Date().toISOString(), digest: null, ip: DEMO_IP });
+}
+
 function removeRows(match: (v: Row) => boolean): number {
   let n = 0;
   for (let i = allVersions.length - 1; i >= 0; i--) {

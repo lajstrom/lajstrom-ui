@@ -9,6 +9,7 @@ import { authenticate, byPassword, createToken, revokeToken, type Refusal } from
 import { bootstrapOpen, exchangeBootstrapToken } from "./bootstrap";
 import * as db from "./db";
 import { getPersona, setPersona } from "./persona";
+import * as hooks from "./webhooks";
 
 function fail(status: number, code: ApiErrorBody["error"]["code"], message: string) {
   return HttpResponse.json<ApiErrorBody>({ error: { code, message } }, { status });
@@ -107,6 +108,82 @@ function repoFor(params: PathParams, action: "write" | "delete" | "manage"): db.
   if (repo instanceof Response) return repo;
   return repo.permissions.includes(action) ? repo : fail(403, "FORBIDDEN", `this needs ${action} on ${repo.prefix}`);
 }
+
+// Webhooks (docs/api.md, Webhooks): the routes under a repo and those under /api/v1/webhooks
+// answer alike, in the scope of the route; src/mocks/webhooks.ts keeps them.
+
+/** The mask of a webhook route's scope: the repo's, for manage on it, decided before the repo is
+ * looked up (401, then 404 or 403: rbac.md §3); "" under /api/v1/webhooks, for the admin role,
+ * before the body is read. */
+function webhookScope(params: PathParams): string | Response {
+  if (getPersona() === "anonymous") return unauthorized("credentials are needed");
+  if (params.format === undefined) return adminOr403() ?? "";
+  const repo = repoFor(params, "manage");
+  return repo instanceof Response ? repo : repo.prefix;
+}
+
+/** The webhook {id} of the route's scope: under a repo, one of another mask is 404. */
+function webhookOf(params: PathParams) {
+  const mask = webhookScope(params);
+  if (mask instanceof Response) return mask;
+  const w = hooks.webhookIn(mask, decode(params.id));
+  return "status" in w ? refusal(w) : w;
+}
+
+const webhookList: Resolver = async ({ params }) => {
+  const mask = webhookScope(params);
+  return mask instanceof Response ? mask : HttpResponse.json({ webhooks: hooks.listWebhooks(mask) });
+};
+
+const webhookCreate: Resolver = async ({ params, request }) => {
+  const mask = webhookScope(params);
+  if (mask instanceof Response) return mask;
+  const created = hooks.createWebhook(mask, await body(request), `user:${getPersona()}`);
+  if ("status" in created) return refusal(created);
+  const location = mask ? `/api/v1/repos/${mask}/webhooks/${created.id}` : `/api/v1/webhooks/${created.id}`;
+  return HttpResponse.json(created, { status: 201, headers: { Location: location } });
+};
+
+const webhookGet: Resolver = async ({ params }) => {
+  const w = webhookOf(params);
+  return w instanceof Response ? w : HttpResponse.json(w);
+};
+
+const webhookUpdate: Resolver = async ({ params, request }) => {
+  const w = webhookOf(params);
+  if (w instanceof Response) return w;
+  const updated = hooks.updateWebhook(w, await body(request), `user:${getPersona()}`);
+  return "status" in updated ? refusal(updated) : HttpResponse.json(updated);
+};
+
+const webhookDelete: Resolver = async ({ params }) => {
+  const w = webhookOf(params);
+  if (w instanceof Response) return w;
+  hooks.deleteWebhook(w, `user:${getPersona()}`);
+  return new HttpResponse(null, { status: 204 });
+};
+
+const webhookSecret: Resolver = async ({ params }) => {
+  const w = webhookOf(params);
+  if (w instanceof Response) return w;
+  const secret = hooks.rotateSecret(w, `user:${getPersona()}`);
+  return "status" in secret ? refusal(secret) : HttpResponse.json(secret);
+};
+
+const webhookTest: Resolver = async ({ params }) => {
+  const w = webhookOf(params);
+  if (w instanceof Response) return w;
+  const delivery = hooks.testWebhook(w);
+  return "status" in delivery ? refusal(delivery) : HttpResponse.json(delivery);
+};
+
+const webhookDeliveries: Resolver = async ({ params, request }) => {
+  const w = webhookOf(params);
+  if (w instanceof Response) return w;
+  const sp = new URL(request.url).searchParams;
+  const page = hooks.listDeliveries(w, sp.get("limit"), sp.get("cursor"));
+  return "status" in page ? refusal(page) : HttpResponse.json(page);
+};
 
 
 
@@ -428,6 +505,24 @@ export const handlers = [
     const refused = db.deleteRepo(repo, new URL(request.url).searchParams.get("force") === "true", `user:${getPersona()}`);
     return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
   }),
+
+  // Webhooks: a repo's, for manage on it, and those of every mask, for the admin role.
+  get("*/api/v1/repos/:format/:repo/webhooks", webhookList),
+  post("*/api/v1/repos/:format/:repo/webhooks", webhookCreate),
+  get("*/api/v1/repos/:format/:repo/webhooks/:id", webhookGet),
+  patch("*/api/v1/repos/:format/:repo/webhooks/:id", webhookUpdate),
+  del("*/api/v1/repos/:format/:repo/webhooks/:id", webhookDelete),
+  post("*/api/v1/repos/:format/:repo/webhooks/:id/secret", webhookSecret),
+  post("*/api/v1/repos/:format/:repo/webhooks/:id/test", webhookTest),
+  get("*/api/v1/repos/:format/:repo/webhooks/:id/deliveries", webhookDeliveries),
+  get("*/api/v1/webhooks", webhookList),
+  post("*/api/v1/webhooks", webhookCreate),
+  get("*/api/v1/webhooks/:id", webhookGet),
+  patch("*/api/v1/webhooks/:id", webhookUpdate),
+  del("*/api/v1/webhooks/:id", webhookDelete),
+  post("*/api/v1/webhooks/:id/secret", webhookSecret),
+  post("*/api/v1/webhooks/:id/test", webhookTest),
+  get("*/api/v1/webhooks/:id/deliveries", webhookDeliveries),
 
   // Any other request under /api/ gets the server's answer to a path it does not know.
   http.all(
