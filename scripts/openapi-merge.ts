@@ -14,7 +14,10 @@ const METHODS = ["get", "put", "post", "delete", "patch", "head", "options"];
 export function mergeSpec(serverText: string, proposedText: string): string {
   const commit = /^# Vendored from lajstrom\/lajstrom@([0-9a-f]{40})\b/.exec(serverText)?.[1];
   if (!commit) throw new Error("openapi/server.yaml lacks its first line, # Vendored from lajstrom/lajstrom@<commit>");
-  const merged = merge(parse(serverText) as unknown, parse(proposedText) as unknown, []);
+  const proposed = parse(proposedText) as unknown;
+  const empty = emptyKey(proposed, []);
+  if (empty) throw new Error(`openapi/proposed.yaml: ${empty} has no value; in {…}, a comma ends a description unless it is quoted`);
+  const merged = merge(parse(serverText) as unknown, proposed, []);
   return [
     `# Generated from openapi/server.yaml, lajstrom/lajstrom@${commit}, and openapi/proposed.yaml.`,
     "# Do not edit: npm run gen:api.",
@@ -85,6 +88,24 @@ function label(item: unknown): string {
 
 function where(path: string[]): string {
   return path.join(" ");
+}
+
+/** The first key without a value: what YAML makes of the text after a comma of an unquoted
+ * description in a flow mapping. */
+function emptyKey(value: unknown, path: string[]): string | null {
+  if (Array.isArray(value)) {
+    for (const [i, item] of value.entries()) {
+      const found = emptyKey(item, [...path, String(i)]);
+      if (found) return found;
+    }
+  } else if (isNode(value)) {
+    for (const [key, v] of Object.entries(value)) {
+      if (v === null) return where([...path, JSON.stringify(key)]);
+      const found = emptyKey(v, [...path, key]);
+      if (found) return found;
+    }
+  }
+  return null;
 }
 
 function isNode(v: unknown): v is Node {

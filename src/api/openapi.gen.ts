@@ -422,19 +422,20 @@ export type Schemas = {
     /** The manifest digest */
     digest: string;
     publishedAt: string;
-    /** Proposed. */
+    /** Proposed: The manifest's artifact type (lajstrom/lajstrom#1132). */
     artifactType?: string;
     /**
-     * Proposed: The manifest's lajstrom.* annotations by their full key, as VariantDetail has them.
+     * Proposed: The manifest's lajstrom.* annotations by their full key, as VariantDetail has them
+     * (lajstrom/lajstrom#1132).
      */
     attrs?: Record<string, string>;
-    /** Proposed. */
+    /** Proposed: The size of its file layers (lajstrom/lajstrom#1132). */
     size?: number;
-    /** Proposed. */
+    /** Proposed: The number of its file layers (lajstrom/lajstrom#1132). */
     fileCount?: number;
-    /** Proposed: The row came from the annotations alone. */
+    /** Proposed: The row came from the annotations alone (lajstrom/lajstrom#1132). */
     degraded?: boolean;
-    /** Proposed. */
+    /** Proposed: Its signatures, SBOMs and attestations (lajstrom/lajstrom#1132). */
     referrers?: Schemas["ReferrerCounts"];
   };
   Pointer: {
@@ -790,7 +791,7 @@ export type Schemas = {
   Registry: {
     name: string;
     type: "generic" | "ecr";
-    /** The product detected */
+    /** The product detected, from the registry comparison of docs/registries/. */
     product: string;
     url: string;
     prefix: string;

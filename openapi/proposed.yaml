@@ -200,17 +200,21 @@ components:
 
     Variant:
       properties:
-        artifactType: {type: string}
+        artifactType: {type: string, description: The manifest's artifact type (lajstrom/lajstrom#1132).}
         attrs:
           type: object
-          description: The manifest's lajstrom.* annotations by their full key, as VariantDetail has them.
+          description: >-
+            The manifest's lajstrom.* annotations by their full key, as VariantDetail has them
+            (lajstrom/lajstrom#1132).
           additionalProperties: {type: string}
-        size: {type: integer}
-        fileCount: {type: integer}
+        size: {type: integer, description: The size of its file layers (lajstrom/lajstrom#1132).}
+        fileCount: {type: integer, description: The number of its file layers (lajstrom/lajstrom#1132).}
         degraded:
           type: boolean
-          description: The row came from the annotations alone.
-        referrers: {$ref: "#/components/schemas/ReferrerCounts"}
+          description: The row came from the annotations alone (lajstrom/lajstrom#1132).
+        referrers:
+          $ref: "#/components/schemas/ReferrerCounts"
+          description: Its signatures, SBOMs and attestations (lajstrom/lajstrom#1132).
 
     VariantDetail:
       properties:
@@ -400,7 +404,7 @@ components:
       properties:
         name: {type: string}
         type: {type: string, enum: [generic, ecr]}
-        product: {type: string, description: The product detected, from the registry comparison of docs/registries/.}
+        product: {type: string, description: "The product detected, from the registry comparison of docs/registries/."}
         url: {type: string}
         prefix: {type: string}
         capabilities:

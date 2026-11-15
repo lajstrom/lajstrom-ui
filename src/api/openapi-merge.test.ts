@@ -77,4 +77,10 @@ components:
     );
     expect(() => mergeSpec("paths: {}", "paths: {}")).toThrow(/Vendored from/);
   });
+
+  it("refuses a description that a comma cut short", () => {
+    expect(() => mergeSpec(server, "components: {schemas: {B: {type: string, description: One, two.}}}")).toThrow(
+      /components schemas B "two\." has no value/,
+    );
+  });
 });
