@@ -59,6 +59,8 @@ npx license-checker-rseidelsohn@5.0.1 --production --excludePrivatePackages \
 - React: no impure calls (`Date.now()`, random) in render; keep non-component helpers out of
   component files (fast refresh); `react-hooks` lint must pass.
 - Tests with vitest for pure logic: formats, profile, mock conformance.
+- A change to the server goes through `src/api/change.ts`: realistic by default, optimistic only
+  where `docs/adr/0003-changes-realistic-by-default.md` says it is safe.
 - UI text in English, like the server's documentation.
 
 ## Commits and pull requests

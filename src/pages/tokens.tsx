@@ -1,8 +1,9 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { KeyRound, LogIn } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { optimistic, useChanges } from "@/api/change";
 import { createUserToken, revokeUserToken } from "@/api/mutations";
 import { callerQuery, userTokensQuery } from "@/api/queries";
 import { setSession } from "@/api/session";
@@ -14,21 +15,22 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState, Segmented, Skeleton } from "@/components/ui/misc";
 import { sha256Hex } from "@/lib/sha256";
-import { tokenState } from "@/lib/tokens";
+import { revoked, tokenState } from "@/lib/tokens";
 
 type Search = { all?: string };
 
 const live = (t: Token) => tokenState(t) === "active" || tokenState(t) === "expiring";
+const tokenId = (t: Token) => t.id;
 
 export function TokensPage() {
   const who = useQuery(callerQuery);
   const session = useSession();
   const search = useSearch({ strict: false }) as Search;
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const [revoking, setRevoking] = useState<Token | null>(null);
   const user = who.data?.kind === "user" ? who.data.name : null;
   const tokens = useQuery({ ...userTokensQuery(user ?? ""), enabled: user !== null });
+  const list = userTokensQuery(user ?? "").queryKey;
   const showAll = search.all === "1";
 
   // This browser's token: the one sign-in created, or a pasted one found by its hash prefix.
@@ -37,6 +39,20 @@ export function TokensPage() {
 
   const all = useMemo(() => [...(tokens.data ?? [])].sort((a, b) => b.id - a.id), [tokens.data]);
   const shown = showAll ? all : all.filter(live);
+
+  // Optimistic: the row is revoked at once (docs/adr/0003-changes.md). Revoking this browser's
+  // token signs out once the server has done it.
+  const revoke = useMutation({
+    mutationKey: ["revoke", ...list],
+    mutationFn: (t: Token) => revokeUserToken(user ?? "", t.id),
+    ...optimistic({ queryKey: list, apply: revoked, describe: (t: Token) => `Revoke ${t.name}` }),
+    onSuccess: (_, t) => {
+      if (t.id !== currentId) return;
+      setSession(null);
+      void navigate({ to: "/sign-in" });
+    },
+  });
+  const changes = useChanges(["revoke", ...list], tokenId);
 
   if (who.isPending) return <Skeleton className="h-40" />;
   if (!user) {
@@ -63,8 +79,6 @@ export function TokensPage() {
     );
   }
 
-  const refresh = () => void queryClient.invalidateQueries({ queryKey: userTokensQuery(user).queryKey });
-
   return (
     <>
       <PageHeader
@@ -75,7 +89,7 @@ export function TokensPage() {
             expired tokens stay listed for the record.
           </>
         }
-        actions={<CreateTokenDialog kind="pat" login={user} create={(req) => createUserToken(user, req)} onCreated={refresh} />}
+        actions={<CreateTokenDialog kind="pat" login={user} create={(req) => createUserToken(user, req)} list={list} />}
       />
 
       <Card>
@@ -103,23 +117,15 @@ export function TokensPage() {
             Create one for pip, apt, Maven or a script; the Connect tab of every repository shows the commands.
           </EmptyState>
         ) : (
-          <TokenTable tokens={shown} currentId={currentId} onRevoke={setRevoking} />
+          <TokenTable tokens={shown} currentId={currentId} onRevoke={setRevoking} changes={changes} />
         )}
       </Card>
 
       <RevokeTokenDialog
         token={revoking}
         current={revoking !== null && revoking.id === currentId}
-        revoke={(t) => revokeUserToken(user, t.id)}
+        onConfirm={(t) => revoke.mutate(t)}
         onClose={() => setRevoking(null)}
-        onRevoked={() => {
-          if (revoking && revoking.id === currentId) {
-            setSession(null);
-            void navigate({ to: "/sign-in" });
-            return;
-          }
-          refresh();
-        }}
       />
     </>
   );

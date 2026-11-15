@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
 import { Kbd } from "@/components/ui/misc";
+import { Notices } from "@/components/ui/notices";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
 
@@ -269,6 +270,7 @@ export function AppShell() {
       </footer>
 
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <Notices />
     </div>
   );
 }

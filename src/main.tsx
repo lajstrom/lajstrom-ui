@@ -35,6 +35,11 @@ async function main() {
   // What the API answers depends on who asks: sign-in, sign-out, another tab, or a token the
   // server refused (src/api/client.ts) start every query over.
   onSessionChange(() => void queryClient.resetQueries());
+  // A change in flight, which an optimistic screen already shows as done, is lost with the page:
+  // the browser asks before leaving (docs/adr/0003-changes-realistic-by-default.md).
+  window.addEventListener("beforeunload", (e) => {
+    if (queryClient.isMutating() > 0) e.preventDefault();
+  });
   const router = makeRouter(queryClient);
 
   createRoot(document.getElementById("root")!).render(
