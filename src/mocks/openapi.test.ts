@@ -26,8 +26,6 @@ const mockOps = new Set(
 /** The server's operations the mock does not answer yet: "Try it out" gets the 404 the server
  * answers to a path it does not know. The UI does none of them yet. */
 const notMocked = new Set([
-  "delete /api/v1/repos/{format}/{repo}/upstream-cache",
-  "post /api/v1/repos/{format}/{repo}/prefetch",
   "get /api/v1/openapi.yaml",
 ]);
 

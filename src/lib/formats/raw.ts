@@ -22,6 +22,7 @@ export const raw: FormatSpec = {
           {
             id: "upload",
             title: "Upload",
+            publish: true,
             caption: "shell",
             shell: true,
             code: `curl -u "${USER}:${TOKEN}" -T ./report.pdf ${base}/reports/2026/report.pdf`,
@@ -45,6 +46,7 @@ export const raw: FormatSpec = {
       },
       {
         title: "Push with oras",
+        publish: true,
         description: "The same artifact through the OCI facade; the annotations are the manifest profile's.",
         snippets: [
           {

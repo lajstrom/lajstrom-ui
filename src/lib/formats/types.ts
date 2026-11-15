@@ -23,9 +23,17 @@ export type Snippet = {
   shell?: boolean;
   /** One sentence under the code. */
   note?: string;
+  /** It publishes: a proxy or a group, read-only, leaves it out (connectFor). */
+  publish?: boolean;
 };
 
-export type SnippetGroup = { title: string; description?: string; snippets: Snippet[] };
+export type SnippetGroup = {
+  title: string;
+  description?: string;
+  snippets: Snippet[];
+  /** Every snippet of it publishes: a proxy or a group leaves it out (connectFor). */
+  publish?: boolean;
+};
 
 /** A package as the snippets need it: its name, and what the proposed package facts add. */
 export type InstallPackage = { name: string; latestVersion?: string | null; attrs?: Record<string, string> };

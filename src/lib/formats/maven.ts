@@ -82,6 +82,7 @@ export const maven: FormatSpec = {
       },
       {
         title: "Deploy",
+        publish: true,
         description:
           "mvn deploy uploads file by file; the PUT of maven-metadata.xml commits the version as one manifest.",
         snippets: [

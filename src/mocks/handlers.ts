@@ -348,6 +348,24 @@ export const handlers = [
     return HttpResponse.json(db.reindexRun(repo));
   }),
 
+  // A proxy's cache and a prefetch (docs/api.md): manage on the repo, checked before the body.
+  del("*/api/v1/repos/:format/:repo/upstream-cache", async ({ params, request }) => {
+    const repo = repoFor(params, "manage");
+    if (repo instanceof Response) return repo;
+    const refused = db.purgeUpstreamCache(repo, new URL(request.url).searchParams.get("name"), `user:${getPersona()}`);
+    return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
+  }),
+
+  post("*/api/v1/repos/:format/:repo/prefetch", async ({ params, request }) => {
+    const repo = repoFor(params, "manage");
+    if (repo instanceof Response) return repo;
+    const result = db.prefetch(repo, await body(request), `user:${getPersona()}`);
+    if ("status" in result) return refusal(result);
+    // The answer comes when every fetch has ended: a moment per image.
+    await delay(Math.min(3000, 400 * new Set(result.results.map((r) => r.name)).size));
+    return HttpResponse.json(result);
+  }),
+
   get("*/api/v1/repos/:format/:repo/sessions", async ({ params }) => {
     const repo = repoOr404(params);
     if (repo instanceof Response) return repo;

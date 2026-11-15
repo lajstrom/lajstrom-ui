@@ -34,6 +34,11 @@ server's specs. The read endpoints the UI needs are proposed in
   packages, versions of unknown OCI repositories, foreign manifests and orphans it found), open
   maven deploy sessions and deploy tokens. A format this UI does not know yet shows its packages,
   versions and files, without snippets.
+- **Proxy and group repos**: the kind in the list and the header; a proxy's upstream (its TTLs,
+  offline, the names it mirrors and refuses), and for maintainers a purge of its cache and a
+  prefetch of names or images with a result for each; a group's members in order, each linked,
+  with its merged names or, for `oci`, the paths each member serves. Neither shows publish
+  snippets.
 - **A package**: versions grouped with their variants (architectures, wheel tags), npm's
   dist-tags on the versions they name, install snippets, what the metadata layer says.
 - **A version**: files with digests and download URLs, install and `oras`/`cosign` snippets,

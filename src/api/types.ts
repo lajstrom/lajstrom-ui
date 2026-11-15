@@ -214,3 +214,20 @@ export type Delivery = Schemas["Delivery"];
 
 /** A page of a delivery log, newest first; `next` is the cursor of the page after it. */
 export type DeliveryList = Schemas["DeliveryList"];
+
+// Proxy and group repos (docs/spec/proxy-and-group.md).
+
+/** A proxy repo's settings: its upstream by the configuration's name, the TTLs of its cache,
+ * offline, and the names it mirrors (allow) and never fetches (deny). */
+export type Upstream = Schemas["Upstream"];
+
+/** A group's settings: its members in order, and the merged names, or an oci group's routes. */
+export type RepoGroup = Schemas["Group"];
+
+/** POST …/prefetch: package names of a format's proxy, or images and platforms of an oci one. */
+export type PrefetchRequest = Schemas["PrefetchRequest"];
+
+/** What a prefetch did, one result per version, or per image, platform and blob of an oci repo. */
+export type PrefetchResult = Schemas["PrefetchResult"];
+
+export type PrefetchItemResult = Schemas["PrefetchItemResult"];
