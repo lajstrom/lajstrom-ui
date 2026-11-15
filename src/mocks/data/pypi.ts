@@ -234,8 +234,8 @@ export function pypiVersions(): VersionSpec[] {
       },
       [{ version: "2019.3-hotfix", files: { sdist: 88_412 }, at: ago(410), by: "user:admin", nonstandard: true, degraded: true, zipSdist: true }],
     ),
-    // Stored at acme-blobs, the form of its OCI name before ADR 0017 (blob_73 now): the last
-    // reindex finds 1.2.0 at the newest form too, a split (src/mocks/data/reindex.ts).
+    // Stored at acme-blob_73, the newest form of its OCI name (ADR 0017): the last reindex finds
+    // 1.2.0 at the form before it, acme-blobs, too, a split (src/mocks/data/reindex.ts).
     ...project(
       internal,
       "acme-blobs",

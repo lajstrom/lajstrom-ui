@@ -1,7 +1,9 @@
 // The naming rules of docs/spec/manifest-profile.md §4 (lajstrom/lajstrom), ported from
-// internal/oci/profile/escape.go for the mock data and for showing users what a name becomes in
-// the registry. The server never decodes tags, and neither does the UI: the API returns tag and
-// OCI path as stored. profile.test.ts holds the test vectors of escape_test.go.
+// internal/oci/profile/escape.go and path.go for the mock data and for showing users what a name
+// becomes in the registry. The server never decodes tags, and neither does the UI: the API returns
+// tag and OCI path as stored. profile.test.ts holds the test vectors of escape_test.go, path_test.go
+// and the plugins' name tests. Only the newest form is written here: the earlier forms of a path
+// (before ADR 0017) are the server's to read.
 
 import { sha256Hex } from "./sha256";
 
@@ -21,18 +23,49 @@ export function escape(s: string): string {
   return out;
 }
 
+/** The path-component grammar of the OCI distribution specification 1.1. */
 const ociComponent = /^[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*$/;
 
+// ADR 0017 and its amendment: the components a registry keeps for itself. Zot's catalog and
+// garbage collector skip the suffixes, its image layout has the files, Harbor's routes find the
+// words anywhere in a URL.
+const reservedSuffixes = ["blobs", ".uploads", ".sync"];
+const reservedComponents = ["index.json", "oci-layout", "manifests", "referrers"];
+
+const reserved = (c: string) => reservedSuffixes.some((s) => c.endsWith(s)) || reservedComponents.includes(c);
+
+const hexByte = (c: string) => "_" + c.charCodeAt(0).toString(16).padStart(2, "0");
+
 /**
- * EscapeComponent of §4.3, for repository path components. A name the OCI grammar rejects becomes
- * "h0__" and 32 hex digits of the sha256 of the original name; Escape never produces "__", so a
- * hashed component cannot collide with an escaped one.
+ * EscapeComponent of §4.3, for repository path components (ADR 0017). A name whose escaped form
+ * the 1.1 grammar rejects becomes "h0_h" and 32 hex digits of the sha256 of the original name;
+ * otherwise each "-" of a run of two or more is escaped, and so is the last byte of a reserved
+ * component: "a--b" is "a_2d_2db", "blobs" is "blob_73".
  */
 export function escapeComponent(s: string): string {
-  const lowered = s.replace(/[A-Z]/g, (c) => c.toLowerCase());
-  const escaped = escape(lowered);
-  if (ociComponent.test(escaped)) return escaped;
-  return "h0__" + sha256Hex(s).slice(0, 32);
+  return escapeComponentMax(s, 0);
+}
+
+/** EscapeComponentMax: escapeComponent, hashing a name whose escaped form is longer than maxLen
+ * bytes too when maxLen is positive (a raw path's 64-byte components, §4.1). */
+export function escapeComponentMax(s: string, maxLen: number): string {
+  const e = escape(s.replace(/[A-Z]/g, (c) => c.toLowerCase()));
+  if (!ociComponent.test(e) || (maxLen > 0 && e.length > maxLen)) return "h0_h" + sha256Hex(s).slice(0, 32);
+  const last = reserved(e);
+  if (!last && !e.includes("--")) return e;
+  let out = "";
+  for (let i = 0; i < e.length; i++) {
+    const c = e[i]!;
+    const dashRun = c === "-" && (e[i - 1] === "-" || e[i + 1] === "-");
+    out += dashRun || (last && i === e.length - 1) ? hexByte(c) : c;
+  }
+  return out;
+}
+
+/** PackagePath of §4.3: joins escaped components with "/", writing a component "tags" that a
+ * component starting with "list" follows as "tag_73" (Harbor's tag-list route). */
+export function joinPackagePath(components: string[]): string {
+  return components.map((c, i) => (c === "tags" && components[i + 1]?.startsWith("list") ? "tag_73" : c)).join("/");
 }
 
 /**
@@ -50,18 +83,33 @@ export function normalizePypi(name: string): string {
   return name.toLowerCase().replace(/[-_.]+/g, "-");
 }
 
-/** The package path of §4.1 for a package name, as each MVP plugin's EscapeName computes it. */
+/** An npm name split into its scope, without the @, and the name without the scope:
+ * ["acme", "widgets"] for @acme/widgets, ["", "lodash"] for lodash. */
+export function npmScope(name: string): [scope: string, base: string] {
+  if (!name.startsWith("@")) return ["", name];
+  const slash = name.indexOf("/");
+  return slash === -1 ? ["", name] : [name.slice(1, slash), name.slice(slash + 1)];
+}
+
+/** The package path of §4.1 for a package name, as each plugin's EscapeName computes it. */
 export function packagePath(format: string, name: string): string {
   switch (format) {
     case "raw":
-      return name.split("/").filter(Boolean).map(escapeComponent).join("/");
+      // A component longer than 64 bytes escaped is hashed (raw's maxComponentLen).
+      return joinPackagePath(name.split("/").filter(Boolean).map((c) => escapeComponentMax(c, 64)));
     case "pypi":
       return escapeComponent(normalizePypi(name));
     case "maven": {
       const [groupId = "", artifactId = ""] = name.split(":");
-      return `${escapeComponent(groupId.toLowerCase())}/${escapeComponent(artifactId)}`;
+      return joinPackagePath([escapeComponent(groupId.toLowerCase()), escapeComponent(artifactId)]);
+    }
+    case "npm": {
+      // @scope/name is two components without the @; an unscoped name is one.
+      const [scope, base] = npmScope(name);
+      return scope ? joinPackagePath([escapeComponent(scope), escapeComponent(base)]) : escapeComponent(base);
     }
     default:
+      // apt (deb), rpm: EscapeComponent of the name.
       return escapeComponent(name);
   }
 }
