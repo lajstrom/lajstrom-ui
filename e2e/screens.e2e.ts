@@ -38,14 +38,14 @@ test("each repo, its first package and that package's newest version", async ({ 
       if (!pkg) return;
 
       await page.getByRole("link", { name: pkg.name, exact: true }).first().click();
-      await expect(page).toHaveURL(new RegExp(`/${r.format}/${r.name}/.+`));
+      await expect(page).toHaveURL((url) => url.pathname.startsWith(`/ui/${r.format}/${r.name}/`));
       await shown(page);
       const { versions } = await api<Schemas["VersionList"]>(request, `${path}/${segment(pkg.name)}/versions`);
       const newest = versions[0];
       expect(newest, `a version of ${pkg.name}`).toBeDefined();
 
       await page.getByRole("link", { name: newest!.version, exact: true }).first().click();
-      await expect(page).toHaveURL(new RegExp(`/-/${newest!.version.replace(/[.+]/g, "\\$&")}`));
+      await expect(page).toHaveURL((url) => decodeURIComponent(url.pathname).endsWith(`/-/${newest!.version}`));
       await shown(page, newest!.version);
     });
   }
