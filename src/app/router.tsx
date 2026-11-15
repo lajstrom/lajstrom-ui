@@ -4,6 +4,7 @@ import { createRootRouteWithContext, createRoute, createRouter } from "@tanstack
 import { AccessPage } from "@/pages/access";
 import { ApiDocsPage } from "@/pages/api-docs";
 import { AuditPage } from "@/pages/audit";
+import { FirstAdminPage } from "@/pages/first-admin";
 import { NotFound } from "@/pages/not-found";
 import { PackageRoute } from "@/pages/package";
 import { RegistriesPage } from "@/pages/registries";
@@ -35,6 +36,7 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/audit", component: AuditPage, validateSearch: strings }),
   createRoute({ getParentRoute: () => rootRoute, path: "/access", component: AccessPage, validateSearch: strings }),
   createRoute({ getParentRoute: () => rootRoute, path: "/sign-in", component: SignInPage, validateSearch: strings }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/first-admin", component: FirstAdminPage, validateSearch: strings }),
   createRoute({ getParentRoute: () => rootRoute, path: "/tokens", component: TokensPage, validateSearch: strings }),
   createRoute({ getParentRoute: () => rootRoute, path: "/api-docs", component: ApiDocsPage }),
   repoLayout.addChildren([

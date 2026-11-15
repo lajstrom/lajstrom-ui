@@ -9,13 +9,16 @@ export class ApiError extends Error {
   readonly code: string;
   /** The answer was Lajstrom's error envelope; false for a network failure or a proxy's page. */
   readonly fromServer: boolean;
+  /** Seconds to wait before trying again, from Retry-After (a 429); null without it. */
+  readonly retryAfter: number | null;
 
-  constructor(status: number, code: string, message: string, fromServer = true) {
+  constructor(status: number, code: string, message: string, fromServer = true, retryAfter: number | null = null) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
     this.fromServer = fromServer;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -103,7 +106,8 @@ async function request(method: string, path: string, opts: RequestOptions = {}):
     }
     // The session's token was refused: revoked, expired, or its user disabled. Signed out.
     if (res.status === 401 && session && getSession()?.token === session.token) setSession(null);
-    throw new ApiError(res.status, code, message, fromServer);
+    const retryAfter = Number(res.headers.get("Retry-After") ?? NaN);
+    throw new ApiError(res.status, code, message, fromServer, Number.isInteger(retryAfter) && retryAfter >= 0 ? retryAfter : null);
   }
   return res;
 }

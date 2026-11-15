@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { useNavigate, useSearch } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { FlaskConical, KeyRound, LogIn } from "lucide-react";
 import { useId, useState, type FormEvent } from "react";
 
@@ -144,6 +144,14 @@ export function SignInPage() {
           </form>
         </CardBody>
       </Card>
+
+      {/* A new server has no users: its first admin is made with the bootstrap token. */}
+      <p className="mt-3 text-center text-xs text-muted-foreground">
+        A new server without users?{" "}
+        <Link to="/first-admin" search={{ redirect: search.redirect }} className="text-primary hover:underline">
+          Set up the first admin
+        </Link>
+      </p>
 
       {demoMode().active ? (
         <div className="mt-4 rounded-lg border border-border px-3 py-3">

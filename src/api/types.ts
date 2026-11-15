@@ -127,6 +127,10 @@ export type AuditList = Schemas["AuditList"];
 /** A local user. Whether it is an admin follows from its bindings (rbac.md §3). */
 export type User = Schemas["User"];
 
+/** The body of POST /api/v1/bootstrap: the server's one-time bootstrap token, and the name and
+ * the password of the first admin. */
+export type BootstrapRequest = Schemas["BootstrapRequest"];
+
 /** A personal access token or a deploy token (docs/api.md, Tokens). The secret is answered only
  * once, by the creation: CreatedToken. */
 export type Token = Schemas["Token"];

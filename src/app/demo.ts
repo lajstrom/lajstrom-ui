@@ -84,3 +84,8 @@ export const demoUsers: { name: string; description: string }[] = [
   { name: "bob", description: "maintains apt/*, publishes to raw/*" },
   { name: "carol", description: "reads everything, publishes to two repos" },
 ];
+
+/** The bootstrap token of the demo's server (src/mocks/bootstrap.ts): it makes one first admin,
+ * next to the accounts above, until "Reset data". A real server's comes from the file of
+ * auth.bootstrap.tokenFile (docs/auth.md). */
+export const DEMO_BOOTSTRAP_TOKEN = "lajstrom-demo-bootstrap-token-0f1e2d3c4b5a6978";

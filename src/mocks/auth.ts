@@ -65,6 +65,33 @@ function decodeBasic(value: string): { user: string; secret: string } | null {
   }
 }
 
+// --- Passwords set in the demo -------------------------------------------------------------
+// A user made in the demo, such as the first admin (src/mocks/bootstrap.ts), has the password it
+// was given, which the server's rules make 8 bytes or more; a user of the seed has its name.
+
+/** The sha256 of the password of each user made in the demo, by name; never the password. */
+const passwords = new Map<string, string>();
+
+keep("passwords", {
+  save: () => [...passwords],
+  load: (data) => {
+    if (!Array.isArray(data)) return;
+    for (const [name, hash] of data as [string, string][]) passwords.set(name, hash);
+  },
+});
+
+/** Gives a user made in the demo its password. */
+export function setPassword(user: string, password: string): void {
+  passwords.set(user, sha256Hex(password));
+  persist();
+}
+
+/** Whether secret is the user's password: the one it was given in the demo, else its name. */
+function isPassword(user: string, secret: string): boolean {
+  const hash = passwords.get(user);
+  return hash === undefined ? secret === user : sha256Hex(secret) === hash;
+}
+
 export function authenticate(request: Request): Authn {
   const header = request.headers.get("Authorization");
   if (!header) return { principal: "anonymous" };
@@ -90,7 +117,7 @@ export function authenticate(request: Request): Authn {
       used(t);
       return { principal: creds.user };
     }
-    if (creds.secret !== creds.user) return { refused: true };
+    if (!isPassword(creds.user, creds.secret)) return { refused: true };
     return { principal: creds.user };
   }
   return { principal: "anonymous" };

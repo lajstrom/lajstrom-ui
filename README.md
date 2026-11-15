@@ -42,6 +42,9 @@ server's specs. The read endpoints the UI needs are proposed in
 - **Sign-in** with a password, which creates a personal access token for the browser (12 hours,
   revoked on sign-out), or with a token you already have. Requests carry it as
   `Authorization: Bearer`; there are no cookies.
+- **The first admin** of a new server: "Set up the first admin", linked from the sign-in page,
+  exchanges the server's one-time bootstrap token for the first admin with a name and a password,
+  then signs in as it.
 - **Tokens**: your personal access tokens and a repository's deploy tokens: create one, copy the
   secret the one time it is shown, revoke.
 - Every screen state is in the URL (`/ui/apt/ubuntu-internal?suite=jammy&arch=arm64`), so a link
@@ -56,6 +59,11 @@ its login will: the accounts are `admin` / `admin`, `alice` / `alice`, `bob` / `
 `carol` / `carol` (the password is the name), each with the bindings of the demo's data, so
 signing in as another one shows how the UI follows them. The sign-in page lists them; a click
 fills the form.
+
+"Set up the first admin" works in the demo too. A real server with an admin answers `404` to the
+bootstrap; the demo's server takes its token, `lajstrom-demo-bootstrap-token-0f1e2d3c4b5a6978`,
+once, as a new server would, for a first admin next to the accounts above, then answers `404`.
+"Reset data" makes the token valid again.
 
 - Next to a server, "Open the demo" on the sign-in page, "See it in the demo" where the server
   has no endpoint yet, or `/ui/?demo=1` enter it; "Exit demo" or `?demo=0` go back. The real

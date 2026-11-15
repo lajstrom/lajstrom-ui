@@ -692,10 +692,10 @@ function auditLog(): (MockEvent & { id: number })[] {
   for (const s of repoSeeds) {
     events.push({ at: s.createdAt, principal: "user:admin", action: "repo.create", repo: keyOf(s), subject: keyOf(s), digest: null, ip: ipOf["user:admin"]!, details: { registry: s.registry, anonymousRead: s.anonymousRead } });
   }
-  for (const u of users.filter((u) => u.name !== "admin")) {
+  for (const u of users.filter((u) => u.name !== "admin" && u.uid !== firstAdmin?.user.uid)) {
     events.push({ at: u.createdAt, principal: "user:admin", action: "user.create", repo: "", subject: `user:${u.name}`, digest: null, ip: ipOf["user:admin"]!, details: {} });
   }
-  for (const b of bindings.filter((b) => b.id !== 1)) {
+  for (const b of bindings.filter((b) => b.id !== 1 && b.id !== firstAdmin?.binding.id)) {
     events.push({ at: b.createdAt, principal: "user:admin", action: "binding.create", repo: "", subject: b.principal, digest: null, ip: ipOf["user:admin"]!, details: { role: b.role, repoMask: b.repoMask, binding: b.id } });
   }
   for (const t of tokens) {
@@ -855,6 +855,40 @@ keep("db", {
     for (const [k, reason] of d.yanks ?? []) yanks.set(k, reason);
     demoEvents.push(...(d.events ?? []));
     auditCache = null;
+  },
+});
+
+// --- The first admin ------------------------------------------------------------------------
+// The admin made with the bootstrap token (POST /api/v1/bootstrap, src/mocks/bootstrap.ts): a
+// local user with the binding (user:<uid>, admin, */*), made together, and one user.create event
+// by anonymous with the source bootstrap (docs/auth.md, Bootstrap), not one derived from the seed
+// (auditLog). Kept by src/mocks/state.ts; its event is kept with the others of the demo.
+
+type MockUser = (typeof users)[number];
+
+let firstAdmin: { user: MockUser; binding: MockBinding } | null = null;
+
+function addFirstAdmin(admin: { user: MockUser; binding: MockBinding }): void {
+  firstAdmin = admin;
+  if (!users.some((u) => u.uid === admin.user.uid)) users.push(admin.user);
+  if (!bindings.some((b) => b.id === admin.binding.id)) bindings.push(admin.binding);
+}
+
+/** Makes the first admin called name; the caller has checked the name, and that it is free. */
+export function makeFirstAdmin(name: string): MockUser {
+  const at = new Date().toISOString();
+  const user: MockUser = { uid: uidOf(name), name, kind: "local", disabled: false, createdAt: at };
+  const binding: MockBinding = { id: Math.max(0, ...bindings.map((b) => b.id)) + 1, principal: `user:${name}`, role: "admin", repoMask: "*/*", createdAt: at };
+  addFirstAdmin({ user, binding });
+  changed({ at, principal: "anonymous", action: "user.create", repo: "", subject: `user:${name}`, digest: null, ip: DEMO_IP, details: { admin: true, name, source: "bootstrap" } });
+  return user;
+}
+
+keep("first admin", {
+  save: () => firstAdmin,
+  load: (data) => {
+    const d = data as { user?: MockUser; binding?: MockBinding } | null;
+    if (d?.user && d.binding) addFirstAdmin({ user: d.user, binding: d.binding });
   },
 });
 
