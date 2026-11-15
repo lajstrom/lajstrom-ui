@@ -231,3 +231,18 @@ export type PrefetchRequest = Schemas["PrefetchRequest"];
 export type PrefetchResult = Schemas["PrefetchResult"];
 
 export type PrefetchItemResult = Schemas["PrefetchItemResult"];
+
+// Managing repos (docs/api.md, Repos).
+
+/** POST /api/v1/repos: a hosted repo, a proxy with its upstream, or a group with its members. */
+export type CreateRepoRequest = Schemas["CreateRepo"];
+
+/** PATCH …/repos/{format}/{repo}: the fields to change; policy, upstream and group merged as
+ * RFC 7396 merge patches. */
+export type RepoPatch = Schemas["RepoPatch"];
+
+/** A merge patch of a policy: null removes a key. */
+export type PolicyPatch = Schemas["PolicyPatch"];
+
+/** POST …/reindex: prune, verify; an empty body takes the defaults. */
+export type ReindexRequest = Schemas["ReindexRequest"];

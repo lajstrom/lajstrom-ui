@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { AlertTriangle, CheckCircle2, Clock, KeyRound, Loader2, RefreshCw, ShieldCheck, Upload } from "lucide-react";
 
-import { callerQuery, infoQuery, registriesQuery, reindexQuery, sessionsQuery } from "@/api/queries";
+import { callerQuery, infoQuery, registriesQuery, sessionsQuery } from "@/api/queries";
 import type { ReindexRun, Repo } from "@/api/types";
 import { ErrorState, Principal, RelativeTime } from "@/components/common";
 import { Badge } from "@/components/ui/badge";
@@ -18,22 +18,13 @@ import { AuditTable } from "./audit";
 import { DeployTokens } from "./deploy-tokens";
 import { managesUpstream } from "./proxy-changes";
 import { UpstreamCacheCard } from "./proxy-dialogs";
+import { StartReindexButton } from "./reindex-dialog";
 import { ReindexFindings, ReindexSummary } from "./reindex-report";
+import { reindexes, useReindexRun } from "./repo-changes";
+import { defaultMaxFileSize } from "./repo-form";
 import { MembersCard, UpstreamCard } from "./repo-kinds";
 
 const NOT_REPORTED = <span className="text-muted-foreground">not reported by this server version</span>;
-
-/** The largest file when the policy sets none (Policy in the server's openapi.yaml). */
-const defaultMaxFileSize: Record<string, number> = {
-  npm: 512 * 1024 ** 2,
-  pypi: 4 * 1024 ** 3,
-  maven: 4 * 1024 ** 3,
-  apt: 8 * 1024 ** 3,
-  raw: 8 * 1024 ** 3,
-  oci: 16 * 1024 ** 3,
-  // A format the list does not name, rpm among them.
-  rpm: 8 * 1024 ** 3,
-};
 
 export function RepoDetails({ repo }: { repo: Repo }) {
   const info = useQuery(infoQuery);
@@ -301,7 +292,8 @@ export function ReindexState({ repo }: { repo: Repo }) {
 }
 
 export function RepoMaintenance({ repo }: { repo: Repo }) {
-  const report = useQuery(reindexQuery(repo.format, repo.name));
+  // Polled while a run runs (docs/adr/0003-changes-realistic-by-default.md: reindex is realistic, polled).
+  const report = useReindexRun(repo);
   const sessions = useQuery({ ...sessionsQuery(repo.format, repo.name), enabled: repo.format === "maven" });
 
   return (
@@ -313,7 +305,12 @@ export function RepoMaintenance({ repo }: { repo: Repo }) {
           icon={<RefreshCw />}
           title="Last reindex"
           description="Reconcile compares the index with the registry every hour; reindex rebuilds it from the annotations"
-          actions={<ReindexState repo={repo} />}
+          actions={
+            <>
+              <ReindexState repo={repo} />
+              {reindexes(repo) ? <StartReindexButton repo={repo} running={report.data?.state === "running"} /> : null}
+            </>
+          }
         />
         {report.isError ? (
           <ErrorState error={report.error} />
@@ -323,7 +320,9 @@ export function RepoMaintenance({ repo }: { repo: Repo }) {
           </CardBody>
         ) : report.data === null ? (
           <EmptyState title="No reindex yet" className="py-6">
-            No run has covered this repo: ingest indexes every publish, and a reindex rebuilds the index from the registry.
+            {repo.kind === "group"
+              ? "A group holds nothing to reindex: each member is reindexed on its own."
+              : "No run has covered this repo: ingest indexes every publish, and a reindex rebuilds the index from the registry."}
           </EmptyState>
         ) : (
           <ReindexRunView run={report.data} />

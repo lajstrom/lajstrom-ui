@@ -1,9 +1,10 @@
 // The changes the UI makes, against the endpoints the server has (docs/api.md).
 
 import { apiPath, apiSend, basicAuth } from "./client";
-import { webhooksPath, type WebhookScope } from "./queries";
+import { normalizeRepo, webhooksPath, type WebhookScope } from "./queries";
 import type { BatchDeleteRequest, BatchDeleteResult, CreatedToken, MaskTokenRequest, PrefetchRequest, PrefetchResult, TokenRequest } from "./types";
 import type { Binding, BindingRequest, User, UserPatch, UserRequest } from "./types";
+import type { CreateRepoRequest, ReindexRequest, ReindexRun, Repo, RepoPatch } from "./types";
 import type { CreatedWebhook, Delivery, Webhook, WebhookRequest, WebhookSecret } from "./types";
 
 export function createUserToken(user: string, req: TokenRequest): Promise<CreatedToken> {
@@ -123,4 +124,27 @@ export function purgeUpstreamCache(format: string, repo: string, name?: string):
 /** Fetches versions of names, or images of an oci proxy, before a client asks for them. */
 export function prefetch(format: string, repo: string, req: PrefetchRequest): Promise<PrefetchResult> {
   return apiSend<PrefetchResult>("POST", apiPath("repos", format, repo, "prefetch"), { body: req });
+}
+
+// Repos (docs/api.md, Repos): the admin creates them; manage changes, deletes and reindexes.
+
+/** Creates a repo; the answer is the resource, as GET answers it. */
+export function createRepo(req: CreateRepoRequest): Promise<Repo> {
+  return apiSend<Omit<Repo, "prefix">>("POST", apiPath("repos"), { body: req }).then(normalizeRepo);
+}
+
+/** Changes a repo; the answer is the resource as it is then. */
+export function updateRepo(format: string, repo: string, patch: RepoPatch): Promise<Repo> {
+  return apiSend<Omit<Repo, "prefix">>("PATCH", apiPath("repos", format, repo), { body: patch }).then(normalizeRepo);
+}
+
+/** Deletes a repo from the index; force, one that has versions. Its artifacts stay in the
+ * registry. */
+export function deleteRepo(format: string, repo: string, force: boolean): Promise<void> {
+  return apiSend("DELETE", apiPath("repos", format, repo), { query: { force: force || undefined } });
+}
+
+/** Starts a reindex of the repo; the answer is the run, which GET …/reindex follows. */
+export function startReindex(format: string, repo: string, req: ReindexRequest): Promise<ReindexRun> {
+  return apiSend<ReindexRun>("POST", apiPath("repos", format, repo, "reindex"), { body: req });
 }

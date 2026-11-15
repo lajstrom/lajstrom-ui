@@ -1,9 +1,11 @@
-// The proxy repos of the mock (docs/spec/proxy-and-group.md): which names a proxy mirrors (§3),
-// and what a prefetch of an oci proxy fetches (§11.10). db.ts keeps the state and the audit rows.
+// The proxy and group repos of the mock (docs/spec/proxy-and-group.md): which names a proxy
+// mirrors (§3), what a prefetch of an oci proxy fetches (§11.10), and the checks of a proxy's
+// upstream and a group's members (§2.5). db.ts keeps the state and the audit rows.
 
-import type { PrefetchItemResult, PrefetchResult, Upstream } from "@/api/types";
+import type { PrefetchItemResult, PrefetchResult, RepoGroup, Upstream } from "@/api/types";
 import { sha256Hex } from "@/lib/sha256";
 
+import type { RepoSeed } from "./data/system";
 import type { Refusal } from "./db";
 
 const invalid = (message: string): Refusal => ({ status: 400, code: "INVALID", message });
@@ -171,4 +173,142 @@ export function prefetchImages({ repo, upstream, dockerHub, held }: Fetch, body:
     }
   }
   return { results };
+}
+
+// --- The checks of §2.5 ----------------------------------------------------------------------
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+const UNITS: Record<string, number> = { ns: 1e-9, us: 1e-6, "µs": 1e-6, ms: 1e-3, s: 1, m: 60, h: 3600 };
+
+/** The seconds of a Go duration ("10m", "1h30m", "0s", "0"), or null when it is not one. */
+export function durationSeconds(v: string): number | null {
+  if (v === "0") return 0;
+  const parts = [...v.matchAll(/(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)/g)];
+  if (!parts.length || parts.map((p) => p[0]).join("") !== v) return null;
+  return parts.reduce((n, [, num, unit]) => n + Number(num) * UNITS[unit!]!, 0);
+}
+
+/** Why a list of name patterns is refused (§2.5), or null: at most 256, each 1 to 256 bytes
+ * without a space or a control character. */
+function patternsRefusal(list: unknown, field: string): Refusal | null {
+  if (!Array.isArray(list) || list.some((p) => typeof p !== "string")) return invalid(`${field}: a list of name patterns`);
+  if (list.length > 256) return invalid(`${field}: 256 patterns at most`);
+  for (const [i, p] of (list as string[]).entries()) {
+    if (!p || new TextEncoder().encode(p).length > 256 || /[\s\p{Cc}]/u.test(p)) {
+      return invalid(`${field}[${i}]: "${p}" is not a pattern: 1 to 256 bytes, no space or control character`);
+    }
+  }
+  return null;
+}
+
+type UpstreamConfig = { name: string; format: string };
+
+/** Why a proxy's upstream, whole, is refused (§2.2, §2.5), or null. */
+export function upstreamRefusal(u: unknown, format: string, configured: UpstreamConfig[]): Refusal | null {
+  if (!isObject(u)) return invalid("upstream: a JSON object with the name of an upstream");
+  const unknown = Object.keys(u).find((k) => !["name", "metadataTTL", "negativeTTL", "offline", "allow", "deny"].includes(k));
+  if (unknown) return invalid(`upstream.${unknown}: not a key of an upstream`);
+  const names = configured.filter((c) => c.format === format).map((c) => c.name);
+  if (typeof u.name !== "string" || !u.name) return invalid("upstream.name: the name of an upstream of the configuration");
+  if (!names.includes(u.name)) {
+    return invalid(`upstream.name: "${u.name}" is not an upstream of format ${format}${names.length ? ` (${names.join(", ")})` : ": the configuration has none"}`);
+  }
+  for (const [key, max, label] of [
+    ["metadataTTL", 168 * 3600, "168h"],
+    ["negativeTTL", 24 * 3600, "24h"],
+  ] as const) {
+    const v = u[key];
+    if (v === undefined) continue;
+    const s = typeof v === "string" ? durationSeconds(v) : null;
+    if (s === null || s > max) return invalid(`upstream.${key}: "${String(v)}" is not a duration from 0s to ${label}`);
+  }
+  if (u.offline !== undefined && typeof u.offline !== "boolean") return invalid("upstream.offline: true or false");
+  for (const key of ["allow", "deny"] as const) {
+    if (u[key] === undefined) continue;
+    const refused = patternsRefusal(u[key], `upstream.${key}`);
+    if (refused) return refused;
+  }
+  return null;
+}
+
+/** A path pattern of an oci group's routes (§12.1): `<path>`, `<prefix>/*` or `*`. */
+const routePattern = (p: string) => p === "*" || OCI_PATH.test(p.endsWith("/*") ? p.slice(0, -2) : p);
+
+/** Why a group's settings, whole, are refused (§2.3, §2.5, §12.1), or null. `repos` are the
+ * repos there are; `self` the group's own name. */
+export function groupRefusal(g: unknown, format: string, self: string, repos: RepoSeed[]): Refusal | null {
+  if (!isObject(g)) return invalid("group: a JSON object with its members");
+  const unknown = Object.keys(g).find((k) => !["members", "merge", "paths"].includes(k));
+  if (unknown) return invalid(`group.${unknown}: not a key of a group`);
+  const members = g.members;
+  if (!Array.isArray(members) || members.length < 1 || members.length > 16 || members.some((m) => typeof m !== "string")) {
+    return invalid(`group.members: 1 to 16 repos of format ${format}, in order`);
+  }
+  let hosted = 0;
+  for (const [i, m] of (members as string[]).entries()) {
+    const repo = repos.find((r) => r.format === format && r.name === m);
+    if (m === self) return invalid(`group.members[${i}]: "${m}" is the group itself`);
+    if (!repo) return invalid(`group.members[${i}]: "${m}" is not a repo of format ${format}`);
+    if (repo.kind === "group") return invalid(`group.members[${i}]: "${m}" is a group`);
+    if (members.indexOf(m) !== i) return invalid(`group.members[${i}]: "${m}" is named twice`);
+    if ((repo.kind ?? "hosted") === "hosted" && ++hosted > 1 && format !== "oci") {
+      return invalid(`group.members[${i}]: "${m}" is a second hosted repo; a group has one at most`);
+    }
+  }
+  if (format !== "oci") {
+    if (g.paths !== undefined) return invalid("group.paths: only a group of oci repos has paths");
+    return g.merge === undefined ? null : patternsRefusal(g.merge, "group.merge");
+  }
+  if (g.merge !== undefined) return invalid("group.merge: a group of oci repos has none; its paths route each path to one member");
+  if (!isObject(g.paths)) return invalid("group.paths: each member's name to the patterns of the paths it serves");
+  const paths = g.paths;
+  const seen = new Map<string, string>();
+  let total = 0;
+  for (const key of Object.keys(paths)) {
+    if (!members.includes(key)) return invalid(`group.paths.${key}: "${key}" is not a member`);
+  }
+  for (const m of members as string[]) {
+    const list = paths[m];
+    if (!Array.isArray(list) || !list.length) return invalid(`group.paths.${m}: every member serves one path pattern at least`);
+    for (const [i, p] of list.entries()) {
+      const field = `group.paths.${m}[${i}]`;
+      if (typeof p !== "string" || !routePattern(p)) return invalid(`${field}: "${String(p)}" is not <path>, <prefix>/* or *`);
+      if (list.indexOf(p) !== i) return invalid(`${field}: "${p}" is twice in the list`);
+      const other = seen.get(p);
+      if (other) return invalid(`${field}: "${p}" is also ${other}`);
+      seen.set(p, field);
+      if (++total > 256) return invalid("group.paths: 256 patterns at most in all");
+    }
+  }
+  return null;
+}
+
+/** An RFC 7396 merge patch of a proxy's upstream: null puts a key back to its default, a list
+ * is replaced whole. */
+export function mergeUpstream(current: Upstream, patch: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...current };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null) delete out[k];
+    else out[k] = v;
+  }
+  return out;
+}
+
+/** An RFC 7396 merge patch of a group: each list replaced whole, a key of paths set to null
+ * removed (§12.1). */
+export function mergeGroup(current: RepoGroup, patch: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...current };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null) delete out[k];
+    else if (k === "paths" && isObject(v)) {
+      const paths: Record<string, unknown> = { ...(current.paths ?? {}) };
+      for (const [m, list] of Object.entries(v)) {
+        if (list === null) delete paths[m];
+        else paths[m] = list;
+      }
+      out.paths = paths;
+    } else out[k] = v;
+  }
+  return out;
 }

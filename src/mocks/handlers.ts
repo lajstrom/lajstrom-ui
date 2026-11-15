@@ -345,7 +345,8 @@ export const handlers = [
     const repo = repoOr404(params);
     if (repo instanceof Response) return repo;
     if (!repo.permissions.includes("manage")) return fail(403, "FORBIDDEN", "the reindex run needs manage on the repo");
-    return HttpResponse.json(db.reindexRun(repo));
+    const run = db.reindexRun(repo);
+    return run ? HttpResponse.json(run) : fail(404, "NOT_FOUND", `no reindex run has covered ${repo.prefix}`);
   }),
 
   // A proxy's cache and a prefetch (docs/api.md): manage on the repo, checked before the body.

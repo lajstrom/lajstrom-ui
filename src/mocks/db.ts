@@ -44,10 +44,10 @@ import { bindings, registries, repoSeeds, roleActions, serverInfo, tokens, uidOf
 import { passwords } from "./data/system";
 import { ago, ahead, before, HOST } from "./data/time";
 import { getPersona, type Persona } from "./persona";
-import { isPackageName, prefetchImages } from "./proxy";
+import { durationSeconds, groupRefusal, isPackageName, mergeGroup, mergeUpstream, prefetchImages, upstreamRefusal } from "./proxy";
 import { keep, persist } from "./state";
 import { upstreams } from "./data/system";
-import type { PrefetchResult } from "@/api/types";
+import type { PrefetchResult, RepoGroup, Upstream } from "@/api/types";
 
 type Action = "read" | "write" | "delete" | "manage";
 
@@ -469,7 +469,7 @@ function repoOf(seed: RepoSeed, persona: Persona): MockRepo {
       lastPushAt: lastPush,
     },
     permissions: permissions(persona, seed),
-    reindex: {
+    reindex: demoReindexState(keyOf(seed)) ?? {
       state: seed.reindex,
       startedAt: running ? before(0, 0, 0.3) : before(0, 0, 21),
       finishedAt: running ? null : before(0, 0, 20),
@@ -871,7 +871,10 @@ export function listSessions(repo: Repo): PublishSession[] {
   return sessions.filter((s) => s.repo === repo.prefix).map(({ repo: _r, ...s }) => s);
 }
 
-function reindexReport(repo: MockRepo): ReindexReport {
+/** The repo's part of a run's report. prune removes the rows of manifests gone from the registry;
+ * verify, on a registry without the referrers API, pushes again the referrers indexes that
+ * lack referrers (docs/operations.md, What a run does). */
+function reindexReport(repo: MockRepo, run: { prune: boolean; verify: boolean } = { prune: true, verify: false }): ReindexReport {
   const pkgs = byRepo.get(repo.prefix) ?? new Map<string, Row[]>();
   const found = reindexFindings(repo.prefix, pkgs);
   // The rows of an OCI repository the registry does not know were not seen.
@@ -894,7 +897,7 @@ function reindexReport(repo: MockRepo): ReindexReport {
       digest: `sha256:${sha256Hex("foreign:debug-image")}`,
       mediaType: "application/vnd.oci.image.manifest.v1+json",
     });
-    removed = 1;
+    removed = run.prune ? 1 : 0;
   }
   foreign.push(...found.foreign);
   // The run read the tags of the rows and those its lists name. It reads a degraded row again
@@ -907,6 +910,16 @@ function reindexReport(repo: MockRepo): ReindexReport {
   ]);
   const degraded = manifests.filter((v) => v.degraded).length;
   const attachments = manifests.reduce((n, v) => n + v.referrers.signatures + v.referrers.sboms + v.referrers.attestations, 0);
+  const noReferrersApi = registries.find((r) => r.name === repo.registry)?.capabilities.referrers === false;
+  const repairedReferrers: NonNullable<ReindexReport["repairedReferrers"]> =
+    run.verify && noReferrersApi
+      ? manifests.slice(0, 2).map((v) => ({
+          repository: packagePath(v.format, v.packageName),
+          subject: v.digest,
+          index: `sha256:${sha256Hex(`referrers-index:${v.digest}`)}`,
+          added: [`sha256:${sha256Hex(`signature:${v.digest}`)}`],
+        }))
+      : [];
   return {
     repo: repo.prefix,
     ociRepositories: repositories.size,
@@ -926,21 +939,47 @@ function reindexReport(repo: MockRepo): ReindexReport {
     drift: found.drift,
     split: found.split,
     repositoryUnknown: found.repositoryUnknown,
-    repairedReferrers: [],
+    repairedReferrers,
     errors: found.errors,
     truncated: false,
   };
 }
 
 /** Runs started in the demo, by repo; each takes a few seconds. */
-const demoRuns = new Map<string, { id: number; startedAt: number; principal: string; prune: boolean; verify: boolean }>();
+type DemoRun = { id: number; startedAt: number; principal: string; prune: boolean; verify: boolean };
+const demoRuns = new Map<string, DemoRun>();
 let nextRunId = 40;
 const RUN_SECONDS = 4;
 
-/** GET …/reindex: the latest run that covered the repo. The seed's runs are the reconcile loop's;
- * one that is running has no report yet, as on the server. */
-export function reindexRun(repo: MockRepo): ReindexRun {
+keep("reindex", {
+  save: () => ({ runs: [...demoRuns], nextRunId }),
+  load: (data) => {
+    const d = data as { runs?: [string, DemoRun][]; nextRunId?: number };
+    for (const [k, run] of d.runs ?? []) demoRuns.set(k, run);
+    nextRunId = Math.max(nextRunId, d.nextRunId ?? 0);
+  },
+});
+
+/** The repo's reindex state (proposed) while a run of the demo covers it. */
+function demoReindexState(key: string): MockRepo["reindex"] | null {
+  const run = demoRuns.get(key);
+  if (!run) return null;
+  const running = Date.now() - run.startedAt < RUN_SECONDS * 1000;
+  return {
+    state: running ? "running" : "idle",
+    startedAt: new Date(run.startedAt).toISOString(),
+    finishedAt: running ? null : new Date(run.startedAt + RUN_SECONDS * 1000).toISOString(),
+    errors: 0,
+    nextReconcileAt: ahead(0, 0, 39),
+  };
+}
+
+/** GET …/reindex: the latest run that covered the repo, or null when none has: a repo created
+ * since the reconcile loop's last run, and a group, which the loop passes by. The seed's runs
+ * are the reconcile loop's; one that is running has no report yet, as on the server. */
+export function reindexRun(repo: MockRepo): ReindexRun | null {
   const demo = demoRuns.get(repo.prefix);
+  if (!demo && (repo.kind === "group" || repo.createdAt > before(0, 0, 21))) return null;
   if (demo) {
     const running = Date.now() - demo.startedAt < RUN_SECONDS * 1000;
     const finished = new Date(demo.startedAt + RUN_SECONDS * 1000).toISOString();
@@ -956,7 +995,7 @@ export function reindexRun(repo: MockRepo): ReindexRun {
       startedAt: new Date(demo.startedAt).toISOString(),
       heartbeatAt: running ? new Date().toISOString() : finished,
       finishedAt: running ? null : finished,
-      report: running ? null : reindexReport(repo),
+      report: running ? null : reindexReport(repo, demo),
     };
   }
   const state = repo.reindex.state === "running" ? "running" : repo.reindex.state === "failed" ? "failed" : "done";
@@ -979,14 +1018,18 @@ export function reindexRun(repo: MockRepo): ReindexRun {
 
 /** POST …/reindex: a run of the repo, refused while one runs (409). */
 export function startReindex(repo: MockRepo, body: unknown, by: string): ReindexRun | Refusal {
-  if (reindexRun(repo).state === "running") return { status: 409, code: "CONFLICT", message: `a reindex of ${repo.prefix} runs since a moment ago` };
+  // An overlapping run is named: where it runs and since when (docs/api.md, Reindex).
+  const current = reindexRun(repo);
+  if (current?.state === "running") {
+    return { status: 409, code: "CONFLICT", message: `a reindex of ${current.allRepos ? "every repo" : repo.prefix} runs on ${current.replica} since ${current.startedAt}` };
+  }
   const b = (body ?? {}) as Record<string, unknown>;
   if (typeof b !== "object" || Array.isArray(b)) return invalid("the body must be a JSON object");
   const unknown = Object.keys(b).find((k) => k !== "prune" && k !== "verify");
   if (unknown) return invalid(`${unknown}: not a field of a reindex request`);
   demoRuns.set(repo.prefix, { id: ++nextRunId, startedAt: Date.now(), principal: by, prune: b.prune === true, verify: b.verify === true });
   changed({ at: new Date().toISOString(), principal: by, action: "repo.reindex", repo: repo.prefix, subject: repo.prefix, digest: null, ip: DEMO_IP, details: { prune: b.prune === true, verify: b.verify === true, source: "api" } });
-  return reindexRun(repo);
+  return reindexRun(repo)!;
 }
 
 // --- Audit ----------------------------------------------------------------------------------
@@ -1131,8 +1174,8 @@ export function listAudit(q: AuditQuery): AuditList {
 
 // --- Changes made in the demo ---------------------------------------------------------------
 // What the API lets a caller of the demo change in repos: create, change and delete them, with
-// the server's rules (docs/api.md, Repos). The UI is read-only and offers none of it; the API
-// docs of the demo can. Every change is an audit event and is kept by src/mocks/state.ts, so
+// the server's rules (docs/api.md, Repos), from the repo pages and from the API docs of the
+// demo. Every change is an audit event and is kept by src/mocks/state.ts, so
 // that a reload replays it.
 
 /** Repos of the seed deleted in the demo: their seeded versions go when it reloads. */
@@ -1272,7 +1315,18 @@ function checkPolicy(policy: unknown, format: string, patch: boolean): Refusal |
       if (!isObject(v)) return invalid("policy.maven: a JSON object");
       const unknown = Object.keys(v).find((mk) => !["sessionTimeout", "maxSessionFiles", "versionPolicy"].includes(mk));
       if (unknown) return invalid(`policy.maven.${unknown} is not a policy key`);
-    } else return invalid(`policy.${k} is not a policy key`);
+      // The ranges of docs/api.md, Policy.
+      const { sessionTimeout: t, maxSessionFiles: n, versionPolicy: vp } = v;
+      const seconds = typeof t === "string" ? durationSeconds(t) : null;
+      if (t !== undefined && !(t === null && patch) && (seconds === null || seconds < 60 || seconds > 86400)) {
+        return invalid(`policy.maven.sessionTimeout: "${String(t)}" is not a duration from 1m to 24h`);
+      }
+      if (n !== undefined && !(n === null && patch) && (!Number.isInteger(n) || (n as number) < 1 || (n as number) > 999)) {
+        return invalid("policy.maven.maxSessionFiles: an integer from 1 to 999");
+      }
+      if (vp !== undefined && !(vp === null && patch) && vp !== "release" && vp !== "snapshot") return invalid("policy.maven.versionPolicy: release or snapshot");
+    } else if (k === "maven") return invalid("policy.maven: a maven repo only");
+    else return invalid(`policy.${k} is not a policy key`);
   }
   return null;
 }
@@ -1300,37 +1354,67 @@ export function versionCount(repoKey: string): number {
   return [...(byRepo.get(repoKey)?.values() ?? [])].reduce((n, list) => n + list.length, 0);
 }
 
-/** POST /api/v1/repos: the admin creates a repo (docs/api.md, Repos). */
+const forbidden = (message: string): Refusal => ({ status: 403, code: "FORBIDDEN", message });
+
+/** Names a registry's storage or routes keep for themselves (docs/api.md, Repos; ADR 0017). */
+const reservedName = (name: string) => /(blobs|\.uploads|\.sync)$/.test(name) || ["index.json", "oci-layout", "manifests", "referrers", "tags"].includes(name);
+
+/** The formats whose repos may be proxies and groups: oci, which needs no plugin; npm, the one
+ * plugin that has them, is not a format of the mock (proxy-and-group.md §1). */
+const KINDED_FORMATS = ["oci"];
+
+/** POST /api/v1/repos: the admin creates a repo (docs/api.md, Repos): hosted, a proxy of an
+ * upstream of the configuration, or a group of repos of its format (proxy-and-group.md §2). */
 export function createRepo(body: unknown, by: string): MockRepo | Refusal {
-  if (typeof body !== "object" || body === null) return invalid("the body must be a JSON object");
-  const b = body as Record<string, unknown>;
-  const known = ["format", "name", "registry", "kind", "anonymousRead", "policy"];
+  if (!isObject(body)) return invalid("the body must be a JSON object");
+  const b = body;
+  const known = ["format", "name", "registry", "kind", "anonymousRead", "policy", "upstream", "group"];
   const unknown = Object.keys(b).find((k) => !known.includes(k));
   if (unknown) return invalid(`${unknown}: not a field of a repo`);
   if (!FORMATS.includes(b.format as (typeof FORMATS)[number])) return invalid(`format: one of ${FORMATS.join(", ")}`);
+  const format = b.format as RepoSeed["format"];
   if (typeof b.name !== "string" || b.name.length > 64 || !REPO_NAME.test(b.name)) {
     return invalid(`name: "${String(b.name ?? "")}" must be lowercase letters and digits separated by single '.', '_' or '-', at most 64 characters`);
   }
-  if (typeof b.registry !== "string" || !registries.some((r) => r.name === b.registry)) {
+  if (reservedName(b.name)) return invalid(`name: "${b.name}" is kept by registries: no name ends in blobs, .uploads or .sync, or is index.json, oci-layout, manifests, referrers or tags`);
+  const kind = b.kind ?? "hosted";
+  if (kind !== "hosted" && kind !== "proxy" && kind !== "group") return invalid(`kind: "${String(kind)}" is not hosted, proxy or group`);
+  if (kind !== "hosted" && !KINDED_FORMATS.includes(format)) return invalid(`kind: format ${format} has no ${kind} repos`);
+  if (kind === "group") {
+    if (b.registry !== undefined) return invalid("registry: a group has none: it stores nothing");
+    if (b.policy !== undefined && b.policy !== null) return invalid("policy: a group has none; each member keeps its own");
+  } else if (typeof b.registry !== "string" || !registries.some((r) => r.name === b.registry)) {
     return invalid(`registry: one of ${registries.map((r) => r.name).join(", ")}`);
   }
-  if (b.kind !== undefined && b.kind !== "hosted") return invalid("kind: hosted, the only kind in this version");
   if (b.anonymousRead !== undefined && typeof b.anonymousRead !== "boolean") return invalid("anonymousRead: true or false");
-  const policyError = checkPolicy(b.policy, b.format as string, false);
+  const policyError = checkPolicy(b.policy, format, false);
   if (policyError) return policyError;
-  const key = `${b.format}/${b.name}`;
+  if (kind === "proxy") {
+    if (b.upstream === undefined || b.upstream === null) return invalid("upstream: a proxy repo needs one, by the name the configuration gives it");
+    const refused = upstreamRefusal(b.upstream, format, upstreams);
+    if (refused) return refused;
+  } else if (b.upstream !== undefined && b.upstream !== null) return invalid("upstream: only a proxy repo has one");
+  if (kind === "group") {
+    if (b.group === undefined || b.group === null) return invalid("group: a group needs its members");
+    const refused = groupRefusal(b.group, format, b.name, repoSeeds);
+    if (refused) return refused;
+  } else if (b.group !== undefined && b.group !== null) return invalid("group: only a group has one");
+  const key = `${format}/${b.name}`;
   if (repoSeeds.some((s) => keyOf(s) === key)) return { status: 409, code: "CONFLICT", message: `repo ${key} exists` };
 
   const now = new Date().toISOString();
   const seed: RepoSeed = {
-    format: b.format as RepoSeed["format"],
+    format,
     name: b.name,
-    registry: b.registry,
+    ...(kind === "group" ? {} : { registry: b.registry as string }),
     anonymousRead: b.anonymousRead === true,
-    policy: (b.policy as RepoSeed["policy"]) ?? null,
+    policy: kind === "group" ? null : ((b.policy as RepoSeed["policy"]) ?? null),
     createdAt: now,
     updatedAt: now,
     reindex: "idle",
+    ...(kind === "hosted" ? {} : { kind }),
+    ...(kind === "proxy" ? { upstream: b.upstream as Upstream } : {}),
+    ...(kind === "group" ? { group: b.group as RepoGroup } : {}),
   };
   repoSeeds.push(seed);
   // A new repo starts empty, even where one of the same name was deleted.
@@ -1339,31 +1423,77 @@ export function createRepo(body: unknown, by: string): MockRepo | Refusal {
   return repoOf(seed, by.replace(/^user:/, ""));
 }
 
-/** PATCH /api/v1/repos/{format}/{repo}: anonymousRead and policy; the rest cannot change. */
+/** A group's paths in one spelling, whatever the order of its keys. */
+const pathsKey = (paths: RepoGroup["paths"]) => JSON.stringify(Object.entries(paths ?? {}).sort(([a], [b]) => a.localeCompare(b)));
+
+/** PATCH /api/v1/repos/{format}/{repo}: anonymousRead and policy; a proxy's upstream and a
+ * group's settings, merged and checked whole; the admin role for another upstream.name, other
+ * members or other paths (docs/api.md, Change). {"kind": "hosted"} alone turns a proxy of a
+ * format that can adopt its documents into a hosted repo: none of the mock's can. */
 export function updateRepo(repo: MockRepo, body: unknown, by: string): MockRepo | Refusal {
-  if (typeof body !== "object" || body === null) return invalid("the body must be a JSON object");
-  const b = body as Record<string, unknown>;
+  if (!isObject(body)) return invalid("the body must be a JSON object");
+  const b = body;
+  const me = by.replace(/^user:/, "");
+  const admin = isAdmin(me);
   for (const k of Object.keys(b)) {
-    if (["format", "name", "registry", "kind"].includes(k)) return invalid(`${k}: cannot change`);
-    if (k !== "anonymousRead" && k !== "policy") return invalid(`${k}: not a field of a repo`);
+    if (["format", "name", "registry"].includes(k)) return invalid(`${k}: cannot change`);
+    if (!["anonymousRead", "policy", "upstream", "group", "kind"].includes(k)) return invalid(`${k}: not a field of a repo`);
+  }
+  const seed = repoSeeds.find((s) => keyOf(s) === repo.prefix)!;
+  const kind = seed.kind ?? "hosted";
+  if ("kind" in b) {
+    if (Object.keys(b).length > 1) return invalid("kind: alone in the body");
+    if (b.kind !== "hosted") return invalid("kind: only hosted, which a proxy becomes once");
+    if (!admin) return forbidden(`kind: turning ${repo.prefix} into a hosted repo needs the admin role`);
+    if (kind === "group") return invalid("kind: a group cannot become a hosted repo");
+    if (kind === "proxy") return invalid(`kind: format ${seed.format} cannot turn a proxy into a hosted repo`);
+    return repoOf(seed, me);
   }
   if (b.anonymousRead !== undefined && typeof b.anonymousRead !== "boolean") return invalid("anonymousRead: true or false");
+  if (b.policy !== undefined && kind === "group") return invalid("policy: a group has none; each member keeps its own");
   const policyError = checkPolicy(b.policy, repo.format, true);
   if (policyError) return policyError;
-  const seed = repoSeeds.find((s) => keyOf(s) === repo.prefix)!;
-  const before = { anonymousRead: seed.anonymousRead, policy: seed.policy };
+
+  let upstream = seed.upstream;
+  if (b.upstream !== undefined) {
+    if (kind !== "proxy" || !seed.upstream) return invalid("upstream: only a proxy repo has one");
+    if (!isObject(b.upstream)) return invalid(b.upstream === null ? "upstream: a proxy keeps its upstream; it cannot be removed" : "upstream: a merge patch of its keys");
+    const merged = mergeUpstream(seed.upstream, b.upstream);
+    const refused = upstreamRefusal(merged, seed.format, upstreams);
+    if (refused) return refused;
+    if (merged.name !== seed.upstream.name && !admin) return forbidden(`upstream.name: choosing the upstream of ${repo.prefix} needs the admin role`);
+    upstream = merged as Upstream;
+  }
+  let group = seed.group;
+  if (b.group !== undefined) {
+    if (kind !== "group" || !seed.group) return invalid("group: only a group has one");
+    if (!isObject(b.group)) return invalid(b.group === null ? "group: a group keeps its members; it cannot be removed" : "group: a merge patch of its keys");
+    const merged = mergeGroup(seed.group, b.group) as RepoGroup;
+    const refused = groupRefusal(merged, seed.format, seed.name, repoSeeds);
+    if (refused) return refused;
+    // The admin role is asked for a change, not for the key: members sent back as they are, in
+    // their order, need manage alone.
+    if (!admin && JSON.stringify(merged.members) !== JSON.stringify(seed.group.members)) return forbidden(`group.members: changing the members of ${repo.prefix} needs the admin role`);
+    if (!admin && pathsKey(merged.paths) !== pathsKey(seed.group.paths)) return forbidden(`group.paths: changing the routes of ${repo.prefix} needs the admin role`);
+    group = merged;
+  }
+
+  const before = { anonymousRead: seed.anonymousRead, policy: seed.policy, upstream: seed.upstream, group: seed.group };
   const after = {
     anonymousRead: b.anonymousRead === undefined ? seed.anonymousRead : (b.anonymousRead as boolean),
     policy: b.policy === undefined ? seed.policy : mergePolicy(seed.policy, (b.policy as Record<string, unknown> | null) ?? null),
+    upstream,
+    group,
   };
   // A body that changes nothing changes nothing, not even updatedAt.
   if (JSON.stringify(before) !== JSON.stringify(after)) {
-    seed.anonymousRead = after.anonymousRead;
-    seed.policy = after.policy;
+    Object.assign(seed, after);
     seed.updatedAt = new Date().toISOString();
-    changed({ at: seed.updatedAt, principal: by, action: "repo.update", repo: repo.prefix, subject: repo.prefix, digest: null, ip: DEMO_IP, details: { from: before, to: after, source: "api" } });
+    const keys = (Object.keys(after) as (keyof typeof after)[]).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
+    const pick = (o: typeof after) => Object.fromEntries(keys.map((k) => [k, o[k] ?? null]));
+    changed({ at: seed.updatedAt, principal: by, action: "repo.update", repo: repo.prefix, subject: repo.prefix, digest: null, ip: DEMO_IP, details: { from: pick(before), to: pick(after), source: "api" } });
   }
-  return repoOf(seed, by.replace(/^user:/, ""));
+  return repoOf(seed, me);
 }
 
 /** DELETE /api/v1/repos/{format}/{repo}[?force=true]: refused with versions unless forced. */
@@ -1381,6 +1511,9 @@ export function deleteRepo(repo: MockRepo, force: boolean, by: string): Refusal 
   dropRepoData(repo.prefix);
   deletedRepos.add(repo.prefix);
   for (let i = tokens.length - 1; i >= 0; i--) if (tokens[i]!.repo === repo.prefix) tokens.splice(i, 1);
+  // What a proxy fetched stays in the registry, but the index forgets it; so does its last run.
+  for (const k of [...held]) if (k.startsWith(`${repo.prefix}@`)) held.delete(k);
+  demoRuns.delete(repo.prefix);
   changed({ at: new Date().toISOString(), principal: by, action: "repo.delete", repo: repo.prefix, subject: repo.prefix, digest: null, ip: DEMO_IP, details: { versions, source: "api" } });
   return null;
 }
