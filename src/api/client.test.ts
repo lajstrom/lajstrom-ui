@@ -18,15 +18,15 @@ describe("basicAuth", () => {
 
 describe("isUnavailable", () => {
   it("is true for an endpoint the server does not have", () => {
-    const msg = "GET /api/v1/repos/raw/scratch/packages is not in this version; later";
+    const msg = "GET /api/v1/repos/raw/scratch/packages/a is not an endpoint of this version (docs/api.md)";
     expect(isUnavailable(new ApiError(404, "NOT_FOUND", msg))).toBe(true);
     expect(isUnavailable(new ApiError(501, "UNAVAILABLE", "reindex comes later"))).toBe(true);
   });
 
   it("is false for a resource that does not exist, and for anything else", () => {
     expect(isUnavailable(new ApiError(404, "NOT_FOUND", "repo raw/nope not found"))).toBe(false);
-    expect(isUnavailable(new ApiError(403, "FORBIDDEN", "not in this version"))).toBe(false);
-    expect(isUnavailable(new Error("GET /api/v1/x is not in this version"))).toBe(false);
+    expect(isUnavailable(new ApiError(403, "FORBIDDEN", "GET /api/v1/x is not an endpoint of this version"))).toBe(false);
+    expect(isUnavailable(new Error("GET /api/v1/x is not an endpoint of this version"))).toBe(false);
     expect(isUnavailable(null)).toBe(false);
   });
 });
