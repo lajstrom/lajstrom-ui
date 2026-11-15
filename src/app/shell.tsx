@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, Navigate, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { Boxes, Braces, Check, FlaskConical, History, KeyRound, LogIn, LogOut, Monitor, Moon, Search, Server, Sun, User, Users } from "lucide-react";
+import { Boxes, Braces, Check, FlaskConical, History, KeyRound, LogIn, LogOut, Monitor, Moon, Search, Server, Sun, User, Users, Webhook } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { signOut } from "@/api/auth";
@@ -43,7 +43,7 @@ function Logo() {
 
 function NavLink({ to, icon, children }: { to: string; icon: React.ReactNode; children: React.ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const active = to === "/" ? !["/registries", "/audit", "/access", "/search"].some((p) => pathname.startsWith(p)) : pathname.startsWith(to);
+  const active = to === "/" ? !["/registries", "/audit", "/access", "/webhooks", "/search"].some((p) => pathname.startsWith(p)) : pathname.startsWith(to);
   return (
     <Link
       to={to}
@@ -229,6 +229,9 @@ export function AppShell() {
                 </NavLink>
                 <NavLink to="/access" icon={<Users />}>
                   Access
+                </NavLink>
+                <NavLink to="/webhooks" icon={<Webhook />}>
+                  Webhooks
                 </NavLink>
               </>
             ) : null}

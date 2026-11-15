@@ -21,9 +21,10 @@ import { formatSpec, snippetContext, type FormatSpec } from "@/lib/formats";
 import { facetParam, variantShort } from "@/lib/variants";
 
 import { RepoActivity, RepoDetails, RepoMaintenance } from "./repo-tabs";
+import { RepoWebhooks } from "./webhooks";
 
 export type RepoSearch = {
-  tab?: "packages" | "connect" | "details" | "maintenance" | "activity";
+  tab?: "packages" | "connect" | "details" | "maintenance" | "webhooks" | "activity";
   /** Names that start with it: the server's filter of the package list. */
   prefix?: string;
   sort?: "name" | "updated" | "versions" | "size";
@@ -75,6 +76,7 @@ export function RepoPage() {
     { id: "connect", label: "Connect", show: true },
     { id: "details", label: "Details", show: true },
     { id: "maintenance", label: "Maintenance", show: canManage },
+    { id: "webhooks", label: "Webhooks", show: canManage },
     { id: "activity", label: "Activity", show: who.data?.admin ?? false },
   ];
 
@@ -163,6 +165,8 @@ export function RepoPage() {
         <RepoDetails repo={r} />
       ) : tab === "maintenance" && canManage ? (
         <RepoMaintenance repo={r} />
+      ) : tab === "webhooks" && canManage ? (
+        <RepoWebhooks repo={r} />
       ) : tab === "activity" ? (
         <RepoActivity repo={r} />
       ) : (

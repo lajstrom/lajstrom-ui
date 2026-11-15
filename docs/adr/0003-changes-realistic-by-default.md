@@ -34,6 +34,10 @@ server's state if the server refuses. Safe means all three:
 | disable or enable a user, change a repo's `anonymousRead` or policy | optimistic | a PATCH the UI can predict |
 | delete a binding | optimistic | can be created again |
 | create a token, a webhook, or rotate a secret | realistic | the secret exists only in the answer |
+| turn a webhook on or off | optimistic | a PATCH the UI can predict |
+| change a webhook's URL or events | realistic | the server checks the URL against its egress rules |
+| send a webhook a ping | realistic | the outcome, delivered or failed, is the answer |
+| delete a webhook | confirm, then realistic | cannot be undone; its delivery log goes with it |
 | create a user, a binding or a repo | realistic | the server assigns ids and checks the name |
 | delete a version or a repo | confirm, then realistic | cannot be undone |
 | reindex, prefetch, purge the upstream cache | realistic, polled | a job on the server; progress comes from its status |

@@ -13,6 +13,7 @@ import { ReposPage } from "@/pages/repos";
 import { SearchPage } from "@/pages/search";
 import { SignInPage } from "@/pages/sign-in";
 import { TokensPage } from "@/pages/tokens";
+import { WebhooksPage } from "@/pages/webhooks";
 
 import { basePath } from "./base";
 import { AppShell } from "./shell";
@@ -36,6 +37,7 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/registries", component: RegistriesPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/audit", component: AuditPage, validateSearch: strings }),
   createRoute({ getParentRoute: () => rootRoute, path: "/access", component: AccessPage, validateSearch: strings }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/webhooks", component: WebhooksPage, validateSearch: strings }),
   createRoute({ getParentRoute: () => rootRoute, path: "/sign-in", component: SignInPage, validateSearch: strings }),
   createRoute({ getParentRoute: () => rootRoute, path: "/first-admin", component: FirstAdminPage, validateSearch: strings }),
   createRoute({ getParentRoute: () => rootRoute, path: "/tokens", component: TokensPage, validateSearch: strings }),
