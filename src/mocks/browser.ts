@@ -1,5 +1,7 @@
 import { setupWorker } from "msw/browser";
 
+import { basePath } from "@/app/base";
+
 import { handlers } from "./handlers";
 import { restoreDemoState } from "./state";
 
@@ -8,7 +10,7 @@ export async function startMock(): Promise<void> {
   restoreDemoState();
   const worker = setupWorker(...handlers);
   await worker.start({
-    serviceWorker: { url: `${import.meta.env.BASE_URL}mockServiceWorker.js` },
+    serviceWorker: { url: `${basePath()}mockServiceWorker.js` },
     onUnhandledRequest: "bypass",
     // Every answer of the mock is logged in the console, request and response, also where no
     // service worker runs (plain http to an IP), whose requests the Network panel cannot show.

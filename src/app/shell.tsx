@@ -14,6 +14,7 @@ import { Notices } from "@/components/ui/notices";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
 
+import { AboutButton } from "./about";
 import { CommandPalette } from "./command-palette";
 import { config } from "./config";
 import { demoMode, exitDemo, resetDemo } from "./demo";
@@ -263,6 +264,8 @@ export function AppShell() {
           </span>
           <span>·</span>
           <span>UI prototype{demo.active ? " · demo data" : ""}</span>
+          <span>·</span>
+          <AboutButton />
           <span className="ml-auto">
             Press <Kbd>/</Kbd> to search
           </span>

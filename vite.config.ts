@@ -6,8 +6,10 @@ import react from "@vitejs/plugin-react";
 import type { Plugin } from "vite";
 import { defineConfig } from "vitest/config";
 
+import { buildInfo } from "./scripts/build-info.ts";
+
 // The UI is served below /ui/ (docs/spec/http-routing.md reserves the segment), both by the
-// dev server and by the nginx image. Without the mock, the dev server forwards the API to a
+// dev server and by the nginx image; a build runs below any path (lajstromBuild). Without the mock, the dev server forwards the API to a
 // running Lajstrom:
 //
 //   LAJSTROM_UI_MOCK=false LAJSTROM_API_UPSTREAM=http://localhost:8080 npm run dev
@@ -40,9 +42,33 @@ function devConfigOverride(): Plugin {
   };
 }
 
-export default defineConfig({
-  base: "/ui/",
-  plugins: [devConfigOverride(), react(), tailwindcss()],
+// What this build is and the server API it was built for (scripts/build-info.ts): defined for the
+// app as __LAJSTROM_UI_BUILD__ (src/app/build.ts) and written next to index.html as build.json.
+//
+// A build has relative asset paths, so that one bundle serves at the root of a static origin and
+// below /ui/ (src/app/base.ts). index.html gets <base href="/">: a host that answers a deep link
+// such as /apt/ubuntu-internal with index.html then still loads ./assets from the root. Below
+// another path the host sets that one tag; the image's nginx makes it /ui/ (docker/nginx.conf).
+function lajstromBuild(): Plugin {
+  const info = buildInfo(new URL("./", import.meta.url));
+  let relative = false;
+  return {
+    name: "lajstrom-build",
+    config: () => ({ define: { __LAJSTROM_UI_BUILD__: JSON.stringify(info) } }),
+    configResolved(config) {
+      relative = config.command === "build" && (config.base === "./" || config.base === "");
+    },
+    transformIndexHtml: () => (relative ? [{ tag: "base", attrs: { href: "/" }, injectTo: "head-prepend" }] : []),
+    generateBundle() {
+      this.emitFile({ type: "asset", fileName: "build.json", source: `${JSON.stringify(info, null, 2)}\n` });
+    },
+  };
+}
+
+export default defineConfig(({ command }) => ({
+  // The dev server serves below /ui/, as the image does.
+  base: command === "build" ? "./" : "/ui/",
+  plugins: [devConfigOverride(), lajstromBuild(), react(), tailwindcss()],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
@@ -66,6 +92,6 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
   },
-});
+}));
