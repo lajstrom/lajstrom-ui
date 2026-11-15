@@ -15,20 +15,17 @@ const specOps = new Set(
   Object.entries(spec.paths).flatMap(([path, item]) => Object.keys(item).filter((m) => METHODS.includes(m)).map((m) => `${m} ${path}`)),
 );
 
-/** The same for the routes of the mock, from its source: get("*\/api/v1/repos/:format/:repo", …). */
+/** The same for the routes of the mock, from its source: get("*\/api/v1/repos/:format/:repo", …);
+ * an escaped colon, written "\\:" in the source, is the colon of a custom method (versions:delete). */
 const mockOps = new Set(
   [...handlersSource.matchAll(/^\s+(get|post|put|patch|del)\("\*([^"]+)"/gm)]
     .filter(([, , path]) => !path!.endsWith("/*"))
-    .map(([, method, path]) => `${method === "del" ? "delete" : method} ${path!.replace(/:([a-zA-Z]+)/g, "{$1}")}`),
+    .map(([, method, path]) => `${method === "del" ? "delete" : method} ${path!.replace(/(?<!\\):([a-zA-Z]+)/g, "{$1}").replaceAll("\\\\:", ":")}`),
 );
 
 /** The server's operations the mock does not answer yet: "Try it out" gets the 404 the server
  * answers to a path it does not know. The UI does none of them yet. */
 const notMocked = new Set([
-  "delete /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}",
-  "put /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/yank",
-  "delete /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/yank",
-  "post /api/v1/repos/{format}/{repo}/versions:delete",
   "delete /api/v1/repos/{format}/{repo}/upstream-cache",
   "post /api/v1/repos/{format}/{repo}/prefetch",
   "post /api/v1/users",

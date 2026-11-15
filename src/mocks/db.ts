@@ -6,6 +6,8 @@ import type {
   AttachmentList,
   AuditEvent,
   AuditList,
+  BatchDeleteItemResult,
+  BatchDeleteResult,
   Binding,
   Caller,
   FacetValue,
@@ -22,6 +24,7 @@ import type {
   SearchHit,
   VersionSummary,
   WhoAmI,
+  Yank,
 } from "@/api/types";
 import { formatSpec } from "@/lib/formats";
 import { packagePath } from "@/lib/profile";
@@ -359,6 +362,7 @@ export function listVersions(repo: Repo, name: string): VersionSummary[] | null 
   if (!list) return null;
   return byVersion(list).map((rows) => ({
     ...versionHead(rows),
+    ...yankOf(repo, name, rows[0]!.version),
     variants: rows.map((v) => ({
       variant: v.variant,
       tag: v.tag,
@@ -400,6 +404,7 @@ export function getVersion(repo: Repo, name: string, version: string, variant: s
   if (!shown.length) return null;
   return {
     ...versionHead(sorted),
+    ...yankOf(repo, name, version),
     variants: shown.map(variantDetail),
     ociRepository: `${repo.format}/${repo.name}/${packagePath(repo.format, name)}`,
   };
@@ -808,16 +813,46 @@ function dropRepoData(repoKey: string): number {
   return removeRows((v) => v.repoKey === repoKey);
 }
 
+/** The yanks of pypi versions, by yankKey: the reason, "" for none. A deleted version keeps its
+ * yank, as on the server. */
+const yanks = new Map<string, string>();
+const yankKey = (repo: Repo, name: string, version: string) => `${keyOf(repo)} ${name} ${version}`;
+
+function yankOf(repo: Repo, name: string, version: string): { yanked?: Yank } {
+  const reason = yanks.get(yankKey(repo, name, version));
+  return reason === undefined ? {} : { yanked: { reason } };
+}
+
+/** Manifests of the seed deleted in the demo, by digest: they go again when it reloads. */
+const deletedManifests = new Set<string>();
+
+function dropManifest(digest: string): void {
+  removeRows((v) => v.digest === digest);
+  for (const pkgs of byRepo.values()) {
+    for (const [name, list] of pkgs) {
+      const i = list.findIndex((v) => v.digest === digest);
+      if (i === -1) continue;
+      list.splice(i, 1);
+      if (!list.length) pkgs.delete(name);
+    }
+  }
+}
+
 keep("db", {
-  save: () => ({ repos: repoSeeds, deletedRepos: [...deletedRepos], events: demoEvents }),
+  save: () => ({ repos: repoSeeds, deletedRepos: [...deletedRepos], events: demoEvents, deletedManifests: [...deletedManifests], yanks: [...yanks] }),
   load: (data) => {
-    const d = data as { repos?: RepoSeed[]; deletedRepos?: string[]; events?: MockEvent[] };
+    const d = data as { repos?: RepoSeed[]; deletedRepos?: string[]; events?: MockEvent[]; deletedManifests?: string[]; yanks?: [string, string][] };
     if (!Array.isArray(d.repos)) return;
     repoSeeds.splice(0, repoSeeds.length, ...d.repos);
     for (const k of d.deletedRepos ?? []) {
       deletedRepos.add(k);
       dropRepoData(k);
     }
+    for (const digest of d.deletedManifests ?? []) {
+      deletedManifests.add(digest);
+      dropManifest(digest);
+    }
+    for (const [k, reason] of d.yanks ?? []) yanks.set(k, reason);
     demoEvents.push(...(d.events ?? []));
     auditCache = null;
   },
@@ -954,6 +989,117 @@ export function deleteRepo(repo: MockRepo, force: boolean, by: string): Refusal 
   for (let i = tokens.length - 1; i >= 0; i--) if (tokens[i]!.repo === repo.prefix) tokens.splice(i, 1);
   changed({ at: new Date().toISOString(), principal: by, action: "repo.delete", repo: repo.prefix, subject: repo.prefix, digest: null, ip: DEMO_IP, details: { versions, source: "api" } });
   return null;
+}
+
+const notFound = (message: string): Refusal => ({ status: 404, code: "NOT_FOUND", message });
+
+/** PUT and DELETE …/versions/{version}/yank (docs/api.md, Yank a pypi version): reason null
+ * unyanks. Idempotent: the same yank again, or an unyank of a version not yanked, changes
+ * nothing and writes no audit row. */
+export function yankVersion(repo: MockRepo, name: string, version: string, reason: string | null, by: string): Refusal | null {
+  if (repo.format !== "pypi" || (repo.kind ?? "hosted") !== "hosted") return invalid(`${repo.prefix} is not a hosted pypi repo: only those yank`);
+  if (!manifestsOf(repo, name)?.some((v) => v.version === version)) return notFound(`${name} has no version ${version} in ${repo.prefix}`);
+  const key = yankKey(repo, name, version);
+  if (reason === null ? !yanks.has(key) : yanks.get(key) === reason) return null;
+  if (reason === null) yanks.delete(key);
+  else yanks.set(key, reason);
+  const op = reason === null ? "unyank" : "yank";
+  changed({ at: new Date().toISOString(), principal: by, action: "pypi.yank", repo: repo.prefix, subject: `${name}@${version}`, digest: null, ip: DEMO_IP, details: { op, version, ...(reason ? { reason } : {}) } });
+  return null;
+}
+
+/** Whether the repo's registry deletes manifests; null when it does, else the 501 of the delete. */
+function deletes(repo: MockRepo): Refusal | null {
+  const registry = registries.find((r) => r.name === repo.registry);
+  return registry && !registry.capabilities.deleteManifest
+    ? { status: 501, code: "UNAVAILABLE", message: `registry ${registry.name} does not delete manifests (capabilities.deleteManifest false); nothing was deleted` }
+    : null;
+}
+
+/** Deletes the manifests of a version, each with an audit row. */
+function deleteRows(repo: MockRepo, rows: Row[], by: string, details: Record<string, unknown> = {}): void {
+  for (const v of rows) {
+    deletedManifests.add(v.digest);
+    dropManifest(v.digest);
+    const referrers = v.referrers.signatures + v.referrers.sboms + v.referrers.attestations;
+    changed({ at: new Date().toISOString(), principal: by, action: "delete", repo: repo.prefix, subject: `${v.packageName}@${v.version}${v.variant ? ` (${v.variant})` : ""}`, digest: v.digest, ip: DEMO_IP, details: { referrers, source: "api", ...details } });
+  }
+}
+
+const sameDigests = (rows: Row[], digests: string[]) =>
+  rows.length === new Set(digests).size && rows.every((v) => digests.includes(v.digest));
+
+/** RFC 9110's HTTP-date, as If-Unmodified-Since has it; null when it is not one. */
+function httpDate(v: string): number | null {
+  const t = /^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(v) ? Date.parse(v) : NaN;
+  return Number.isNaN(t) ? null : t;
+}
+
+/** Whether a manifest was published after the cut-off, in whole seconds. */
+const after = (v: Row, cutoff: number) => Math.floor(Date.parse(v.createdAt) / 1000) > Math.floor(cutoff / 1000);
+
+export type VersionDelete = { variant: string | null; force: boolean; ifMatch: string | null; ifUnmodifiedSince: string | null };
+
+/** DELETE …/versions/{version} (docs/api.md, Delete a version): a compare-and-delete with
+ * If-Match and If-Unmodified-Since. The mock has no pointers, so force changes nothing. */
+export function deleteVersion(repo: MockRepo, name: string, version: string, opts: VersionDelete, by: string): Refusal | null {
+  const all = manifestsOf(repo, name)?.filter((v) => v.version === version) ?? [];
+  if (!all.length) return notFound(`${name} has no version ${version} in ${repo.prefix}`);
+  const rows = opts.variant === null ? all : all.filter((v) => v.variant === opts.variant);
+  if (!rows.length) return notFound(`${name} ${version} has no variant ${opts.variant}`);
+  if (opts.ifMatch !== null && opts.ifMatch.trim() !== "*") {
+    const tags = opts.ifMatch.split(",").map((t) => t.trim());
+    if (!tags.every((t) => /^"sha256:[0-9a-f]{64}"$/.test(t))) return invalid(`If-Match: a list of quoted digests, or *, not ${opts.ifMatch}`);
+    if (!sameDigests(rows, tags.map((t) => t.slice(1, -1)))) {
+      return { status: 412, code: "CONFLICT", message: `${name} ${version} changed since it was read: its digests are now ${rows.map((v) => v.digest).join(", ")}` };
+    }
+  }
+  if (opts.ifUnmodifiedSince !== null) {
+    const cutoff = httpDate(opts.ifUnmodifiedSince);
+    if (cutoff === null) return invalid(`If-Unmodified-Since: an HTTP-date, not ${opts.ifUnmodifiedSince}`);
+    if (rows.some((v) => after(v, cutoff))) return { status: 412, code: "CONFLICT", message: `${name} ${version} was published after the cut-off` };
+  }
+  const unavailable = deletes(repo);
+  if (unavailable) return unavailable;
+  deleteRows(repo, rows, by);
+  return null;
+}
+
+const JOB = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+/** POST …/versions:delete (docs/api.md, Delete versions in a batch): each item on its own, with
+ * the conditions of the single delete; a result per item. */
+export function deleteVersions(repo: MockRepo, body: unknown, by: string): BatchDeleteResult | Refusal {
+  if (!isObject(body)) return invalid("the body is a JSON object with items");
+  const unknown = Object.keys(body).find((k) => !["items", "cutoff", "dryRun", "job"].includes(k));
+  if (unknown) return invalid(`unknown field ${unknown}`);
+  const { items, cutoff, dryRun = false, job = `batch-${Date.now().toString(36)}` } = body;
+  if (!Array.isArray(items) || items.length < 1 || items.length > 1000) return invalid("items: 1 to 1000 versions");
+  for (const [i, item] of items.entries()) {
+    if (!isObject(item) || typeof item.package !== "string" || typeof item.version !== "string" || !Array.isArray(item.digests) || !item.digests.length || !item.digests.every((d) => typeof d === "string")) {
+      return invalid(`items[${i}]: package, version and the digests of every variant`);
+    }
+    const extra = Object.keys(item).find((k) => !["package", "version", "digests"].includes(k));
+    if (extra) return invalid(`items[${i}]: unknown field ${extra}`);
+  }
+  const cut = cutoff === undefined ? null : typeof cutoff === "string" ? Date.parse(cutoff) : NaN;
+  if (cut !== null && Number.isNaN(cut)) return invalid("cutoff: an RFC 3339 time");
+  if (typeof dryRun !== "boolean") return invalid("dryRun: true or false");
+  if (typeof job !== "string" || !JOB.test(job)) return invalid("job: up to 64 letters, digits, '.', '_' and '-', starting with a letter or a digit");
+  const unavailable = deletes(repo);
+  const results = (items as { package: string; version: string; digests: string[] }[]).map((item): BatchDeleteItemResult => {
+    const head = { package: item.package, version: item.version };
+    const rows = manifestsOf(repo, item.package)?.filter((v) => v.version === item.version) ?? [];
+    if (!rows.length) return { ...head, status: "gone", message: `${item.package} has no version ${item.version}` };
+    if (!sameDigests(rows, item.digests)) return { ...head, status: "changed", message: "its digests changed since they were read", digests: rows.map((v) => v.digest) };
+    if (cut !== null && rows.some((v) => after(v, cut))) {
+      return { ...head, status: "young", message: "published after the cut-off", lastModified: rows.at(-1)!.createdAt };
+    }
+    if (unavailable) return { ...head, status: "error", message: unavailable.message };
+    if (!dryRun) deleteRows(repo, rows, by, { job });
+    return { ...head, status: "deleted" };
+  });
+  return { job, dryRun, results };
 }
 
 export { bindings, tokens, users, serverInfo };

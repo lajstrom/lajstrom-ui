@@ -12,7 +12,7 @@ import { revoked } from "@/lib/tokens";
 import { createToken } from "@/mocks/auth";
 import { handlers } from "@/mocks/handlers";
 
-import { optimistic, realistic } from "./change";
+import { optimistic, realistic, update } from "./change";
 import { createUserToken, revokeUserToken } from "./mutations";
 import { userTokensQuery } from "./queries";
 import { setSession } from "./session";
@@ -65,7 +65,7 @@ const row = (client: QueryClient, user: string, id: number) => client.getQueryDa
 function revoke(client: QueryClient, user: string, token: Token) {
   return new MutationObserver(client, {
     mutationFn: (t: Token) => revokeUserToken(user, t.id),
-    ...optimistic({ queryKey: list(user), apply: revoked, describe: (t: Token) => `Revoke ${t.name}` }),
+    ...optimistic({ updates: (t: Token) => [update(list(user), (tokens: Token[]) => revoked(tokens, t))], describe: (t) => `Revoke ${t.name}` }),
   }).mutate(token);
 }
 

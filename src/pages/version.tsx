@@ -34,6 +34,7 @@ import { ociSnippets, referrerKinds } from "@/lib/formats/common";
 
 import { MetadataRows } from "./metadata";
 import { packageCrumbs } from "./package-model";
+import { VersionActions } from "./version-dialogs";
 
 type Props = { format: string; repoName: string; name: string; version: string };
 
@@ -146,6 +147,7 @@ export function VersionPage({ format, repoName, name, version }: Props) {
             <Skeleton className="h-4 w-72" />
           )
         }
+        actions={repo.data && d ? <VersionActions repo={repo.data} name={name} detail={d} versions={versions.data?.length} /> : null}
       />
 
       {d && d.variants.length > 1 ? (

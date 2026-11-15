@@ -2,7 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { KeyRound } from "lucide-react";
 import { useState } from "react";
 
-import { optimistic, useChanges } from "@/api/change";
+import { optimistic, update, useChanges } from "@/api/change";
 import { createDeployToken, revokeDeployToken } from "@/api/mutations";
 import { deployTokensQuery } from "@/api/queries";
 import type { Repo, Token } from "@/api/types";
@@ -23,7 +23,7 @@ export function DeployTokens({ repo }: { repo: Repo }) {
   const revoke = useMutation({
     mutationKey: ["revoke", ...key],
     mutationFn: (t: Token) => revokeDeployToken(repo.format, repo.name, t.id),
-    ...optimistic({ queryKey: key, apply: revoked, describe: (t: Token) => `Revoke ${t.name}` }),
+    ...optimistic({ updates: (t: Token) => [update(key, (tokens: Token[]) => revoked(tokens, t))], describe: (t) => `Revoke ${t.name}` }),
   });
   const changes = useChanges(["revoke", ...key], tokenId);
   const list = [...(tokens.data ?? [])].sort((a, b) => b.id - a.id);

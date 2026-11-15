@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { KeyRound, LogIn } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { optimistic, useChanges } from "@/api/change";
+import { optimistic, update, useChanges } from "@/api/change";
 import { createUserToken, revokeUserToken } from "@/api/mutations";
 import { callerQuery, userTokensQuery } from "@/api/queries";
 import { setSession } from "@/api/session";
@@ -45,7 +45,7 @@ export function TokensPage() {
   const revoke = useMutation({
     mutationKey: ["revoke", ...list],
     mutationFn: (t: Token) => revokeUserToken(user ?? "", t.id),
-    ...optimistic({ queryKey: list, apply: revoked, describe: (t: Token) => `Revoke ${t.name}` }),
+    ...optimistic({ updates: (t: Token) => [update(list, (tokens: Token[]) => revoked(tokens, t))], describe: (t) => `Revoke ${t.name}` }),
     onSuccess: (_, t) => {
       if (t.id !== currentId) return;
       setSession(null);
