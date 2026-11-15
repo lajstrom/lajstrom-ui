@@ -226,35 +226,6 @@ components:
           $ref: "#/components/schemas/OciManifest"
           description: The manifest, read from the registry (lajstrom/lajstrom#951).
 
-    ReindexRun:
-      properties:
-        report:
-          description: The other fields of the report, as docs/api.md shows them (lajstrom/lajstrom#1128).
-          properties:
-            repo: {type: string}
-            ociRepositories: {type: integer}
-            manifests: {type: integer}
-            added: {type: integer}
-            updated: {type: integer}
-            unchanged: {type: integer}
-            removed: {type: integer}
-            pending: {type: integer}
-            degraded: {type: integer}
-            referrers: {type: integer}
-            foreign:
-              type: array
-              description: Manifests under the repo's path that Lajstrom did not write; not indexed.
-              items:
-                type: object
-                required: [repository, tag, digest, mediaType]
-                properties:
-                  repository: {type: string}
-                  tag: {type: string}
-                  digest: {type: string}
-                  mediaType: {type: string}
-            errors: {type: array, items: {}}
-            truncated: {type: boolean}
-
     RepoStats:
       type: object
       required: [packages, versions, manifests, files, size, lastPushAt]

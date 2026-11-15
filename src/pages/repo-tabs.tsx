@@ -296,12 +296,10 @@ function ReindexRunView({ run }: { run: ReindexRun }) {
             </THead>
             <TBody>
               {r.foreign.map((f) => (
-                <TR key={f.digest}>
+                <TR key={`${f.repository}@${f.digest ?? f.tag}`}>
                   <TD className="font-mono text-xs">{f.repository}</TD>
                   <TD className="font-mono text-xs">{f.tag}</TD>
-                  <TD>
-                    <CopyText value={f.digest} display={shortDigest(f.digest)} label="digest" />
-                  </TD>
+                  <TD>{f.digest ? <CopyText value={f.digest} display={shortDigest(f.digest)} label="digest" /> : null}</TD>
                   <TD className="font-mono text-xs text-muted-foreground">{f.mediaType}</TD>
                 </TR>
               ))}

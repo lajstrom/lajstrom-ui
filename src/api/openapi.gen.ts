@@ -1,7 +1,7 @@
 // Generated from public/openapi.yaml by scripts/gen-api-types.ts. Do not edit: npm run gen:api.
 
 /** The commit of lajstrom/lajstrom whose /api/v1 these types describe. */
-export const serverApiCommit = "a49fac3ec3dfab43067c7e9812d9c968a5834e1e";
+export const serverApiCommit = "f0d887d5ebd9b34f49c9a1d528af6c6b60df2531";
 
 /**
  * components.schemas of the server's openapi.yaml with the UI's proposal; what the proposal adds
@@ -134,7 +134,7 @@ export type Schemas = {
   CreateRepo: {
     format: string;
     name: string;
-    /** Required but on a group */
+    /** Required but on a group, which has none. */
     registry?: string;
     kind?: "hosted" | "proxy" | "group";
     anonymousRead?: boolean;
@@ -189,61 +189,79 @@ export type Schemas = {
     error?: string;
     /**
      * The repo's part of the run's report; null while the run is running, and for a run of every
-     * repo that stopped before it reached the repo. The other fields of the report, as docs/api.md
-     * shows them (lajstrom/lajstrom#1128).
+     * repo that stopped before it reached the repo. Each list holds at most 1000 entries, after
+     * which truncated is true; the counts stay exact. In the report of a run of an earlier release,
+     * a count it did not write is 0 and a list it did not write null.
      */
     report: {
+      /** The repo, <format>/<name>. */
+      repo: string;
+      /** The OCI repositories under the repo's path. */
+      ociRepositories: number;
+      /** The tags read. */
+      manifests: number;
+      /** The rows written, of versions and journal entries, that the index did not have. */
+      added: number;
+      /** The rows read again, with verify or degraded, and written. */
+      updated: number;
+      /** The rows seen with the digest the index has. */
+      unchanged: number;
+      /** The rows removed, their manifests gone from the registry (prune). */
+      removed: number;
+      /**
+       * The rows whose manifest the registry answered unknown (prune), kept until it answers so
+       * twice at least 10 minutes apart and the row is reconcile.graceAge old
+       * (docs/spec/guarantees.md, INV-5).
+       */
+      pending: number;
       /**
        * The tags the registry still lists whose manifests were deleted through Lajstrom less than
        * reconcile.graceAge before the run, on a registry not classified strong: not indexed again.
-       * Absent from the report of a run of a release before it.
        */
-      deletedPending?: number;
+      deletedPending: number;
+      /** The versions written from their annotations, their metadata layer unreadable. */
+      degraded: number;
+      /** The referrers listed, each digest once. */
+      referrers: number;
+      /** The attachment rows of the versions seen or written. */
+      attachments: number;
+      /**
+       * The manifests under the repo's path that are not Lajstrom's: never indexed, never served.
+       */
+      foreign: Schemas["ReindexFinding"][];
+      /** The referrers whose subject no version has. */
+      orphanReferrers: Schemas["ReindexFinding"][];
+      /**
+       * The npm and pypi journal entries of an OCI repository without versions
+       * (docs/spec/manifest-profile.md §8): not indexed, adopted by the next append to the package.
+       */
+      orphanJournal: Schemas["ReindexFinding"][] | null;
+      /** The tags that name another digest in the registry than in the index. */
+      drift: Schemas["ReindexDrift"][];
+      /** The packages found at two forms of their OCI name (ADR 0017), one entry per other form. */
+      split: Schemas["ReindexSplit"][] | null;
+      /**
+       * The versions of the index whose OCI repository the registry does not know: prune keeps
+       * their rows, a delete through the API removes them.
+       */
+      repositoryUnknown: Schemas["ReindexRepositoryUnknown"][] | null;
       /**
        * The sha256-<hex> indexes that lacked referrers the audit log has as pushed and the registry
        * still has, or were missing, and that Lajstrom pushed again with them: runs of the reconcile
-       * loop and with verify, on a registry without the referrers API. null in the report of a run
-       * of a release before it.
+       * loop and with verify, on a registry without the referrers API.
        */
-      repairedReferrers?: Schemas["RepairedReferrersIndex"][] | null;
-      /** Proposed. */
-      repo?: string;
-      /** Proposed. */
-      ociRepositories?: number;
-      /** Proposed. */
-      manifests?: number;
-      /** Proposed. */
-      added?: number;
-      /** Proposed. */
-      updated?: number;
-      /** Proposed. */
-      unchanged?: number;
-      /** Proposed. */
-      removed?: number;
-      /** Proposed. */
-      pending?: number;
-      /** Proposed. */
-      degraded?: number;
-      /** Proposed. */
-      referrers?: number;
-      /** Proposed: Manifests under the repo's path that Lajstrom did not write; not indexed. */
-      foreign?: {
-        repository: string;
-        tag: string;
-        digest: string;
-        mediaType: string;
-      }[];
-      /** Proposed. */
-      errors?: unknown[];
-      /** Proposed. */
-      truncated?: boolean;
+      repairedReferrers: Schemas["RepairedReferrersIndex"][] | null;
+      /** What the run could not read, check or write, each with its error. */
+      errors: Schemas["ReindexFinding"][];
+      /** A list stopped at 1000 entries. */
+      truncated: boolean;
     } | null;
   };
   /**
    * A subject's sha256-<hex> index that a reindex run pushed again with the referrers it lacked.
    */
   RepairedReferrersIndex: {
-    /** The OCI repository of the subject */
+    /** The OCI repository of the subject, below the repo's base. */
     repository: string;
     subject: string;
     /** The digest of the index pushed. */
@@ -251,13 +269,76 @@ export type Schemas = {
     /** The referrers it lacked, in the order of their pushes. */
     added: string[];
   };
+  /** A manifest, or a failure, that a reindex report lists; a key without a value is left out. */
+  ReindexFinding: {
+    /** The OCI repository, below the repo's base; empty for a failure of the whole repo. */
+    repository: string;
+    tag?: string;
+    digest?: string;
+    mediaType?: string;
+    artifactType?: string;
+    /** The digest of a referrer's subject. */
+    subject?: string;
+    /** What failed (errors). */
+    error?: string;
+  };
+  /**
+   * A tag that names another digest in the registry than in the index; the index keeps its digest.
+   */
+  ReindexDrift: {
+    package: string;
+    tag: string;
+    /** The digest the index has. */
+    index: string;
+    /** The digest the registry's tag names. */
+    registry: string;
+  };
+  /**
+   * A package whose manifests are at two forms of its OCI name (ADR 0017): the index has the
+   * package at indexed; a run copies or moves nothing in the registry.
+   */
+  ReindexSplit: {
+    package: string;
+    /** The package's OCI name in the index, below the repo's base. */
+    indexed: string;
+    /** The tags of its versions in the index. */
+    indexedTags: string[];
+    /** The other form, below the repo's base. */
+    other: string;
+    /** The tags of the profile manifests at the other form. */
+    otherTags: string[];
+  };
+  /**
+   * A version of the index whose OCI repository the registry does not know: its tag does not
+   * resolve, its manifest by digest and the repository's tag list are a 404 without
+   * MANIFEST_UNKNOWN. The row stays until it is deleted through the API or the repository comes
+   * back; a run deletes nothing in the registry.
+   */
+  ReindexRepositoryUnknown: {
+    /** The OCI repository, below the repo's base. */
+    repository: string;
+    package: string;
+    version: string;
+    /** The variant of a version with variants. */
+    variant?: string;
+    tag: string;
+    digest: string;
+    /**
+     * The request that deletes the version's rows, the variant alone when it has one: DELETE
+     * /api/v1/repos/<format>/<name>/packages/<package>/versions/<version>, with ?variant=<variant>
+     * for a variant, the package and the version path-escaped.
+     */
+    delete: string;
+  };
   Token: {
     id: number;
     kind: "pat" | "deploy";
     /** The owner of a personal access token. */
     user?: string;
-    /** The <format>/<name> of a deploy token. */
+    /** The <format>/<name> of a deploy token of one repo. */
     repo?: string;
+    /** The mask of a deploy token over a mask, oci/* or *\/talos. */
+    repoMask?: string;
     name: string;
     scopes: ("read" | "write")[];
     expiresAt: string | null;
@@ -276,6 +357,15 @@ export type Schemas = {
   TokenRequest: {
     name: string;
     scopes?: ("read" | "write")[];
+    expiresAt?: string;
+    /** A number of days (30d) or a duration (12h). */
+    expiresIn?: string;
+  };
+  MaskTokenRequest: {
+    /** <format>/<repo>, each segment a name or * for any: oci/*, *\/talos. */
+    repoMask: string;
+    name: string;
+    scopes: ("read" | "write")[];
     expiresAt?: string;
     /** A number of days (30d) or a duration (12h). */
     expiresIn?: string;
@@ -419,7 +509,7 @@ export type Schemas = {
     /** Empty for a format without variants. */
     variant: string;
     tag: string;
-    /** The manifest digest */
+    /** The manifest digest, the entity tag of If-Match. */
     digest: string;
     publishedAt: string;
     /** Proposed: The manifest's artifact type (lajstrom/lajstrom#1132). */
@@ -480,7 +570,7 @@ export type Schemas = {
     layer: string;
     /** The layer's media type. */
     mediaType: string;
-    /** The referrer's artifactType */
+    /** The referrer's artifactType, else its config's media type. */
     artifactType: string;
     /** What it is; a value this list does not name is shown as it is. */
     kind: "signature" | "sbom" | "scan" | "provenance" | "attestation" | "other";
@@ -490,25 +580,26 @@ export type Schemas = {
     size: number;
     /** The referrer manifest's annotations. */
     annotations: Record<string, string>;
-    /** lajstrom.attachment.tool */
+    /** lajstrom.attachment.tool, when set. */
     tool?: string;
-    /** lajstrom.attachment.toolVersion */
+    /** lajstrom.attachment.toolVersion, when set. */
     toolVersion?: string;
-    /** lajstrom.attachment.database */
+    /** lajstrom.attachment.database, when set. */
     database?: string;
-    /** lajstrom.attachment.input */
+    /** lajstrom.attachment.input, the SBOM a scan was computed from, when it is a digest. */
     input?: string;
     /**
-     * verified (a trusted key signed it, for its predicate type, and what it signed names the
-     * variant), untrusted, unsigned, invalid or unsupported (keyless, notation, a message
-     * signature, a layer above attachments.maxBlobSize).
+     * verified (a trusted key or keyless identity signed it, for its predicate type, and what it
+     * signed names the variant), untrusted, unsigned, invalid or unsupported (keyless without
+     * attachments.keyless, cosign's legacy keyless layers, notation, a message signature, a layer
+     * above attachments.maxBlobSize).
      */
     verification: "verified" | "untrusted" | "unsigned" | "invalid" | "unsupported";
-    /** The name of the trust entry whose key verified it. */
+    /** The name of the key or keyless identity that verified it. */
     signedBy?: string;
     /** Why it is not verified. */
     reason?: string;
-    /** The referrer's org.opencontainers.image.created */
+    /** The referrer's org.opencontainers.image.created, when it has one. */
     createdAt?: string;
     /** When ingest or reindex last wrote or saw the row. */
     indexedAt: string;
@@ -576,7 +667,7 @@ export type Schemas = {
     package: string;
     version: string;
     status: "deleted" | "changed" | "protected" | "young" | "gone" | "error";
-    /** Why */
+    /** Why, for every status but deleted. */
     message?: string;
     /** The digests of the version now, for changed. */
     digests?: string[];
@@ -620,16 +711,16 @@ export type Schemas = {
     status: "fetched" | "held" | "shared" | "failed";
     /** For failed, the status a request of the file would have had. */
     httpStatus?: number;
-    /** Why */
+    /** Why, for failed. */
     message?: string;
     /**
      * Of an oci repo: what a reference names, an index or a manifest; a platform's manifest; a
      * blob. Absent for an image that failed before what it names was known.
      */
     kind?: "index" | "manifest" | "blob";
-    /** Of an oci repo */
+    /** Of an oci repo, the platform of a manifest or a blob of an index. */
     platform?: string;
-    /** Of an oci repo */
+    /** Of an oci repo, the digest of the index, manifest or blob. */
     digest?: string;
     /** Of an oci repo, what the request got from the upstream; a manifest's with its blobs. */
     bytes?: number;
@@ -678,6 +769,64 @@ export type Schemas = {
     uid?: string;
     /** Whether the request's credential reaches the admin role. */
     admin: boolean;
+  };
+  Webhook: {
+    id: number;
+    /** A repo mask of rbac.md §3, such as apt/ubuntu-internal, apt/* or *\/*. */
+    mask: string;
+    url: string;
+    /** The types it gets; empty, every type. */
+    events: ("version.published" | "version.deleted" | "repo.created" | "repo.deleted")[];
+    active: boolean;
+    description: string;
+    /** The principal that created it. */
+    createdBy: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+  CreatedWebhook: Schemas["Webhook"] & {
+    /** whsec_ and the base64 of the key: shown this once. */
+    secret: string;
+  };
+  WebhookList: {
+    webhooks: Schemas["Webhook"][];
+  };
+  /**
+   * Create: url is required, and under /api/v1/webhooks the mask too; active is true by default.
+   * Change: the fields given change; a mask is refused.
+   */
+  WebhookRequest: {
+    mask?: string;
+    url?: string;
+    events?: ("version.published" | "version.deleted" | "repo.created" | "repo.deleted")[];
+    active?: boolean;
+    description?: string;
+  };
+  WebhookSecret: {
+    /** Shown this once. */
+    secret: string;
+  };
+  Delivery: {
+    id: number;
+    /** The CloudEvents id, the same on every attempt. */
+    eventId: string;
+    eventType: string;
+    state: "pending" | "delivered" | "failed";
+    attempts: number;
+    /** When a pending delivery is due. */
+    nextAt?: string;
+    lastAt?: string;
+    /** The status of the last answer; absent when none came. */
+    lastStatus?: number;
+    /** Lajstrom's words, never the receiver's body. */
+    lastError?: string;
+    createdAt: string;
+    deliveredAt?: string;
+  };
+  DeliveryList: {
+    deliveries: Schemas["Delivery"][];
+    /** The cursor of the next page; absent on the last. */
+    next?: string;
   };
   /** Proposed. */
   RepoStats: {
