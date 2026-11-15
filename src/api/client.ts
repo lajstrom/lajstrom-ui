@@ -57,6 +57,8 @@ type RequestOptions = {
   signal?: AbortSignal;
   /** Overrides the session's bearer, for sign-in: Basic credentials or a token being checked. */
   authorization?: string;
+  /** Conditions of a request, such as If-Match. */
+  headers?: Record<string, string>;
 };
 
 async function request(method: string, path: string, opts: RequestOptions = {}): Promise<Response> {
@@ -67,7 +69,7 @@ async function request(method: string, path: string, opts: RequestOptions = {}):
     else url.searchParams.set(k, String(v));
   }
   const session = opts.authorization === undefined ? getSession() : null;
-  const headers: Record<string, string> = { Accept: "application/json" };
+  const headers: Record<string, string> = { Accept: "application/json", ...opts.headers };
   const authorization = opts.authorization ?? (session ? `Bearer ${session.token}` : undefined);
   if (authorization) headers.Authorization = authorization;
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
@@ -113,7 +115,7 @@ export async function apiGet<T>(path: string, query?: Query, signal?: AbortSigna
 
 /** A request that changes something; resolves to the JSON answer, or undefined for 204. */
 export async function apiSend<T = undefined>(
-  method: "POST" | "PATCH" | "DELETE",
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   opts: Omit<RequestOptions, "signal"> = {},
 ): Promise<T> {

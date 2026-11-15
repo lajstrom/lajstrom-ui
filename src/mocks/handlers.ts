@@ -55,6 +55,7 @@ function answered(resolver: Resolver): Resolver {
 
 const get = (path: string, resolver: Resolver) => http.get(path, answered(resolver));
 const post = (path: string, resolver: Resolver) => http.post(path, answered(resolver));
+const put = (path: string, resolver: Resolver) => http.put(path, answered(resolver));
 const del = (path: string, resolver: Resolver) => http.delete(path, answered(resolver));
 const patch = (path: string, resolver: Resolver) => http.patch(path, answered(resolver));
 
@@ -175,6 +176,57 @@ export const handlers = [
     const variant = new URL(request.url).searchParams.get("variant");
     const v = db.getVersion(repo, decode(params.name), decode(params.version), variant);
     return v ? HttpResponse.json(v) : fail(404, "NOT_FOUND", `version ${decode(params.version)} of ${decode(params.name)} not found in ${repo.prefix}`);
+  }),
+
+  del("*/api/v1/repos/:format/:repo/packages/:name/versions/:version", async ({ params, request }) => {
+    const repo = repoFor(params, "delete");
+    if (repo instanceof Response) return repo;
+    const sp = new URL(request.url).searchParams;
+    const refused = db.deleteVersion(
+      repo,
+      decode(params.name),
+      decode(params.version),
+      {
+        variant: sp.get("variant"),
+        force: sp.get("force") === "true",
+        ifMatch: request.headers.get("If-Match"),
+        ifUnmodifiedSince: request.headers.get("If-Unmodified-Since"),
+      },
+      `user:${getPersona()}`,
+    );
+    return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
+  }),
+
+  // The colon of the custom method is escaped: unescaped, it would start a parameter.
+  post("*/api/v1/repos/:format/:repo/versions\\:delete", async ({ params, request }) => {
+    const repo = repoFor(params, "delete");
+    if (repo instanceof Response) return repo;
+    const result = db.deleteVersions(repo, await body(request), `user:${getPersona()}`);
+    return "status" in result ? refusal(result) : HttpResponse.json(result);
+  }),
+
+  put("*/api/v1/repos/:format/:repo/packages/:name/versions/:version/yank", async ({ params, request }) => {
+    const repo = repoFor(params, "write");
+    if (repo instanceof Response) return repo;
+    if (new URL(request.url).searchParams.has("variant")) return fail(400, "INVALID", "a yank is of the whole version: no ?variant=");
+    // The body is optional: none, {} or a reason that is null or "" yank without a reason.
+    const b = await body(request);
+    if (b !== null && (typeof b !== "object" || Array.isArray(b))) return fail(400, "INVALID", "the body is a JSON object");
+    const fields = (b ?? {}) as Record<string, unknown>;
+    const extra = Object.keys(fields).find((k) => k !== "reason");
+    if (extra) return fail(400, "INVALID", `unknown field ${extra}`);
+    const reason = fields.reason ?? "";
+    if (typeof reason !== "string") return fail(400, "INVALID", "reason: a string or null");
+    if (new TextEncoder().encode(reason).length > 4096) return fail(400, "INVALID", "reason: at most 4096 bytes");
+    const refused = db.yankVersion(repo, decode(params.name), decode(params.version), reason, `user:${getPersona()}`);
+    return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
+  }),
+
+  del("*/api/v1/repos/:format/:repo/packages/:name/versions/:version/yank", async ({ params }) => {
+    const repo = repoFor(params, "write");
+    if (repo instanceof Response) return repo;
+    const refused = db.yankVersion(repo, decode(params.name), decode(params.version), null, `user:${getPersona()}`);
+    return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
   }),
 
   get("*/api/v1/repos/:format/:repo/packages/:name/versions/:version/attachments", async ({ params, request }) => {

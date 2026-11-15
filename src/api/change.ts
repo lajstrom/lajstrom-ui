@@ -21,11 +21,17 @@ export function realistic(...queryKeys: QueryKey[]) {
   };
 }
 
-type Change = { apply: (data: unknown) => unknown };
+/** One query's data as a change makes it (update). */
+export type Update = { queryKey: QueryKey; apply: (data: unknown) => unknown };
+
+/** What a change does to the data of one query; a query without data stays without. */
+export function update<TData>(queryKey: QueryKey, apply: (data: TData) => TData): Update {
+  return { queryKey, apply: (data) => (data === undefined ? data : apply(data as TData)) };
+}
 
 /** The optimistic changes of one query's data: the data before the first of them, the changes
  * since then in their order, and how many are still in flight. */
-type InFlight = { before: unknown; changes: Change[]; pending: number };
+type InFlight = { before: unknown; changes: Update[]; pending: number };
 
 const inFlight = new WeakMap<QueryClient, Map<string, InFlight>>();
 
@@ -35,52 +41,59 @@ function queriesOf(client: QueryClient): Map<string, InFlight> {
   return queries;
 }
 
-type OptimisticOptions<TData, TVariables> = {
-  /** The query whose data shows the change. */
-  queryKey: QueryKey;
-  /** The data as the server will have it once it has made the change. */
-  apply: (data: TData, variables: TVariables) => TData;
+type OptimisticOptions<TVariables> = {
+  /** What the change does to each query that shows it: the list, and the page of the thing. */
+  updates: (variables: TVariables) => Update[];
   /** The change, for the notice of a refusal: "Revoke laptop". */
   describe: (variables: TVariables) => string;
 };
 
 /**
- * The callbacks of an optimistic change: cancel the query's fetches and apply the change to its
- * data at once. When the server refuses it, the data goes back to what it was with the other
- * changes still applied, so that two changes of one list in flight do not undo each other, and a
- * notice says so. When the last change of the query settles, the query is fetched again.
+ * The callbacks of an optimistic change: cancel the fetches of the queries that show it and apply
+ * the change to their data at once. When the server refuses it, each query's data goes back to
+ * what it was with the other changes still applied, so that two changes of one list in flight do
+ * not undo each other, and a notice says so. When the last change of a query settles, the query
+ * is fetched again.
  */
-export function optimistic<TData, TVariables>({ queryKey, apply, describe }: OptimisticOptions<TData, TVariables>) {
-  const key = hashKey(queryKey);
+export function optimistic<TVariables>({ updates, describe }: OptimisticOptions<TVariables>) {
   return {
-    onMutate: async (variables: TVariables, { client }: MutationFunctionContext): Promise<Change> => {
-      await client.cancelQueries({ queryKey });
+    onMutate: async (variables: TVariables, { client }: MutationFunctionContext): Promise<Update[]> => {
+      const changes = updates(variables);
+      // Exact keys: a query below one, such as a version's attachments, goes on loading.
+      await Promise.all(changes.map(({ queryKey }) => client.cancelQueries({ queryKey, exact: true })));
       const queries = queriesOf(client);
-      const state = queries.get(key) ?? { before: client.getQueryData(queryKey), changes: [], pending: 0 };
-      queries.set(key, state);
-      const change: Change = { apply: (data) => (data === undefined ? data : apply(data as TData, variables)) };
-      state.changes.push(change);
-      state.pending++;
-      client.setQueryData(queryKey, change.apply);
-      return change;
+      for (const change of changes) {
+        const key = hashKey(change.queryKey);
+        const state = queries.get(key) ?? { before: client.getQueryData(change.queryKey), changes: [], pending: 0 };
+        queries.set(key, state);
+        state.changes.push(change);
+        state.pending++;
+        client.setQueryData(change.queryKey, change.apply);
+      }
+      return changes;
     },
-    onError: (error: Error, variables: TVariables, change: Change | undefined, { client }: MutationFunctionContext) => {
-      const state = queriesOf(client).get(key);
-      if (state && change) {
+    onError: (error: Error, variables: TVariables, changes: Update[] | undefined, { client }: MutationFunctionContext) => {
+      for (const change of changes ?? []) {
+        const state = queriesOf(client).get(hashKey(change.queryKey));
+        if (!state) continue;
         state.changes = state.changes.filter((c) => c !== change);
         client.setQueryData(
-          queryKey,
+          change.queryKey,
           state.changes.reduce((data, c) => c.apply(data), state.before),
         );
       }
       notify({ tone: "danger", title: `${describe(variables)}: refused`, description: errorText(error) });
     },
-    onSettled: async (_data: unknown, _error: Error | null, _variables: TVariables, change: Change | undefined, { client }: MutationFunctionContext) => {
+    onSettled: async (_data: unknown, _error: Error | null, _variables: TVariables, changes: Update[] | undefined, { client }: MutationFunctionContext) => {
       const queries = queriesOf(client);
-      const state = queries.get(key);
-      if (!state || !change || --state.pending > 0) return;
-      queries.delete(key);
-      await client.invalidateQueries({ queryKey });
+      const settled = (changes ?? []).filter((change) => {
+        const key = hashKey(change.queryKey);
+        const state = queries.get(key);
+        if (!state || --state.pending > 0) return false;
+        queries.delete(key);
+        return true;
+      });
+      await Promise.all(settled.map(({ queryKey }) => client.invalidateQueries({ queryKey, exact: true })));
     },
   };
 }

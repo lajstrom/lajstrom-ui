@@ -93,6 +93,16 @@ export type VariantDetail = Schemas["VariantDetail"];
 /** GET …/packages/{name}/versions/{version}: one version with every variant in detail. */
 export type VersionDetail = Schemas["VersionDetail"];
 
+/** The yank of a pypi version (PEP 592), absent when it is not yanked. */
+export type Yank = Schemas["Yank"];
+
+export type BatchDeleteRequest = Schemas["BatchDeleteRequest"];
+
+/** What POST …/versions:delete did with each item, in the order of the request. */
+export type BatchDeleteResult = Schemas["BatchDeleteResult"];
+
+export type BatchDeleteItemResult = Schemas["BatchDeleteItemResult"];
+
 /** An attachment of a version: one layer of a referrer of one of its variants, labelled. */
 export type Attachment = Schemas["Attachment"];
 

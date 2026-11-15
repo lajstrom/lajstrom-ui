@@ -47,10 +47,11 @@ until it is closed, and may carry an action such as Undo.
 **How.** `src/api/change.ts` holds both modes as callbacks of `useMutation`:
 
 - `realistic(...queryKeys)` fetches the queries again once the server has answered.
-- `optimistic({ queryKey, apply, describe })` cancels the query's fetches, applies the change to
-  its cached data, and, on a refusal, puts back the data as it was before the first change in
+- `optimistic({ updates, describe })` cancels the fetches of the queries that show the change
+  (`update(queryKey, apply)` for each: a list, the page of the thing), applies the change to their
+  cached data, and, on a refusal, puts back each one's data as it was before the first change in
   flight with the other changes applied again, so that two changes of one list do not undo each
-  other. When the last change of the query settles, the query is fetched again.
+  other. When the last change of a query settles, the query is fetched again.
 - `useChanges(mutationKey, id)` gives each thing's last change, pending or refused, for the row
   or the button that shows it.
 

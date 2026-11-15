@@ -1,13 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { AlertTriangle, Info, Package as PackageIcon } from "lucide-react";
-import { useMemo } from "react";
+import { AlertTriangle, Info, Package as PackageIcon, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
 
 import { infoQuery, packageQuery, repoQuery, versionQuery, versionsQuery } from "@/api/queries";
 import type { Repo } from "@/api/types";
 import { ErrorState, FormatMark, PageHeader, Principal, RelativeTime, SignedBadge } from "@/components/common";
 import { SnippetTabs } from "@/components/snippets";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { CopyText } from "@/components/ui/code-block";
 import { Properties, Property, Skeleton } from "@/components/ui/misc";
@@ -21,6 +22,8 @@ import { variantShort } from "@/lib/variants";
 import { MetadataRows } from "./metadata";
 import { derivePackage, groupVersions, packageCrumbs, type PackageInfo, type VersionGroup } from "./package-model";
 import { VersionPage } from "./version";
+import { deletes } from "./version-changes";
+import { DeleteVersionsDialog } from "./version-dialogs";
 
 /** /$format/$repo/<package name>[/-/<version>]: the splat keeps raw paths and maven coordinates whole. */
 export function PackageRoute() {
@@ -50,6 +53,11 @@ function PackagePage({ format, repoName, name }: { format: string; repoName: str
   const p: PackageInfo | undefined =
     pkg.data ?? (derived && versions.data ? derivePackage(format, repoName, name, versions.data, latest.data, spec) : undefined);
   const failed = pkg.isError ? pkg.error : derived && versions.isError ? versions.error : null;
+  // The versions ticked for a batch delete; a version gone from the list is not one any more.
+  const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+  const selected = groups.filter((g) => ticked.has(g.version));
+  const selectable = repo.data !== undefined && deletes(repo.data);
 
   if (failed) {
     return (
@@ -95,6 +103,14 @@ function PackagePage({ format, repoName, name }: { format: string; repoName: str
         <Card className="min-w-0 self-start">
           <CardHeader
             title="Versions"
+            actions={
+              selectable && selected.length ? (
+                <Button size="sm" onClick={() => setDeleting(true)}>
+                  <Trash2 />
+                  Delete {pluralize(selected.length, "version")}
+                </Button>
+              ) : null
+            }
             description={
               versions.data
                 ? `${pluralize(groups.length, "version")}${spec.variantLabel ? `, ${pluralize(groups.reduce((n, g) => n + g.variants.length, 0), "manifest")} (one per ${spec.variantLabel.toLowerCase()})` : ""} · tags are immutable`
@@ -110,9 +126,37 @@ function PackagePage({ format, repoName, name }: { format: string; repoName: str
               ))}
             </div>
           ) : (
-            <VersionsTable format={format} repo={repoName} name={name} spec={spec} groups={groups} />
+            <VersionsTable
+              format={format}
+              repo={repoName}
+              name={name}
+              spec={spec}
+              groups={groups}
+              ticked={selectable ? ticked : undefined}
+              onTick={(versions, on) =>
+                setTicked((prev) => {
+                  const next = new Set(prev);
+                  for (const v of versions) {
+                    if (on) next.add(v);
+                    else next.delete(v);
+                  }
+                  return next;
+                })
+              }
+            />
           )}
         </Card>
+
+        {deleting && repo.data ? (
+          <DeleteVersionsDialog
+            repo={repo.data}
+            name={name}
+            groups={selected}
+            total={groups.length}
+            onClose={() => setDeleting(false)}
+            onDeleted={() => setTicked(new Set())}
+          />
+        ) : null}
 
         <aside className="min-w-0 space-y-4">
           {repo.data && p ? <InstallCard repo={repo.data} pkg={p} spec={spec} /> : <Skeleton className="h-40" />}
@@ -130,12 +174,17 @@ function VersionsTable({
   name,
   spec,
   groups,
+  ticked,
+  onTick,
 }: {
   format: string;
   repo: string;
   name: string;
   spec: FormatSpec;
   groups: VersionGroup[];
+  /** The versions ticked for a batch delete; no boxes without it. */
+  ticked?: ReadonlySet<string>;
+  onTick: (versions: string[], on: boolean) => void;
 }) {
   const navigate = useNavigate();
   const isRaw = format === "raw";
@@ -151,6 +200,17 @@ function VersionsTable({
     <Table>
       <THead>
         <TR>
+          {ticked ? (
+            <TH className="w-0 pr-0">
+              <input
+                type="checkbox"
+                aria-label="Select every version"
+                className="size-4 cursor-pointer align-middle accent-primary"
+                checked={groups.length > 0 && groups.every((g) => ticked.has(g.version))}
+                onChange={(e) => onTick(groups.map((g) => g.version), e.target.checked)}
+              />
+            </TH>
+          ) : null}
           <TH>Version</TH>
           {spec.variantLabel ? <TH>{spec.variantLabel}</TH> : null}
           {format === "apt" ? <TH>Suite</TH> : null}
@@ -165,10 +225,21 @@ function VersionsTable({
             key={g.version}
             className="cursor-pointer transition-colors hover:bg-surface"
             onClick={(e) => {
-              if ((e.target as HTMLElement).closest("a,button")) return;
+              if ((e.target as HTMLElement).closest("a,button,input")) return;
               open(g);
             }}
           >
+            {ticked ? (
+              <TD className="w-0 pr-0">
+                <input
+                  type="checkbox"
+                  aria-label={`Select ${g.version}`}
+                  className="size-4 cursor-pointer align-middle accent-primary"
+                  checked={ticked.has(g.version)}
+                  onChange={(e) => onTick([g.version], e.target.checked)}
+                />
+              </TD>
+            ) : null}
             <TD>
               <div className="flex items-center gap-2">
                 <Link
