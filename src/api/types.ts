@@ -1,11 +1,10 @@
-// Types of the /api/v1 JSON the UI reads. Where the server has a resource, its type is the
-// server's: src/api/server.gen.ts, generated from the server's openapi.yaml as vendored in
-// openapi/server.yaml (npm run update:openapi). The rest are written here: endpoints and fields
-// marked "proposed" are not in the server yet; docs/api-proposal.md describes them, and the UI
-// shows them only when they are there. Field names follow the index models
-// (internal/index/models.go) in camelCase.
+// Types of the /api/v1 JSON the UI reads, named for the UI. They are those of
+// src/api/openapi.gen.ts, generated from public/openapi.yaml: the server's openapi.yaml as
+// vendored in openapi/server.yaml (npm run update:openapi), with what the UI proposes from
+// openapi/proposed.yaml. A proposed endpoint or field is not in the server yet;
+// docs/api-proposal.md describes them, and the UI shows them only when they are there.
 
-import type { Schemas } from "./server.gen";
+import type { Schemas } from "./openapi.gen";
 
 /** The formats the UI has a spec for (src/lib/formats). */
 export type FormatName = "raw" | "pypi" | "apt" | "maven";
@@ -36,202 +35,79 @@ export type WhoAmI = Schemas["Whoami"];
 /** repos.policy, with the keys the server reads; an absent key takes its default. */
 export type RepoPolicy = Schemas["Policy"];
 
-/** Reindex and reconcile status of a repo (the plan's `reindex: {state, started, done, errors}`). */
-export type ReindexStatus = {
-  state: "idle" | "running" | "failed";
-  startedAt: string | null;
-  finishedAt: string | null;
-  errors: number;
-  /** Next scheduled reconcile (reconcile.interval, default 1h); null when disabled. */
-  nextReconcileAt: string | null;
-};
+/** Reindex and reconcile state of a repo (proposed). */
+export type ReindexStatus = Schemas["ReindexStatus"];
 
 /** The repo's OpenPGP signing key for apt; retired keys are still served for a while. */
-export type SigningKey = {
-  algorithm: "ed25519" | "rsa4096";
-  fingerprint: string;
-  createdAt: string;
-  retiredAt: string | null;
-};
+export type SigningKey = Schemas["SigningKey"];
 
-export type RepoStats = {
-  packages: number;
-  /** Distinct (package, version) pairs. */
-  versions: number;
-  /** Manifests: one per (package, version, variant). */
-  manifests: number;
-  files: number;
-  size: number;
-  lastPushAt: string | null;
-};
+export type RepoStats = Schemas["RepoStats"];
 
-/** A repo as GET /api/v1/repos answers it, plus `prefix`, which the UI derives, and the
- * proposed fields of api-proposal.md §3.2 (lajstrom/lajstrom#957). A group has no registry and
- * no policy; a proxy has its upstream, a group its members. */
+/** A repo as GET /api/v1/repos answers it, with the proposed fields of lajstrom/lajstrom#957
+ * (stats, permissions, reindex, signingKeys), plus `prefix`, which the UI derives. A group has
+ * no registry and no policy; a proxy has its upstream, a group its members. Without
+ * `permissions` the UI offers the actions and the server decides (src/lib/access.ts). */
 export type Repo = Schemas["Repo"] & {
   /** <format>/<name>: the repo's path on every protocol and its OCI path below the instance
    * prefix. Not in the answer: src/api/queries.ts derives it. */
   prefix: string;
-  /** Proposed: derived counts. */
-  stats?: RepoStats;
-  /** Proposed: what the caller may do here (rbac.md §2). Absent: the UI offers the actions and
-   * the server decides (src/lib/access.ts). */
-  permissions?: Action[];
-  /** Proposed: reindex and reconcile status. */
-  reindex?: ReindexStatus;
-  /** Proposed, apt only: current key first, then retired ones. */
-  signingKeys?: SigningKey[];
 };
 
 /** A directory of a raw repo, for browsing paths like a file tree. */
-export type RawDirectory = { name: string; path: string; files: number; size: number; updatedAt: string };
+export type RawDirectory = Schemas["RawDirectory"];
 
 /** One value of a filter facet with its count: suite "jammy" (12). */
-export type FacetValue = { value: string; count: number };
+export type FacetValue = Schemas["FacetValue"];
 
-/** What api-proposal.md §3.3 adds to a package of the list (lajstrom/lajstrom#955, #957); the
- * server answers name and createdAt only. */
-export type PackageFacts = {
-  /** Escaped package path (Plugin.EscapeName). */
-  nameOci: string;
-  latestVersion: string | null;
-  /** Distinct versions. */
-  versions: number;
-  /** Manifests (versions × variants). */
-  manifests: number;
-  /** Variants of the latest version: amd64, arm64; py3-none-any, sdist. */
-  latestVariants: string[];
-  size: number;
-  /** One line from the metadata layer: pypi summary, deb description, maven name. */
-  summary: string | null;
-  /** Format attributes of the latest version without "lajstrom.": deb.suite, maven.packaging, … */
-  attrs: Record<string, string>;
-  updatedAt: string;
-};
-
-/** A row of GET …/packages: the server's, and the proposed facts when the answer has them. */
-export type PackageSummary = Schemas["Package"] & Partial<PackageFacts>;
+/** A row of GET …/packages: the server's name and createdAt, and the proposed facts of
+ * lajstrom/lajstrom#955 when the answer has them. */
+export type PackageSummary = Schemas["Package"];
 
 /** GET …/packages: a page ordered by name, with the server's cursor. `facets` and `directories`
- * are proposed (lajstrom/lajstrom#955); an answer with facets takes the proposed filters too. */
-export type PackageList = Omit<Schemas["PackageList"], "packages"> & {
-  packages: PackageSummary[];
-  /** Filter values over the whole repo, by attribute key (deb.suite, deb.component, …). */
-  facets?: Record<string, FacetValue[]>;
-  /** raw with ?dir=: the subdirectories of dir (packages then holds the files directly in it). */
-  directories?: RawDirectory[];
-};
+ * are proposed; an answer with facets takes the proposed filters too. */
+export type PackageList = Schemas["PackageList"];
 
 /** GET …/packages/{name} (proposed, lajstrom/lajstrom#958); the package page derives it from the
  * versions when the server does not have it (src/pages/package-model.ts). */
-export type PackageDetail = Schemas["Package"] &
-  PackageFacts & {
-    /** <format>/<repo>/<nameOci>, the OCI repository below the instance prefix. */
-    ociRepository: string;
-    /** The metadata layer of the newest manifest. */
-    latestMetadata: Record<string, unknown> | null;
-  };
+export type PackageDetail = Schemas["PackageDetail"];
 
-export type ReferrerCounts = { signatures: number; sboms: number; attestations: number };
+export type ReferrerCounts = Schemas["ReferrerCounts"];
 
-/** What api-proposal.md §3.4 adds to a variant of the version list; the server answers its tag,
- * digest and publish time only. */
-export type VariantFacts = {
-  artifactType: string;
-  /** The manifest's lajstrom.* annotations by their full key, as VariantDetail has them. */
-  attrs: Record<string, string>;
-  size: number;
-  fileCount: number;
-  /** The metadata layer is missing or unreadable: indexed from annotations only. */
-  degraded: boolean;
-  referrers: ReferrerCounts;
-};
-
-export type VariantSummary = Schemas["Variant"] & Partial<VariantFacts>;
+/** A variant of the version list: its tag, digest and publish time, and the proposed facts
+ * when the answer has them. */
+export type VariantSummary = Schemas["Variant"];
 
 /** A version of GET …/packages/{name}/versions, newest first, with its variants. */
-export type VersionSummary = Omit<Schemas["Version"], "variants"> & { variants: VariantSummary[] };
+export type VersionSummary = Schemas["Version"];
 
 export type FileEntry = Schemas["File"];
 
-export type OciDescriptor = {
-  mediaType: string;
-  digest: string;
-  size: number;
-  annotations?: Record<string, string>;
-};
+export type OciDescriptor = Schemas["OciDescriptor"];
 
-export type OciManifest = {
-  schemaVersion: 2;
-  mediaType: string;
-  artifactType: string;
-  config: OciDescriptor;
-  layers: OciDescriptor[];
-  annotations: Record<string, string>;
-};
+export type OciManifest = Schemas["OciManifest"];
 
 /** One variant of GET …/versions/{version}; the manifest and its annotations are proposed
  * (lajstrom/lajstrom#951): the server reads them from the registry on /v2. */
-export type VariantDetail = Schemas["VariantDetail"] & { annotations?: Record<string, string>; manifest?: OciManifest };
+export type VariantDetail = Schemas["VariantDetail"];
 
 /** GET …/packages/{name}/versions/{version}: one version with every variant in detail. */
-export type VersionDetail = Omit<Schemas["VersionDetail"], "variants"> & { variants: VariantDetail[] };
+export type VersionDetail = Schemas["VersionDetail"];
 
 /** An attachment of a version: one layer of a referrer of one of its variants, labelled. */
 export type Attachment = Schemas["Attachment"];
 
 export type AttachmentList = Schemas["AttachmentList"];
 
-export type SearchHit =
-  | {
-      kind: "package";
-      format: FormatName;
-      repo: string;
-      name: string;
-      latestVersion: string | null;
-      summary: string | null;
-      updatedAt: string;
-    }
-  | {
-      kind: "version";
-      format: FormatName;
-      repo: string;
-      name: string;
-      version: string;
-      variant: string;
-      digest: string;
-      /** What matched: "manifest" or the file name whose layer digest matched. */
-      matched: string;
-    };
+export type SearchHit = Schemas["SearchHit"];
 
 /** GET /api/v1/search?q= (proposed). A sha256 digest finds manifests and files. */
-export type SearchResult = { hits: SearchHit[]; total: number };
-
-/** provider.Capabilities (internal/provider/provider.go). */
-export type Capabilities = {
-  createOnPush: boolean;
-  referrers: boolean;
-  catalog: boolean;
-  deleteManifest: boolean;
-  immutableTags: boolean;
-  blobRedirect: boolean;
-  maxBlobSize: number;
-};
+export type SearchResult = Schemas["SearchResult"];
 
 /** GET /api/v1/registries (proposed; system resource, admin only). */
-export type Registry = {
-  name: string;
-  type: "generic" | "ecr";
-  /** Detected product, from the spike results (docs/registries/). */
-  product: string;
-  url: string;
-  prefix: string;
-  capabilities: Capabilities;
-  /** Support tier: tested in CI, tested manually, untested. */
-  support: "ci" | "manual" | "untested";
-  status: { state: "ok" | "degraded" | "down"; checkedAt: string; latencyMs: number | null; message: string | null };
-  repos: string[];
-};
+export type Registry = Schemas["Registry"];
+
+/** provider.Capabilities (internal/provider/provider.go). */
+export type Capabilities = Registry["capabilities"];
 
 export type AuditEvent = Schemas["AuditEntry"];
 
@@ -257,36 +133,13 @@ export type TokenRequest = Schemas["TokenRequest"];
  * user's name now. */
 export type Binding = Schemas["Binding"];
 
-/** An open publication session: maven deploys file by file until maven-metadata.xml. */
-export type PublishSession = {
-  id: number;
-  key: string; // g:a:v
-  principal: string;
-  state: "open" | "committed" | "aborted" | "expired";
-  files: { name: string; size: number; digest: string }[];
-  createdAt: string;
-  updatedAt: string;
-  expiresAt: string;
-};
+/** An open publication session (proposed): maven deploys file by file until
+ * maven-metadata.xml. */
+export type PublishSession = Schemas["PublishSession"];
 
 /** GET …/repos/{format}/{repo}/reindex: the latest run that covered the repo. */
-export type ReindexRun = Omit<Schemas["ReindexRun"], "report"> & { report: ReindexReport | null };
+export type ReindexRun = Schemas["ReindexRun"];
 
 /** The repo's part of a run's report. The server's openapi.yaml names two of its fields; the
- * others are those docs/api.md shows (Reindex), optional until the description has them. */
-export type ReindexReport = NonNullable<Schemas["ReindexRun"]["report"]> & {
-  repo?: string;
-  ociRepositories?: number;
-  manifests?: number;
-  added?: number;
-  updated?: number;
-  unchanged?: number;
-  removed?: number;
-  pending?: number;
-  degraded?: number;
-  referrers?: number;
-  /** Manifests under the repo's path that Lajstrom did not write: not indexed. */
-  foreign?: { repository: string; tag: string; digest: string; mediaType: string }[];
-  errors?: unknown[];
-  truncated?: boolean;
-};
+ * others, proposed, are those docs/api.md shows (lajstrom/lajstrom#1128). */
+export type ReindexReport = NonNullable<ReindexRun["report"]>;

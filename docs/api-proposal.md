@@ -4,9 +4,9 @@
 - Shapes: [`openapi/proposed.yaml`](../openapi/proposed.yaml), additions to the server's OpenAPI
   description. `npm run gen:api` merges the two into [`public/openapi.yaml`](../public/openapi.yaml),
   where each addition is marked `x-lajstrom-status: proposed`: the API page of the demo shows it.
-- Implemented by: the mock in [`src/mocks/`](../src/mocks/); the types in
-  [`src/api/types.ts`](../src/api/types.ts), where the proposed fields are optional on top of the
-  server's types.
+- Implemented by: the mock in [`src/mocks/`](../src/mocks/). The UI's types are generated from
+  the merged spec (`src/api/openapi.gen.ts`), so a proposed field is optional on a server's
+  schema, as the UI must treat it.
 - Related: [ADR 0001](adr/0001-web-ui-in-its-own-repository.md); lajstrom/lajstrom#70, the UI.
 
 ## 1. Why

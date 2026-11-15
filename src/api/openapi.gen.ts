@@ -1,9 +1,12 @@
-// Generated from openapi/server.yaml by scripts/gen-api-types.ts. Do not edit: npm run gen:api.
+// Generated from public/openapi.yaml by scripts/gen-api-types.ts. Do not edit: npm run gen:api.
 
 /** The commit of lajstrom/lajstrom whose /api/v1 these types describe. */
 export const serverApiCommit = "a49fac3ec3dfab43067c7e9812d9c968a5834e1e";
 
-/** components.schemas of the server's openapi.yaml; src/api/types.ts names them for the UI. */
+/**
+ * components.schemas of the server's openapi.yaml with the UI's proposal; what the proposal adds
+ * starts with "Proposed:". src/api/types.ts names them for the UI.
+ */
 export type Schemas = {
   Error: {
     error: {
@@ -29,6 +32,17 @@ export type Schemas = {
     group?: Schemas["Group"];
     createdAt: string;
     updatedAt: string;
+    /** Proposed: Counts over the index (lajstrom/lajstrom#957). */
+    stats?: Schemas["RepoStats"];
+    /** Proposed: What the caller may do on the repo, rbac.md §2 (lajstrom/lajstrom#957). */
+    permissions?: ("read" | "write" | "delete" | "manage")[];
+    /** Proposed: Reindex and reconcile state (lajstrom/lajstrom#957). */
+    reindex?: Schemas["ReindexStatus"];
+    /**
+     * Proposed: An apt repo only, the current key first, then the retired ones
+     * (lajstrom/lajstrom#957).
+     */
+    signingKeys?: Schemas["SigningKey"][];
   };
   /**
    * A group's settings (docs/spec/proxy-and-group.md §2.3): its members, read in order, and the
@@ -175,7 +189,8 @@ export type Schemas = {
     error?: string;
     /**
      * The repo's part of the run's report; null while the run is running, and for a run of every
-     * repo that stopped before it reached the repo.
+     * repo that stopped before it reached the repo. The other fields of the report, as docs/api.md
+     * shows them (lajstrom/lajstrom#1128).
      */
     report: {
       /**
@@ -191,6 +206,37 @@ export type Schemas = {
        * of a release before it.
        */
       repairedReferrers?: Schemas["RepairedReferrersIndex"][] | null;
+      /** Proposed. */
+      repo?: string;
+      /** Proposed. */
+      ociRepositories?: number;
+      /** Proposed. */
+      manifests?: number;
+      /** Proposed. */
+      added?: number;
+      /** Proposed. */
+      updated?: number;
+      /** Proposed. */
+      unchanged?: number;
+      /** Proposed. */
+      removed?: number;
+      /** Proposed. */
+      pending?: number;
+      /** Proposed. */
+      degraded?: number;
+      /** Proposed. */
+      referrers?: number;
+      /** Proposed: Manifests under the repo's path that Lajstrom did not write; not indexed. */
+      foreign?: {
+        repository: string;
+        tag: string;
+        digest: string;
+        mediaType: string;
+      }[];
+      /** Proposed. */
+      errors?: unknown[];
+      /** Proposed. */
+      truncated?: boolean;
     } | null;
   };
   /**
@@ -313,10 +359,38 @@ export type Schemas = {
     name: string;
     /** The publish time of its first version. */
     createdAt: string;
+    /** Proposed: The escaped package path (lajstrom/lajstrom#955). */
+    nameOci?: string;
+    /** Proposed. */
+    latestVersion?: string | null;
+    /** Proposed: Distinct versions. */
+    versions?: number;
+    /** Proposed: Versions times variants. */
+    manifests?: number;
+    /** Proposed: The variants of the latest version. */
+    latestVariants?: string[];
+    /** Proposed. */
+    size?: number;
+    /**
+     * Proposed: One line from the metadata layer: pypi summary, deb Description, maven name
+     * (lajstrom/lajstrom#954).
+     */
+    summary?: string | null;
+    /** Proposed: The format attributes of the latest version without lajstrom., deb.suite. */
+    attrs?: Record<string, string>;
+    /** Proposed. */
+    updatedAt?: string;
   };
   PackageList: {
     packages: Schemas["Package"][];
     next?: string;
+    /**
+     * Proposed: The values of the format's filter keys over the whole repo, with package counts; an
+     * answer with facets takes attr, sort, order and dir (lajstrom/lajstrom#955).
+     */
+    facets?: Record<string, Schemas["FacetValue"][]>;
+    /** Proposed: A raw repo with dir only, the subdirectories of dir. */
+    directories?: Schemas["RawDirectory"][];
   };
   Version: {
     version: string;
@@ -348,6 +422,20 @@ export type Schemas = {
     /** The manifest digest */
     digest: string;
     publishedAt: string;
+    /** Proposed. */
+    artifactType?: string;
+    /**
+     * Proposed: The manifest's lajstrom.* annotations by their full key, as VariantDetail has them.
+     */
+    attrs?: Record<string, string>;
+    /** Proposed. */
+    size?: number;
+    /** Proposed. */
+    fileCount?: number;
+    /** Proposed: The row came from the annotations alone. */
+    degraded?: boolean;
+    /** Proposed. */
+    referrers?: Schemas["ReferrerCounts"];
   };
   Pointer: {
     kind: "dist-tag";
@@ -443,6 +531,10 @@ export type Schemas = {
     indexedAt: string;
     /** The file layers, in manifest order. */
     files: Schemas["File"][];
+    /** Proposed: The manifest's annotations, read from the registry (lajstrom/lajstrom#951). */
+    annotations?: Record<string, string>;
+    /** Proposed: The manifest, read from the registry (lajstrom/lajstrom#951). */
+    manifest?: Schemas["OciManifest"];
   };
   /** One file layer of a manifest. */
   File: {
@@ -585,5 +677,157 @@ export type Schemas = {
     uid?: string;
     /** Whether the request's credential reaches the admin role. */
     admin: boolean;
+  };
+  /** Proposed. */
+  RepoStats: {
+    packages: number;
+    /** Distinct (package, version) pairs. */
+    versions: number;
+    /** One per (package, version, variant). */
+    manifests: number;
+    files: number;
+    size: number;
+    lastPushAt: string | null;
+  };
+  /** Proposed. */
+  ReindexStatus: {
+    state: "idle" | "running" | "failed";
+    startedAt: string | null;
+    finishedAt: string | null;
+    errors: number;
+    /** The next scheduled reconcile; null when it is off. */
+    nextReconcileAt: string | null;
+  };
+  /** Proposed. */
+  SigningKey: {
+    algorithm: "ed25519" | "rsa4096";
+    fingerprint: string;
+    createdAt: string;
+    retiredAt: string | null;
+  };
+  /**
+   * Proposed: A package with every fact of its list row, its OCI repository and the newest metadata
+   * (lajstrom/lajstrom#958).
+   */
+  PackageDetail: {
+    name: string;
+    createdAt: string;
+    nameOci: string;
+    latestVersion: string | null;
+    versions: number;
+    manifests: number;
+    latestVariants: string[];
+    size: number;
+    summary: string | null;
+    attrs: Record<string, string>;
+    updatedAt: string;
+    /** <format>/<repo>/<nameOci>, below the instance prefix. */
+    ociRepository: string;
+    /** The metadata layer of the newest manifest. */
+    latestMetadata: Record<string, unknown> | null;
+  };
+  /** Proposed. */
+  FacetValue: {
+    value: string;
+    count: number;
+  };
+  /** Proposed. */
+  RawDirectory: {
+    name: string;
+    path: string;
+    files: number;
+    size: number;
+    updatedAt: string;
+  };
+  /** Proposed. */
+  ReferrerCounts: {
+    signatures: number;
+    sboms: number;
+    attestations: number;
+  };
+  /** Proposed. */
+  OciDescriptor: {
+    mediaType: string;
+    digest: string;
+    size: number;
+    annotations?: Record<string, string>;
+  };
+  /** Proposed. */
+  OciManifest: {
+    schemaVersion: 2;
+    mediaType: string;
+    artifactType: string;
+    config: Schemas["OciDescriptor"];
+    layers: Schemas["OciDescriptor"][];
+    annotations: Record<string, string>;
+  };
+  /** Proposed. */
+  SearchHit: {
+    kind: "package";
+    format: string;
+    repo: string;
+    name: string;
+    latestVersion: string | null;
+    summary: string | null;
+    updatedAt: string;
+  } | {
+    kind: "version";
+    format: string;
+    repo: string;
+    name: string;
+    version: string;
+    variant: string;
+    digest: string;
+    /** What matched: manifest, or the name of the file whose digest did. */
+    matched: string;
+  };
+  /** Proposed. */
+  SearchResult: {
+    hits: Schemas["SearchHit"][];
+    total: number;
+  };
+  /** Proposed. */
+  Registry: {
+    name: string;
+    type: "generic" | "ecr";
+    /** The product detected */
+    product: string;
+    url: string;
+    prefix: string;
+    /** provider.Capabilities. */
+    capabilities: {
+      createOnPush: boolean;
+      referrers: boolean;
+      catalog: boolean;
+      deleteManifest: boolean;
+      immutableTags: boolean;
+      blobRedirect: boolean;
+      maxBlobSize: number;
+    };
+    /** The support tier: tested in CI, tested by hand, untested (lajstrom/lajstrom#953). */
+    support: "ci" | "manual" | "untested";
+    status: {
+      state: "ok" | "degraded" | "down";
+      checkedAt: string;
+      latencyMs: number | null;
+      message: string | null;
+    };
+    repos: string[];
+  };
+  /** Proposed. */
+  PublishSession: {
+    id: number;
+    /** groupId:artifactId:version */
+    key: string;
+    principal: string;
+    state: "open" | "committed" | "aborted" | "expired";
+    files: {
+      name: string;
+      size: number;
+      digest: string;
+    }[];
+    createdAt: string;
+    updatedAt: string;
+    expiresAt: string;
   };
 };

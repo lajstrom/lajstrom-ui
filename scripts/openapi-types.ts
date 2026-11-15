@@ -1,7 +1,7 @@
-// TypeScript types from the schemas of the server's OpenAPI description (openapi/server.yaml).
-// It covers what that file uses: objects, arrays, enums, $ref, allOf, anyOf, oneOf and type
-// lists with "null". Anything else fails loudly, so a new construct is noticed when the file is
-// vendored again. Written here rather than taken from openapi-typescript, which wants
+// TypeScript types from the schemas of public/openapi.yaml: the server's OpenAPI description
+// with the UI's proposal merged in (scripts/openapi-merge.ts). It covers what those use: objects,
+// arrays, enums, $ref, allOf, anyOf, oneOf and type lists with "null". Anything else fails
+// loudly, so a new construct is noticed when the server's file is vendored again. Written here rather than taken from openapi-typescript, which wants
 // TypeScript 5 (ADR 0002: few dependencies).
 
 import { parse } from "yaml";
@@ -25,21 +25,24 @@ type Spec = { components?: { schemas?: Record<string, Schema> } };
 
 const WIDTH = 100;
 
-/** The source of src/api/server.gen.ts for the text of openapi/server.yaml. */
+/** The source of src/api/openapi.gen.ts for the text of public/openapi.yaml. */
 export function generate(specText: string): string {
-  const commit = /^# Vendored from lajstrom\/lajstrom@([0-9a-f]{40})\b/.exec(specText)?.[1];
-  if (!commit) throw new Error("openapi/server.yaml lacks its first line, # Vendored from lajstrom/lajstrom@<commit>");
+  const commit = /^#[^\n]*\blajstrom\/lajstrom@([0-9a-f]{40})\b/.exec(specText)?.[1];
+  if (!commit) throw new Error("the spec lacks its first line, naming the server's commit as lajstrom/lajstrom@<commit>");
   const spec = parse(specText) as Spec;
   const entries = Object.entries(spec.components?.schemas ?? {}).map(
     ([name, s]) => `${doc(s.description, "  ")}  ${key(name)}: ${type(s, "  ")};`,
   );
   return [
-    "// Generated from openapi/server.yaml by scripts/gen-api-types.ts. Do not edit: npm run gen:api.",
+    "// Generated from public/openapi.yaml by scripts/gen-api-types.ts. Do not edit: npm run gen:api.",
     "",
     "/** The commit of lajstrom/lajstrom whose /api/v1 these types describe. */",
     `export const serverApiCommit = "${commit}";`,
     "",
-    "/** components.schemas of the server's openapi.yaml; src/api/types.ts names them for the UI. */",
+    "/**",
+    " * components.schemas of the server's openapi.yaml with the UI's proposal; what the proposal adds",
+    " * starts with \"Proposed:\". src/api/types.ts names them for the UI.",
+    " */",
     "export type Schemas = {",
     ...entries,
     "};",

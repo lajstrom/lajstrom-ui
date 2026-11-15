@@ -1,4 +1,4 @@
-import type { PackageDetail, PackageFacts, VariantSummary, VersionDetail, VersionSummary } from "@/api/types";
+import type { PackageDetail, PackageSummary, VariantSummary, VersionDetail, VersionSummary } from "@/api/types";
 import type { Crumb } from "@/components/common";
 import { shortDigest } from "@/lib/format";
 import type { FormatSpec } from "@/lib/formats";
@@ -72,8 +72,7 @@ export function groupVersions(list: VersionSummary[]): VersionGroup[] {
 }
 
 /** What the package page shows: the proposed package resource, or what the versions tell. */
-export type PackageInfo = Pick<PackageDetail, "name" | "createdAt" | "ociRepository"> &
-  Partial<PackageFacts> & { latestMetadata?: Record<string, unknown> | null };
+export type PackageInfo = PackageSummary & Pick<PackageDetail, "ociRepository"> & Partial<Pick<PackageDetail, "latestMetadata">>;
 
 /** The package from a server without GET …/packages/{name}: its versions, newest first, and the
  * newest version in detail once it is loaded. */

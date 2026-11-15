@@ -1,8 +1,8 @@
 #!/bin/sh
 # Vendors the server's OpenAPI description, internal/api/openapi.yaml of lajstrom/lajstrom, at a
 # branch, tag or commit (default: main) into openapi/server.yaml, and regenerates
-# src/api/server.gen.ts from it. Typecheck afterwards: what no longer compiles is what the
-# server changed.
+# public/openapi.yaml and src/api/openapi.gen.ts from it (npm run gen:api). Typecheck afterwards:
+# what no longer compiles is what the server changed.
 set -eu
 
 ref=${1:-main}
@@ -18,7 +18,7 @@ trap 'rm -f "$tmp"' EXIT
 curl -fsSL "https://raw.githubusercontent.com/lajstrom/lajstrom/$sha/internal/api/openapi.yaml" > "$tmp"
 {
   echo "# Vendored from lajstrom/lajstrom@$sha, internal/api/openapi.yaml. Do not edit:"
-  echo "# npm run update:openapi -- <ref> replaces it and regenerates src/api/server.gen.ts and public/openapi.yaml."
+  echo "# npm run update:openapi -- <ref> replaces it and regenerates public/openapi.yaml and src/api/openapi.gen.ts."
   cat "$tmp"
 } > openapi/server.yaml
 

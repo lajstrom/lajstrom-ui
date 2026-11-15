@@ -25,14 +25,13 @@ TanStack Router and Query; MSW mocks the API.
 
 ## Contracts
 
-- `src/api/types.ts` mirrors the server's API. Where the server has a resource, the type is the
-  server's, from `src/api/server.gen.ts`: generated from `openapi/server.yaml`, the server's
-  `internal/api/openapi.yaml` vendored at a commit. Never edit either by hand;
-  `npm run update:openapi -- <ref>` takes a newer server, and what then fails to typecheck is
-  what the server changed. Shapes the server does not have yet follow `docs/api-proposal.md`
-  and are added to the server's description in `openapi/proposed.yaml`; `npm run gen:api`
-  merges both into `public/openapi.yaml`, generated too. When the merge says the server has an
-  addition now, take it out of `proposed.yaml` and make the UI's type the server's.
+- `src/api/types.ts` names the types of `src/api/openapi.gen.ts` for the UI; write no shape of
+  the API there by hand. `npm run gen:api` makes `public/openapi.yaml` of `openapi/server.yaml`,
+  the server's `internal/api/openapi.yaml` vendored at a commit, and `openapi/proposed.yaml`,
+  what the UI needs that the server does not have yet (`docs/api-proposal.md`); then the types
+  of it. Never edit the generated files or `server.yaml` by hand. `npm run update:openapi -- <ref>`
+  takes a newer server: what then fails to typecheck is what the server changed, and when the
+  merge says the server has an addition now, take it out of `proposed.yaml`.
 - `src/lib/profile.ts` ports the server's `internal/oci/profile` (Escape, EscapeComponent, Tag).
   When the server's spec or code changes, update the port and copy the new test vectors.
 - The mock must follow the manifest profile: `src/mocks/data/profile-conformance.test.ts` has to

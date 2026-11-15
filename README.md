@@ -166,7 +166,7 @@ alone.
 
 ```
 src/
-  api/          types of /api/v1 (server.gen.ts from openapi/server.yaml), fetch client, session
+  api/          types of /api/v1 (openapi.gen.ts from public/openapi.yaml), fetch client, session
                 and sign-in, queries and mutations
   app/          bootstrap, runtime config, demo mode, router, shell (header, menus), palette, theme
   pages/        one file per screen; package-model.ts groups versions and builds breadcrumbs
@@ -178,7 +178,7 @@ src/
                 "server" (db.ts), seed data per format
 openapi/        server.yaml: the server's OpenAPI description, vendored at a commit;
                 proposed.yaml: what the UI adds to it (docs/api-proposal.md)
-scripts/        vendoring it, generating src/api/server.gen.ts and public/openapi.yaml; the
+scripts/        vendoring it, generating public/openapi.yaml and src/api/openapi.gen.ts; the
                 Pages build
 docker/         nginx.conf and the start script of the image
 deploy/         Kubernetes and compose examples
