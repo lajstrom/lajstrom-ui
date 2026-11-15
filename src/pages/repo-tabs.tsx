@@ -11,11 +11,12 @@ import { CopyText } from "@/components/ui/code-block";
 import { EmptyState, Properties, Property, Skeleton } from "@/components/ui/misc";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Tooltip } from "@/components/ui/tooltip";
-import { formatBytes, formatDateTime, formatNumber, shortDigest } from "@/lib/format";
+import { formatBytes, formatDateTime, formatNumber } from "@/lib/format";
 import { formatSpec, snippetContext } from "@/lib/formats";
 
 import { AuditTable } from "./audit";
 import { DeployTokens } from "./deploy-tokens";
+import { ReindexFindings, ReindexSummary } from "./reindex-report";
 
 const NOT_REPORTED = <span className="text-muted-foreground">not reported by this server version</span>;
 
@@ -228,20 +229,6 @@ const runTone = { running: "primary", done: "success", failed: "danger", abandon
 
 function ReindexRunView({ run }: { run: ReindexRun }) {
   const r = run.report;
-  const counts = (
-    [
-      ["OCI repositories", r?.ociRepositories],
-      ["Manifests", r?.manifests],
-      ["Added", r?.added],
-      ["Updated", r?.updated],
-      ["Removed", r?.removed],
-      ["Degraded", r?.degraded],
-      ["Foreign", r?.foreign?.length],
-      ["Deleted, pending", r?.deletedPending],
-      ["Referrers repaired", r?.repairedReferrers?.length],
-    ] as [string, number | undefined][]
-  ).flatMap(([label, n]) => (n === undefined ? [] : [[label, n] as const]));
-  const warn = new Set(["Foreign", "Degraded", "Deleted, pending"]);
   return (
     <>
       <CardBody>
@@ -263,79 +250,10 @@ function ReindexRunView({ run }: { run: ReindexRun }) {
             {run.state === "running" ? "The report comes when the run finishes." : "The run stopped before it reached this repo."}
           </p>
         ) : (
-          <>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-              {counts.map(([label, n]) => (
-                <div key={label} className="rounded-md border border-border px-3 py-2">
-                  <div className="text-xs text-muted-foreground">{label}</div>
-                  <div className={`text-base font-semibold tabular ${warn.has(label) && n > 0 ? "text-warning" : ""}`}>{formatNumber(n)}</div>
-                </div>
-              ))}
-            </div>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Degraded rows have no readable metadata layer and were indexed from annotations only.
-              {r.deletedPending ? " Deleted, pending: tags the registry still lists after a delete through Lajstrom, not indexed again." : ""}
-            </p>
-          </>
+          <ReindexSummary report={r} />
         )}
       </CardBody>
-      {r?.foreign?.length ? (
-        <>
-          <div className="border-t border-border px-4 pt-3 pb-1 text-sm font-medium">Foreign manifests</div>
-          <p className="px-4 pb-2 text-xs text-muted-foreground">
-            Found under this repo's path in the registry but not written by Lajstrom: they have no lajstrom.schema annotation and are not indexed.
-          </p>
-          <Table>
-            <THead>
-              <TR>
-                <TH>OCI repository</TH>
-                <TH>Tag</TH>
-                <TH>Digest</TH>
-                <TH>Media type</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {r.foreign.map((f) => (
-                <TR key={`${f.repository}@${f.digest ?? f.tag}`}>
-                  <TD className="font-mono text-xs">{f.repository}</TD>
-                  <TD className="font-mono text-xs">{f.tag}</TD>
-                  <TD>{f.digest ? <CopyText value={f.digest} display={shortDigest(f.digest)} label="digest" /> : null}</TD>
-                  <TD className="font-mono text-xs text-muted-foreground">{f.mediaType}</TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
-        </>
-      ) : null}
-      {r?.repairedReferrers?.length ? (
-        <>
-          <div className="border-t border-border px-4 pt-3 pb-1 text-sm font-medium">Referrers indexes pushed again</div>
-          <Table>
-            <THead>
-              <TR>
-                <TH>OCI repository</TH>
-                <TH>Subject</TH>
-                <TH>Index</TH>
-                <TH>Referrers added</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {r.repairedReferrers.map((x) => (
-                <TR key={x.index}>
-                  <TD className="font-mono text-xs">{x.repository}</TD>
-                  <TD>
-                    <CopyText value={x.subject} display={shortDigest(x.subject)} label="subject" />
-                  </TD>
-                  <TD>
-                    <CopyText value={x.index} display={shortDigest(x.index)} label="index" />
-                  </TD>
-                  <TD className="tabular">{x.added.length}</TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
-        </>
-      ) : null}
+      {r ? <ReindexFindings report={r} /> : null}
     </>
   );
 }

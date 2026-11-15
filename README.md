@@ -29,7 +29,9 @@ server's specs. The read endpoints the UI needs are proposed in
   component, architecture; maven packaging), a file tree for raw repos, a "connect a client"
   page with copyable snippets for pip, uv, twine, apt (sources.list, deb822, auth.conf), Maven,
   Gradle, curl and oras, the repo's policy, index state and signing keys, and for maintainers the
-  last reindex report (with foreign manifests), open maven deploy sessions and deploy tokens.
+  last reindex report (its counts, and the errors, drift, split packages, versions of unknown OCI
+  repositories, foreign manifests and orphans it found), open maven deploy sessions and deploy
+  tokens.
 - **A package**: versions grouped with their variants (architectures, wheel tags), install
   snippets, what the metadata layer says.
 - **A version**: files with digests and download URLs, install and `oras`/`cosign` snippets,
