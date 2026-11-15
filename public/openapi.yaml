@@ -2373,30 +2373,30 @@ components:
           format: date-time
         artifactType:
           type: string
-          description: Proposed.
+          description: "Proposed: The manifest's artifact type (lajstrom/lajstrom#1132)."
           x-lajstrom-status: proposed
         attrs:
           type: object
           description: "Proposed: The manifest's lajstrom.* annotations by their full key, as VariantDetail
-            has them."
+            has them (lajstrom/lajstrom#1132)."
           additionalProperties:
             type: string
           x-lajstrom-status: proposed
         size:
           type: integer
-          description: Proposed.
+          description: "Proposed: The size of its file layers (lajstrom/lajstrom#1132)."
           x-lajstrom-status: proposed
         fileCount:
           type: integer
-          description: Proposed.
+          description: "Proposed: The number of its file layers (lajstrom/lajstrom#1132)."
           x-lajstrom-status: proposed
         degraded:
           type: boolean
-          description: "Proposed: The row came from the annotations alone."
+          description: "Proposed: The row came from the annotations alone (lajstrom/lajstrom#1132)."
           x-lajstrom-status: proposed
         referrers:
           $ref: "#/components/schemas/ReferrerCounts"
-          description: Proposed.
+          description: "Proposed: Its signatures, SBOMs and attestations (lajstrom/lajstrom#1132)."
           x-lajstrom-status: proposed
     Pointer:
       type: object
@@ -3297,8 +3297,7 @@ components:
             - ecr
         product:
           type: string
-          description: The product detected
-          from the registry comparison of docs/registries/.: null
+          description: The product detected, from the registry comparison of docs/registries/.
         url:
           type: string
         prefix:

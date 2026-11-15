@@ -32,7 +32,7 @@ offer the demo.
 | The repo's counts, the caller's permissions, reindex state, apt signing keys | lajstrom/lajstrom#957 | `Repo`: `stats`, `permissions`, `reindex`, `signingKeys` |
 | The facts of a package row, filters, facets, sorting, raw directories | lajstrom/lajstrom#955, #954 (summary) | `Package`, `PackageList`; `attr`, `sort`, `order`, `dir` on `listPackages` |
 | One package | lajstrom/lajstrom#958 | `GET …/packages/{name}`, `PackageDetail` |
-| The facts of a variant in the version list | none yet | `Variant`: `artifactType`, `attrs`, `size`, `fileCount`, `degraded`, `referrers` |
+| The facts of a variant in the version list | lajstrom/lajstrom#1132 | `Variant`: `artifactType`, `attrs`, `size`, `fileCount`, `degraded`, `referrers` |
 | A version's manifest and annotations | lajstrom/lajstrom#951 | `VariantDetail`: `manifest`, `annotations` |
 | The report of a reindex run, as docs/api.md shows it | lajstrom/lajstrom#1128 | `ReindexRun.report` |
 | A maven repo's open deploys | lajstrom/lajstrom#960 | `GET …/sessions`, `PublishSession` |
