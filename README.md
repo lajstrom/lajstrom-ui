@@ -39,6 +39,12 @@ server's specs. The read endpoints the UI needs are proposed in
   prefetch of names or images with a result for each; a group's members in order, each linked,
   with its merged names or, for `oci`, the paths each member serves. Neither shows publish
   snippets.
+- **Managing repositories**: the admin creates a hosted repo, a proxy of an upstream or a group
+  of members, with the server's refusals at the fields; whoever has `manage` switches anonymous
+  read and changes the policy (at once, put back if the server refuses), a proxy's upstream and
+  a group's members on the Settings tab, deletes a repo after a confirmation that says what goes
+  and that its artifacts stay in the registry, and starts a reindex whose run the Maintenance
+  tab follows until its report.
 - **A package**: versions grouped with their variants (architectures, wheel tags), npm's
   dist-tags on the versions they name, install snippets, what the metadata layer says.
 - **A version**: files with digests and download URLs, install and `oras`/`cosign` snippets,
@@ -427,8 +433,6 @@ the snippet scan has nothing to match.
   ([#16](https://github.com/lajstrom/lajstrom-ui/issues/16)). A release builds one tar.gz and
   one image of it; images per environment would be built from that same tar.gz in the release's
   job `publish`, so that no environment gets a bundle of its own.
-- **Management screens** (repositories, users, bindings): after the read-only UI. The server's
-  endpoints can be tried on the API page meanwhile.
 - Code splitting per page (the main chunk is about 190 KiB gzipped).
 
 ## Contributing and license

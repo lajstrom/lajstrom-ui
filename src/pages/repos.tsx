@@ -15,6 +15,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { formatBytes, formatNumber } from "@/lib/format";
 import { formatOrder, formatSpec, formats } from "@/lib/formats";
 
+import { CreateRepoButton } from "./repo-create";
 import { KindBadge } from "./repo-kinds";
 
 /** Roadmap order; formats without pages (oci) last. */
@@ -92,6 +93,8 @@ export function ReposPage() {
       <PageHeader
         title="Repositories"
         description="Every artifact lives in your OCI registry; Lajstrom serves it through the native protocol of its format."
+        // Creating a repo needs the admin role (docs/api.md, Create).
+        actions={who.data?.admin ? <CreateRepoButton format={search.format} /> : null}
       />
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">

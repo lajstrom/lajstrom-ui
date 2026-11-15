@@ -7,8 +7,8 @@ type SwitchProps = Omit<ComponentProps<"button">, "onChange" | "role"> & {
   onCheckedChange: (checked: boolean) => void;
 };
 
-/** An on/off control that acts at once, such as a webhook's active: a button with role switch,
- * so that screen readers say on or off. */
+/** An on/off control that acts at once, such as a webhook's active or a repo's anonymous read: a
+ * button with role switch, so that screen readers say on or off. */
 export function Switch({ checked, onCheckedChange, className, ...props }: SwitchProps) {
   return (
     <button
@@ -23,7 +23,7 @@ export function Switch({ checked, onCheckedChange, className, ...props }: Switch
       )}
       {...props}
     >
-      <span className={cn("size-3.5 rounded-full bg-background shadow-card transition-transform", checked && "translate-x-3.5")} />
+      <span aria-hidden className={cn("size-3.5 rounded-full bg-background shadow-card transition-transform", checked && "translate-x-3.5")} />
     </button>
   );
 }
