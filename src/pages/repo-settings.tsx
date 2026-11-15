@@ -24,7 +24,7 @@ import { formatBytes, pluralize } from "@/lib/format";
 import { formatSpec } from "@/lib/formats";
 
 import { settingKey, settingOf, useDeleteRepo, useRepoUpdate, useSetting, type RepoSetting } from "./repo-changes";
-import { MembersFields, UpstreamFields } from "./repo-fields";
+import { FieldError, MembersFields, UpstreamFields } from "./repo-fields";
 import { defaultMaxFileSize, fieldOf, groupForm, groupPatch, policyPatch, repoFields, sizeBytes, sizeParts, upstreamForm, upstreamPatch, type SizeUnit } from "./repo-form";
 
 export function RepoSettings({ repo }: { repo: Repo }) {
@@ -36,8 +36,8 @@ export function RepoSettings({ repo }: { repo: Repo }) {
         // Keyed by the policy, so that the form shows the server's once it changes or goes back.
         <PolicyCard key={JSON.stringify(repo.policy ?? null)} repo={repo} change={changes.get("policy")} />
       ) : null}
-      {repo.upstream ? <UpstreamCard key={JSON.stringify(repo.upstream)} repo={repo} /> : null}
-      {repo.group ? <GroupCard key={JSON.stringify(repo.group)} repo={repo} /> : null}
+      {repo.upstream ? <UpstreamSettings key={JSON.stringify(repo.upstream)} repo={repo} /> : null}
+      {repo.group ? <GroupSettings key={JSON.stringify(repo.group)} repo={repo} /> : null}
       <DeleteCard repo={repo} />
     </div>
   );
@@ -84,8 +84,18 @@ function policyForm(p: RepoPolicy | null | undefined): PolicyForm {
   };
 }
 
-/** The policy the form means: a key left at its default is absent. A value that is not a
- * number is sent as it is, for the server to refuse. */
+/** What the form cannot send: a number that is not one, which JSON would send as null, the
+ * removal of the key. Ranges are the server's to check. */
+function policyFormErrors(f: PolicyForm): { size: string | null; files: string | null } {
+  const size = sizeBytes(f.size, f.unit);
+  const files = f.maxSessionFiles.trim();
+  return {
+    size: size !== undefined && Number.isNaN(size) ? `"${f.size.trim()}" is not a number of ${f.unit}.` : null,
+    files: files && !/^\d+$/.test(files) ? `"${files}" is not a whole number.` : null,
+  };
+}
+
+/** The policy the form means: a key left at its default is absent. */
 function policyOf(f: PolicyForm, current: RepoPolicy | null | undefined, maven: boolean): RepoPolicy {
   const size = sizeBytes(f.size, f.unit);
   const files = f.maxSessionFiles.trim();
@@ -108,7 +118,9 @@ function PolicyCard({ repo, change }: { repo: Repo; change: { pending: boolean; 
   const [form, setForm] = useState(() => policyForm(repo.policy));
   const set = (patch: Partial<PolicyForm>) => setForm((f) => ({ ...f, ...patch }));
   const maven = repo.format === "maven";
-  const patch = policyPatch(repo.policy, policyOf(form, repo.policy, maven));
+  const errors = policyFormErrors(form);
+  const sendable = !errors.size && !(maven && errors.files);
+  const patch = sendable ? policyPatch(repo.policy, policyOf(form, repo.policy, maven)) : null;
   const spec = formatSpec(repo.format);
   const fallback = defaultMaxFileSize[repo.format];
   const submit = (e: FormEvent) => {
@@ -132,6 +144,7 @@ function PolicyCard({ repo, change }: { repo: Repo; change: { pending: boolean; 
                 <option value="GiB">GiB</option>
               </Select>
             </div>
+            <FieldError error={errors.size} />
           </Field>
           <Field
             label="Blob redirect"
@@ -161,6 +174,7 @@ function PolicyCard({ repo, change }: { repo: Repo; change: { pending: boolean; 
                 </Field>
                 <Field label="Files per deploy" htmlFor={ids.files} hint="How many files a deploy's session stores, signatures included: 1 to 999; empty, 256.">
                   <Input id={ids.files} inputMode="numeric" value={form.maxSessionFiles} placeholder="256" onChange={(e) => set({ maxSessionFiles: e.target.value })} />
+                  <FieldError error={errors.files} />
                 </Field>
               </div>
               <Field
@@ -199,7 +213,7 @@ function PolicyCard({ repo, change }: { repo: Repo; change: { pending: boolean; 
   );
 }
 
-function UpstreamCard({ repo }: { repo: Repo }) {
+function UpstreamSettings({ repo }: { repo: Repo }) {
   const who = useQuery(callerQuery);
   const save = useRepoUpdate(repo);
   const [form, setForm] = useState(() => upstreamForm(repo.upstream));
@@ -224,7 +238,7 @@ function UpstreamCard({ repo }: { repo: Repo }) {
   );
 }
 
-function GroupCard({ repo }: { repo: Repo }) {
+function GroupSettings({ repo }: { repo: Repo }) {
   const who = useQuery(callerQuery);
   const save = useRepoUpdate(repo);
   const [form, setForm] = useState(() => groupForm(repo.group));
