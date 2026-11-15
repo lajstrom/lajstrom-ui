@@ -1,0 +1,138 @@
+# The UI against a real server (#13): e2e/server.sh builds lajstrom/lajstrom, serves it on Zot
+# and publishes a package of every format; the UI image proxies the API to it, and Playwright
+# signs in and opens every screen (e2e/screens.e2e.ts). A pull request runs against the commit
+# whose openapi.yaml is vendored in openapi/server.yaml, so that its types and the server agree;
+# the nightly run against the server's main, so that the next drift shows the morning after, and
+# a failure of it opens an issue, or comments on the open one.
+name: e2e
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      server-ref:
+        description: A branch, tag or commit of lajstrom/lajstrom; empty for the commit of openapi/server.yaml
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      zot:
+        # The registry of the server's own e2e job, with its image's configuration: HTTP on 5000,
+        # anonymous pushes.
+        image: ghcr.io/project-zot/zot-minimal:v2.1.23
+        ports:
+          - 5000:5000
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The server's commit
+        id: server
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_REF: ${{ inputs.server-ref }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = schedule ]; then
+            ref=main
+          elif [ -n "${INPUT_REF:-}" ]; then
+            ref="$INPUT_REF"
+          else
+            ref="$(sed -n '1s/^# Vendored from lajstrom\/lajstrom@\([0-9a-f]\{40\}\).*/\1/p' openapi/server.yaml)"
+          fi
+          [ -n "$ref" ] || { echo "::error::no commit in the first line of openapi/server.yaml"; exit 1; }
+          echo "ref=$ref" >>"$GITHUB_OUTPUT"
+          echo "lajstrom/lajstrom@$ref" >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: lajstrom/lajstrom
+          ref: ${{ steps.server.outputs.ref }}
+          path: server
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          # The Node of the check job and of the Dockerfile's build stage.
+          node-version: 24
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Playwright's Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Server, with a package of every format
+        env:
+          LAJSTROM_E2E_REGISTRY: localhost:5000
+        run: e2e/server.sh server "$RUNNER_TEMP/e2e"
+      - name: UI image, proxying the API to the server
+        run: |
+          set -euo pipefail
+          docker build -t lajstrom-ui:e2e .
+          docker run -d --name ui --network host --read-only --tmpfs /tmp --cap-drop ALL \
+            -e LAJSTROM_UI_MOCK=false -e LAJSTROM_UI_DEMO=false \
+            -e LAJSTROM_API_UPSTREAM=http://127.0.0.1:18080 lajstrom-ui:e2e
+          for _ in $(seq 1 30); do curl -sf -o /dev/null http://localhost:8080/healthz && break; sleep 1; done
+          curl -sf http://localhost:8080/api/v1/info | jq -c '{version, commit}'
+      - name: Every screen
+        run: |
+          set -a
+          . "$RUNNER_TEMP/e2e/env"
+          set +a
+          npx playwright test
+      - name: Server and UI logs
+        if: failure()
+        run: |
+          tail -n 100 "$RUNNER_TEMP/e2e/server.log" || true
+          docker logs ui 2>&1 | tail -n 50 || true
+      - name: Report, with traces of the failed tests
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-report
+          path: |
+            e2e-report/
+            e2e-results/
+          retention-days: 14
+
+  nightly-failure:
+    name: open an issue
+    needs: e2e
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open an issue, or comment on the open one
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="e2e: the UI fails against the server's main"
+          n="$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body "The nightly run failed again: $RUN"
+          else
+            gh issue create --title "$title" --body "The nightly e2e run against lajstrom/lajstrom@main failed: $RUN
+
+          The report and the traces of the failed tests are the run's artifact e2e-report. The server
+          changed something the UI reads, or the UI broke; e2e/README.md says how to run the same
+          locally."
+          fi

@@ -149,6 +149,8 @@ vite.config.ts.timestamp-*
 .turbo
 
 # Build and tooling
+e2e-results/
+e2e-report/
 *.tsbuildinfo
 .vite/
 .DS_Store
