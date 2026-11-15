@@ -41,8 +41,10 @@ server's specs. The read endpoints the UI needs are proposed in
   annotations and the raw OCI manifest.
 - **Search** (<kbd>⌘K</kbd> / <kbd>Ctrl+K</kbd> / <kbd>/</kbd>): packages and repos; paste a
   `sha256` digest to find the manifest or file it belongs to.
-- **Admin pages**: registries with their capabilities and health, the audit log, and a read-only
-  preview of users, tokens and bindings.
+- **Admin pages**: registries with their capabilities and health, the audit log, every token,
+  and users and bindings: create, disable, rename and delete users and set their passwords, bind
+  users and OIDC groups to roles on repo masks; a user's page has its bindings and its tokens,
+  which the admin may revoke.
 - **Sign-in** with a password, which creates a personal access token for the browser (12 hours,
   revoked on sign-out), or with a token you already have. Requests carry it as
   `Authorization: Bearer`; there are no cookies.

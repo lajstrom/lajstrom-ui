@@ -203,7 +203,14 @@ export const users: User[] = [
   { uid: uidOf("bob"), name: "bob", kind: "local", disabled: false, createdAt: ago(290) },
   { uid: uidOf("carol"), name: "carol", kind: "local", disabled: false, createdAt: ago(150) },
   { uid: uidOf("dave"), name: "dave", kind: "local", disabled: true, createdAt: ago(240) },
+  // Made by its first OIDC login, without a password; its groups are those of its latest login
+  // (rbac.md §8, the proposed User.groups).
+  { uid: uidOf("erin"), name: "erin", kind: "oidc", disabled: false, createdAt: ago(12), groups: ["platform", "payments-oncall"] },
 ];
+
+/** Passwords set through the API in the demo, by user name, as the sha256 of the password. Until
+ * then a local user of the seed has its name as its password, and an OIDC user none. */
+export const passwords = new Map<string, string>();
 
 // A deploy token is bound to one repo, or to a mask of repos (rbac.md §1); uploads in the seed
 // use only the tokens bound to their repo, and users only where a binding lets them write.
@@ -239,6 +246,9 @@ export const bindings: MockBinding[] = [
   { id: 7, principal: "user:carol", role: "writer", repoMask: "pypi/internal", createdAt: ago(150) },
   { id: 8, principal: "user:carol", role: "reader", repoMask: "*/*", createdAt: ago(150) },
   { id: 9, principal: "user:dave", role: "reader", repoMask: "*/*", createdAt: ago(240) },
+  // Bindings of OIDC groups, which reach a repo through their members (rbac.md §8).
+  { id: 10, principal: "group:platform", role: "maintainer", repoMask: "raw/*", createdAt: ago(14) },
+  { id: 11, principal: "group:payments-oncall", role: "reader", repoMask: "*/payments", createdAt: ago(14) },
 ];
 
 export const roleActions: Record<Binding["role"], ("read" | "write" | "delete" | "manage")[]> = {

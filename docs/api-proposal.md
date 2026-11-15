@@ -38,6 +38,7 @@ offer the demo.
 | Search | lajstrom/lajstrom#956 | `GET /api/v1/search`, `SearchResult` |
 | The registries, their capabilities and health | lajstrom/lajstrom#952, #953 | `GET /api/v1/registries`, `Registry` |
 | Every token, for the admin | lajstrom/lajstrom#959 | `GET /api/v1/tokens` |
+| An OIDC user's kind and groups | none yet; OIDC is lajstrom/lajstrom#69 | `User`: `kind` `oidc`, `groups` |
 
 ### 2.1 The repo
 
@@ -94,6 +95,14 @@ from?" from a CI log or a scanner report.
 
 Admin only. The configured backends with the capabilities the provider detected, the support
 tier of the product, the repos on each and a health check.
+
+### 2.8 An OIDC user
+
+The server makes a user of `kind` `oidc` at the first OIDC login of an identity (rbac.md §8),
+while its description of the user resource names `local` only. Its groups, those of its latest
+login that count now, are in whoami for the caller and nowhere for the admin, who binds groups
+and should see which users a group's bindings reach: the user resource gets `groups`, absent for
+a local user, as whoami has it.
 
 ## 3. Conventions
 

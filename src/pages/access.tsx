@@ -1,35 +1,31 @@
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate, useSearch } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { Info } from "lucide-react";
 
-import { bindingsQuery, reposQuery, tokensQuery, usersQuery } from "@/api/queries";
+import { useChanges } from "@/api/change";
+import { bindingsQuery, callerQuery, reposQuery, tokensQuery, usersQuery } from "@/api/queries";
 import type { Binding } from "@/api/types";
 import { ErrorState, PageHeader, Principal, RelativeTime } from "@/components/common";
 import { TokenStatus } from "@/components/tokens";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Segmented, Skeleton } from "@/components/ui/misc";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
+import { errorText } from "@/lib/errors";
+import { maskMatches } from "@/lib/masks";
+import { roleActions, roleTone } from "@/lib/roles";
 
 import { MaskTokens } from "./mask-tokens";
+import { deleteBindingKey, disableKey, useDeleteBinding, useDisableUser, type DisableChange } from "./user-changes";
+import { CreateBindingDialog, CreateUserDialog } from "./user-dialogs";
 
 type Tab = "users" | "tokens" | "masks" | "bindings";
 
-const roleTone: Record<Binding["role"], "primary" | "success" | "warning" | "neutral"> = {
-  admin: "warning",
-  maintainer: "primary",
-  writer: "success",
-  reader: "neutral",
-};
-
-const roleActions: Record<Binding["role"], string> = {
-  reader: "read",
-  writer: "read, write",
-  maintainer: "read, write, delete, manage",
-  admin: "everything, plus system and audit",
-};
+const userId = (c: DisableChange) => c.user.uid;
+const bindingId = (b: Binding) => b.id;
 
 export function AccessPage() {
   const search = useSearch({ strict: false }) as { tab?: Tab };
@@ -45,8 +41,12 @@ export function AccessPage() {
       <div className="mb-4 flex items-start gap-2 rounded-lg border border-primary/20 bg-primary-soft px-4 py-3 text-sm text-primary-soft-foreground">
         <Info className="mt-0.5 size-4 shrink-0" />
         <span>
-          Read-only preview: users and bindings are managed with the lajstrom admin commands for now. Your own tokens are under
-          Personal access tokens in the user menu.
+          The admin role manages users and bindings, here or with the lajstrom admin commands; a user&apos;s page has its bindings and
+          its tokens. Every change is a row of the{" "}
+          <Link to="/audit" className="font-medium underline-offset-2 hover:underline">
+            audit log
+          </Link>
+          . Your own tokens are under Personal access tokens in the user menu.
         </span>
       </div>
       <Segmented
@@ -79,8 +79,22 @@ function Loading() {
 function UsersTable() {
   const users = useQuery(usersQuery);
   const bindings = useQuery(bindingsQuery);
+  // The admin's controls: a new user, and disable or enable on each row but the admin's own
+  // (optimistic); the rest is on the user's page.
+  const who = useQuery(callerQuery);
+  const admin = who.data?.admin === true;
+  const disable = useDisableUser();
+  const changes = useChanges(disableKey, userId);
   return (
     <Card>
+      {admin ? (
+        <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
+          <span className="text-xs text-muted-foreground">A user&apos;s page has its bindings and tokens, a new password, a rename and the delete.</span>
+          <div className="ml-auto">
+            <CreateUserDialog />
+          </div>
+        </div>
+      ) : null}
       {users.isError ? (
         <ErrorState error={users.error} />
       ) : !users.data ? (
@@ -94,23 +108,43 @@ function UsersTable() {
               <TH>Bindings</TH>
               <TH>Created</TH>
               <TH>Status</TH>
+              {admin ? <TH className="w-0" /> : null}
             </TR>
           </THead>
           <TBody>
             {users.data.map((u) => {
               const own = bindings.data?.filter((b) => b.principal === `user:${u.uid}`) ?? [];
+              const groupAdmin = bindings.data?.some((b) => b.role === "admin" && u.groups?.some((g) => b.principal === `group:${g}`)) ?? false;
+              const change = changes.get(u.uid);
+              const self = who.data?.uid === u.uid;
               return (
                 <TR key={u.uid} className={cn(u.disabled && "opacity-60")}>
                   <TD>
                     <Tooltip content={`user:${u.uid}`}>
-                      <span className="flex items-center gap-2 font-medium">
+                      <Link to="/access/users/$user" params={{ user: u.name }} className="flex w-fit items-center gap-2 font-medium hover:underline">
                         <span className="flex size-6 items-center justify-center rounded-full bg-muted text-xs uppercase">{u.name[0]}</span>
                         {u.name}
-                        {own.some((b) => b.role === "admin") ? <Badge tone="warning">admin</Badge> : null}
-                      </span>
+                        {own.some((b) => b.role === "admin") || groupAdmin ? <Badge tone="warning">admin</Badge> : null}
+                      </Link>
                     </Tooltip>
+                    {change?.error ? (
+                      <div className="mt-0.5 max-w-sm text-xs text-danger">
+                        Not {u.disabled ? "enabled" : "disabled"}. {errorText(change.error)}
+                      </div>
+                    ) : null}
                   </TD>
-                  <TD className="text-muted-foreground">{u.kind}</TD>
+                  <TD className="text-muted-foreground">
+                    {u.kind === "oidc" ? (
+                      <Tooltip content="Made by its first OIDC login; the groups of its latest login">
+                        <span className="block w-fit">
+                          <Badge tone="primary">OIDC</Badge>
+                          {u.groups?.length ? <span className="mt-1 block font-mono text-xs">{u.groups.map((g) => `group:${g}`).join(" ")}</span> : null}
+                        </span>
+                      </Tooltip>
+                    ) : (
+                      u.kind
+                    )}
+                  </TD>
                   <TD>
                     <span className="flex flex-wrap gap-1">
                       {own.map((b) => (
@@ -118,12 +152,30 @@ function UsersTable() {
                           {b.role} {b.repoMask}
                         </Badge>
                       ))}
+                      {bindings.data
+                        ?.filter((b) => u.groups?.some((g) => b.principal === `group:${g}`))
+                        .map((b) => (
+                          <Tooltip key={b.id} content={`Through ${b.principal}`}>
+                            <Badge tone="outline" shape="square" className="border-dashed font-mono">
+                              {b.role} {b.repoMask}
+                            </Badge>
+                          </Tooltip>
+                        ))}
                     </span>
                   </TD>
                   <TD className="text-muted-foreground">
                     <RelativeTime iso={u.createdAt} />
                   </TD>
                   <TD>{u.disabled ? <Badge tone="danger">disabled</Badge> : <Badge tone="success">active</Badge>}</TD>
+                  {admin ? (
+                    <TD className="text-right">
+                      {self ? null : (
+                        <Button size="sm" variant="ghost" disabled={change?.pending} onClick={() => disable.mutate({ user: u, disabled: !u.disabled })}>
+                          {u.disabled ? "Enable" : "Disable"}
+                        </Button>
+                      )}
+                    </TD>
+                  ) : null}
                 </TR>
               );
             })}
@@ -202,17 +254,24 @@ function TokensTable() {
   );
 }
 
-function maskMatches(mask: string, repoKey: string) {
-  const [mf, mr] = mask.split("/");
-  const [f, r] = repoKey.split("/");
-  return (mf === "*" || mf === f) && (mr === "*" || mr === r);
-}
-
 function BindingsTable() {
   const bindings = useQuery(bindingsQuery);
   const repos = useQuery(reposQuery);
+  // The admin's controls: a new binding (realistic), and a delete on each row (optimistic).
+  const who = useQuery(callerQuery);
+  const admin = who.data?.admin === true;
+  const remove = useDeleteBinding();
+  const changes = useChanges(deleteBindingKey, bindingId);
   return (
     <Card>
+      {admin ? (
+        <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
+          <span className="text-xs text-muted-foreground">A user or an OIDC group, a role, and the repos of a mask; a principal has the union of its bindings.</span>
+          <div className="ml-auto">
+            <CreateBindingDialog />
+          </div>
+        </div>
+      ) : null}
       {bindings.isError ? (
         <ErrorState error={bindings.error} />
       ) : !bindings.data ? (
@@ -226,15 +285,24 @@ function BindingsTable() {
               <TH>Repo mask</TH>
               <TH>Matches</TH>
               <TH>Created</TH>
+              {admin ? <TH className="w-0" /> : null}
             </TR>
           </THead>
           <TBody>
             {bindings.data.map((b) => {
               const matched = b.role === "admin" ? (repos.data ?? []) : (repos.data ?? []).filter((r) => maskMatches(b.repoMask, r.prefix));
+              const change = changes.get(b.id);
               return (
                 <TR key={b.id}>
                   <TD>
-                    <Principal value={b.principal} name={b.name} />
+                    {b.name ? (
+                      <Link to="/access/users/$user" params={{ user: b.name }} className="hover:underline">
+                        <Principal value={b.principal} name={b.name} />
+                      </Link>
+                    ) : (
+                      <Principal value={b.principal} name={b.name} />
+                    )}
+                    {change?.error ? <div className="mt-0.5 max-w-sm text-xs text-danger">Not deleted. {errorText(change.error)}</div> : null}
                   </TD>
                   <TD>
                     <Tooltip content={roleActions[b.role]}>
@@ -252,6 +320,13 @@ function BindingsTable() {
                   <TD className="text-muted-foreground">
                     <RelativeTime iso={b.createdAt} />
                   </TD>
+                  {admin ? (
+                    <TD className="text-right">
+                      <Button size="sm" variant="ghost" disabled={change?.pending} onClick={() => remove.mutate(b)}>
+                        Delete
+                      </Button>
+                    </TD>
+                  ) : null}
                 </TR>
               );
             })}

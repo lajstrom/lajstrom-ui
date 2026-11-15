@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 
 import { createFirstAdmin, signInWithPassword } from "@/api/auth";
 import { apiGet, apiPath, apiSend } from "@/api/client";
+import { deleteUser, updateUser } from "@/api/mutations";
 import { getSession, setSession } from "@/api/session";
 import type { AuditList, Binding, ServerInfo, User, WhoAmI } from "@/api/types";
 import { DEMO_BOOTSTRAP_TOKEN } from "@/app/demo";
@@ -118,5 +119,17 @@ describe("POST /api/v1/bootstrap in the demo", () => {
     await signInWithPassword("root", "correct horse");
     expect(getSession()?.user).toBe("root");
     await expect(signInWithPassword("root", "root")).rejects.toMatchObject({ name: "SignInError" });
+  });
+
+  it("makes a user like the others: renamed with its password, deleted with its binding", async () => {
+    await signInWithPassword("admin", "admin");
+    const { users } = await apiGet<{ users: User[] }>(apiPath("users"));
+    const root = users.find((u) => u.name === "root")!;
+    await updateUser(root.uid, { name: "boss" });
+    await signInWithPassword("boss", "correct horse");
+    await signInWithPassword("admin", "admin");
+    await deleteUser(root.uid);
+    expect((await apiGet<{ users: User[] }>(apiPath("users"))).users.map((u) => u.name)).not.toContain("boss");
+    expect((await apiGet<{ bindings: Binding[] }>(apiPath("bindings"))).bindings.filter((b) => b.principal === `user:${root.uid}`)).toEqual([]);
   });
 });

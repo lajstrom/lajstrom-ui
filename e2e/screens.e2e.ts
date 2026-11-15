@@ -69,6 +69,13 @@ test("access: users and role bindings", async ({ page }) => {
   await expect(page.getByText(user).first()).toBeVisible();
 });
 
+test("a user's page: its bindings and its tokens", async ({ page }) => {
+  await page.goto(`access/users/${segment(user)}`);
+  await shown(page, user);
+  await expect(page.getByRole("cell", { name: "admin", exact: true }).first()).toBeVisible();
+  await expect(page.getByText("e2e npm publish").first()).toBeVisible();
+});
+
 test("the screens of proposed endpoints say the server lacks them", async ({ page }) => {
   for (const path of ["registries", "search?q=hello"]) {
     await test.step(path, async () => {

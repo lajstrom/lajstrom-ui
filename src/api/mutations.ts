@@ -3,6 +3,7 @@
 import { apiPath, apiSend, basicAuth } from "./client";
 import { webhooksPath, type WebhookScope } from "./queries";
 import type { BatchDeleteRequest, BatchDeleteResult, CreatedToken, MaskTokenRequest, TokenRequest } from "./types";
+import type { Binding, BindingRequest, User, UserPatch, UserRequest } from "./types";
 import type { CreatedWebhook, Delivery, Webhook, WebhookRequest, WebhookSecret } from "./types";
 
 export function createUserToken(user: string, req: TokenRequest): Promise<CreatedToken> {
@@ -11,6 +12,36 @@ export function createUserToken(user: string, req: TokenRequest): Promise<Create
 
 export function revokeUserToken(user: string, id: number): Promise<void> {
   return apiSend("DELETE", apiPath("users", user, "tokens", id));
+}
+
+// Users and bindings, the admin's (docs/api.md, Users and Bindings). A user in a path is its
+// name or its uid; the UI sends the uid, which a rename does not change.
+
+export function createUser(req: UserRequest): Promise<User> {
+  return apiSend<User>("POST", apiPath("users"), { body: req });
+}
+
+/** Changes the name, disabled, or both: disabled first, then the name. */
+export function updateUser(user: string, patch: UserPatch): Promise<User> {
+  return apiSend<User>("PATCH", apiPath("users", user), { body: patch });
+}
+
+/** Sets the password: the old one fails from the next request on; the user's tokens stay. */
+export function setUserPassword(user: string, password: string): Promise<void> {
+  return apiSend("POST", apiPath("users", user, "password"), { body: { password } });
+}
+
+/** Deletes a user: its tokens are revoked and its bindings deleted. It is not undone. */
+export function deleteUser(user: string): Promise<void> {
+  return apiSend("DELETE", apiPath("users", user));
+}
+
+export function createBinding(req: BindingRequest): Promise<Binding> {
+  return apiSend<Binding>("POST", apiPath("bindings"), { body: req });
+}
+
+export function deleteBinding(id: number): Promise<void> {
+  return apiSend("DELETE", apiPath("bindings", id));
 }
 
 export function createDeployToken(format: string, repo: string, req: TokenRequest): Promise<CreatedToken> {

@@ -373,9 +373,19 @@ export type Schemas = {
   User: {
     uid: string;
     name: string;
-    kind: "local";
+    /**
+     * Proposed: oidc, a user made by its first OIDC login, without a password (docs/spec/rbac.md
+     * §8). The server makes them; its description names local only.
+     */
+    kind: "local" | "oidc";
     disabled: boolean;
     createdAt: string;
+    /**
+     * Proposed: An OIDC user's groups that count now, from its latest login (docs/spec/rbac.md §8),
+     * as whoami answers the caller's; absent for a local user. The admin sees through which groups
+     * a user reaches a repo (lajstrom/lajstrom#69).
+     */
+    groups?: string[];
   };
   UserList: {
     users: Schemas["User"][];

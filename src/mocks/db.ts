@@ -27,6 +27,7 @@ import type {
   WhoAmI,
   Yank,
 } from "@/api/types";
+import type { User } from "@/api/types";
 import { formatSpec } from "@/lib/formats";
 import { packagePath } from "@/lib/profile";
 import { sha256Hex } from "@/lib/sha256";
@@ -40,6 +41,7 @@ import { rawVersions } from "./data/raw";
 import { reindexFindings } from "./data/reindex";
 import { rpmVersions } from "./data/rpm";
 import { bindings, registries, repoSeeds, roleActions, serverInfo, tokens, uidOf, users, type MockBinding, type RepoSeed } from "./data/system";
+import { passwords } from "./data/system";
 import { ago, ahead, before, HOST } from "./data/time";
 import { getPersona, type Persona } from "./persona";
 import { keep, persist } from "./state";
@@ -110,10 +112,10 @@ function maskMatches(mask: string, repoKey: string): boolean {
 function permissions(persona: Persona, seed: RepoSeed): Action[] {
   const repoKey = keyOf(seed);
   if (persona !== "anonymous") {
-    const principal = `user:${persona}`;
+    const principals = principalsOf(persona);
     const granted = new Set<Action>();
     for (const b of bindings) {
-      if (b.principal !== principal) continue;
+      if (!principals.includes(b.principal)) continue;
       if (b.role === "admin" || maskMatches(b.repoMask, repoKey)) roleActions[b.role].forEach((a) => granted.add(a));
     }
     if (granted.size) return (["read", "write", "delete", "manage"] as Action[]).filter((a) => granted.has(a));
@@ -122,7 +124,14 @@ function permissions(persona: Persona, seed: RepoSeed): Action[] {
 }
 
 export function isAdmin(persona = getPersona()): boolean {
-  return bindings.some((b) => b.principal === `user:${persona}` && b.role === "admin");
+  const principals = principalsOf(persona);
+  return bindings.some((b) => principals.includes(b.principal) && b.role === "admin");
+}
+
+/** The principals whose bindings a user has: its own and those of its groups now (rbac.md §8). */
+function principalsOf(name: string): string[] {
+  const groups = users.find((u) => u.name === name)?.groups ?? [];
+  return [`user:${name}`, ...groups.map((g) => `group:${g}`)];
 }
 
 // The mock names users `user:<name>` inside; the API answers the canonical `user:<uid>`, and
@@ -130,7 +139,7 @@ export function isAdmin(persona = getPersona()): boolean {
 
 /** `user:<name>` as the API answers it, `user:<uid>`; other principals as they are. */
 export function apiPrincipal(principal: string): string {
-  return principal.startsWith("user:") ? `user:${uidOf(principal.slice(5))}` : principal;
+  return principal.startsWith("user:") ? `user:${uidFor(principal.slice(5))}` : principal;
 }
 
 /** A principal of a request, `user:<name>` or `user:<uid>`, as the mock names it inside. */
@@ -147,11 +156,11 @@ export function userByRef(ref: string) {
 /** The caller of /api/v1/info. */
 export function caller(persona = getPersona()): Caller {
   if (persona === "anonymous") return { principal: "anonymous", kind: "anonymous", name: "anonymous", admin: false };
-  return { principal: apiPrincipal(`user:${persona}`), kind: "user", name: persona, uid: uidOf(persona), admin: isAdmin(persona) };
+  return { principal: apiPrincipal(`user:${persona}`), kind: "user", name: persona, uid: uidFor(persona), admin: isAdmin(persona) };
 }
 
 export function whoami(persona = getPersona()): WhoAmI {
-  return { principal: apiPrincipal(`user:${persona}`), kind: "user", name: persona, uid: uidOf(persona) };
+  return { principal: apiPrincipal(`user:${persona}`), kind: "user", name: persona, uid: uidFor(persona) };
 }
 
 function bindingJson(b: MockBinding): Binding {
@@ -162,6 +171,271 @@ function bindingJson(b: MockBinding): Binding {
 export function listBindings(principal: string | null): Binding[] {
   const of = principal ? mockPrincipal(principal) : null;
   return bindings.filter((b) => !of || b.principal === of).map(bindingJson);
+}
+
+// --- Users and bindings changed in the demo -------------------------------------------------
+// The admin creates, renames, disables, enables and deletes users, sets their passwords, and
+// creates and deletes bindings, with the server's rules and messages (docs/api.md, Users and
+// Bindings; docs/spec/rbac.md §1, §3). Inside, a user is `user:<name>` as above: a rename
+// renames it in the bindings and the tokens, and its uid stays. Every change is an audit row,
+// and the demo keeps them (src/mocks/state.ts).
+
+/** The seed as it was, for the audit rows of it: a change in the demo adds rows, never removes. */
+const seedUsers = users.map((u) => ({ ...u }));
+const seedBindings = bindings.map((b) => ({ ...b }));
+
+/** Users deleted in the demo: the server keeps the row, named ~<uid>, with the name it had. */
+const deletedUsers: (User & { deletedName: string })[] = [];
+/** The uid of each name a user had before a rename or a delete, for the audit rows of then. */
+const formerUids = new Map<string, string>();
+let nextBindingId = Math.max(0, ...bindings.map((b) => b.id)) + 1;
+
+keep("users", {
+  save: () => ({ users, bindings, deletedUsers, formerUids: [...formerUids], passwords: [...passwords], nextBindingId }),
+  load: (data) => {
+    const d = data as {
+      users?: User[];
+      bindings?: MockBinding[];
+      deletedUsers?: (User & { deletedName: string })[];
+      formerUids?: [string, string][];
+      passwords?: [string, string][];
+      nextBindingId?: number;
+    };
+    if (!Array.isArray(d.users) || !Array.isArray(d.bindings)) return;
+    users.splice(0, users.length, ...d.users);
+    bindings.splice(0, bindings.length, ...d.bindings);
+    deletedUsers.splice(0, deletedUsers.length, ...(d.deletedUsers ?? []));
+    for (const [name, uid] of d.formerUids ?? []) formerUids.set(name, uid);
+    for (const [name, hash] of d.passwords ?? []) passwords.set(name, hash);
+    if (typeof d.nextBindingId === "number") nextBindingId = d.nextBindingId;
+    auditCache = null;
+  },
+});
+
+/** The uid of a user the mock names: the live user of the name, or the one that had it; a
+ * deleted user's name is ~<uid>. */
+function uidFor(name: string): string {
+  if (name.startsWith("~")) return name.slice(1);
+  return users.find((u) => u.name === name)?.uid ?? formerUids.get(name) ?? uidOf(name);
+}
+
+/** The name an audit row shows for a user: a deleted one's is the name it had. */
+function nameFor(name: string): string {
+  return name.startsWith("~") ? (deletedUsers.find((u) => `~${u.uid}` === name)?.deletedName ?? name) : name;
+}
+
+export function listUsers(): User[] {
+  return [...users].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
+const conflict = (message: string): Refusal => ({ status: 409, code: "CONFLICT", message });
+
+/** A body of one JSON object with no field but those known, as the server decodes it. */
+function bodyRefusal(body: unknown, known: string[]): Refusal | null {
+  if (!isObject(body)) return invalid("body: must be a JSON object");
+  const unknown = Object.keys(body).find((k) => !known.includes(k));
+  return unknown === undefined ? null : invalid(`body: unknown field "${unknown}"`);
+}
+
+const UID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const bytes = (s: string) => new TextEncoder().encode(s).length;
+
+/** A user name of rbac.md §1 (CheckName of the server), or why not; the name quoted as Go's %q
+ * does. */
+export function nameRefusal(name: string): Refusal | null {
+  if (name === "") return invalid("name: must not be empty");
+  if (name === "deploy") return invalid('name: "deploy" is reserved: Basic credentials deploy:<token> are a deploy token');
+  if (UID.test(name)) return invalid(`name: ${JSON.stringify(name)} has the form of a uid, which user:<uid> means; a name may not (docs/spec/rbac.md §1)`);
+  if (bytes(name) > 64 || !/^[a-z0-9][a-z0-9._-]*$/.test(name)) {
+    return invalid(`name: ${JSON.stringify(name)} must be lowercase letters, digits, '.', '_' and '-', starting with a letter or a digit, at most 64 bytes`);
+  }
+  return null;
+}
+
+/** A password of 8 to 1024 bytes that is no token's secret (CheckPassword of the server). */
+export function passwordRefusal(password: string): Refusal | null {
+  if (bytes(password) < 8) return invalid("password: must be at least 8 bytes");
+  if (bytes(password) > 1024) return invalid("password: must be at most 1024 bytes");
+  if (password.startsWith("ljs_pat_") || password.startsWith("ljs_dep_")) {
+    return invalid("password: must not start with ljs_pat_ or ljs_dep_: a secret with either is a token's");
+  }
+  return null;
+}
+
+/** Whether an enabled user has an admin binding, but for those skip leaves out; a group's admin
+ * binding does not count (rbac.md §3). */
+function anyAdmin(skip: (b: MockBinding) => boolean): boolean {
+  return bindings.some((b) => !skip(b) && b.role === "admin" && users.some((u) => !u.disabled && b.principal === `user:${u.name}`));
+}
+
+const lastAdmin = (name: string) =>
+  conflict(`user ${name} is the last enabled user with an admin binding: create another admin first (lajstrom admin user create --admin, or admin binding create)`);
+
+const str = (v: unknown) => (typeof v === "string" ? v : "");
+
+/** POST /api/v1/users: a local user with its password, and with admin its admin binding too. */
+export function createUser(body: unknown, by: string): User | Refusal {
+  const refused = bodyRefusal(body, ["name", "password", "admin"]);
+  if (refused) return refused;
+  const b = body as Record<string, unknown>;
+  if (b.admin !== undefined && b.admin !== null && typeof b.admin !== "boolean") return invalid("admin: must not be a JSON " + typeof b.admin);
+  const name = str(b.name);
+  const bad = nameRefusal(name) ?? passwordRefusal(str(b.password));
+  if (bad) return bad;
+  if (users.some((u) => u.name === name)) return conflict(`user ${name} already exists`);
+  const now = new Date().toISOString();
+  const user: User = { uid: uidOf(`${name} ${now}`), name, kind: "local", disabled: false, createdAt: now };
+  users.push(user);
+  passwords.set(name, sha256Hex(str(b.password)));
+  if (b.admin === true) bindings.push({ id: nextBindingId++, principal: `user:${name}`, role: "admin", repoMask: "*/*", createdAt: now });
+  changed({ at: now, principal: by, action: "user.create", repo: "", subject: `user:${name}`, digest: null, ip: DEMO_IP, details: { name, admin: b.admin === true, source: "api" } });
+  return user;
+}
+
+function renameUser(user: User, to: string): void {
+  const from = user.name;
+  formerUids.set(from, user.uid);
+  user.name = to;
+  for (const b of bindings) if (b.principal === `user:${from}`) b.principal = `user:${to}`;
+  for (const t of tokens) if (t.kind === "pat" && t.user === from) t.user = to;
+  // A user of the seed signs in with its old name as its password still.
+  const hash = passwords.get(from) ?? (user.kind === "local" ? sha256Hex(from) : undefined);
+  passwords.delete(from);
+  if (hash !== undefined) passwords.set(to, hash);
+}
+
+/** PATCH /api/v1/users/{user}: disabled first, then the name, each an audit row of its own; a
+ * value the user has already changes nothing. */
+export function updateUser(user: User, body: unknown, by: string): User | Refusal {
+  const refused = bodyRefusal(body, ["name", "disabled"]);
+  if (refused) return refused;
+  const b = body as { name?: unknown; disabled?: unknown };
+  if (b.name !== undefined && b.name !== null && typeof b.name !== "string") return invalid("name: must not be a JSON " + typeof b.name);
+  if (b.disabled !== undefined && b.disabled !== null && typeof b.disabled !== "boolean") return invalid("disabled: must not be a JSON " + typeof b.disabled);
+  const name = b.name as string | null | undefined;
+  const disabled = b.disabled as boolean | null | undefined;
+  if (name == null && disabled == null) return invalid("body: nothing to change; the fields are name and disabled");
+  const at = new Date().toISOString();
+  if (disabled != null && disabled !== user.disabled) {
+    if (disabled && !anyAdmin((x) => x.principal === `user:${user.name}`) && bindings.some((x) => x.principal === `user:${user.name}` && x.role === "admin")) {
+      return lastAdmin(user.name);
+    }
+    user.disabled = disabled;
+    changed({ at, principal: by, action: disabled ? "user.disable" : "user.enable", repo: "", subject: `user:${user.name}`, digest: null, ip: DEMO_IP, details: { name: user.name, source: "api" } });
+  }
+  if (name != null) {
+    const bad = nameRefusal(name);
+    if (bad) return bad;
+    if (name !== user.name) {
+      if (users.some((u) => u.name === name)) return conflict(`user ${name} already exists`);
+      const from = user.name;
+      renameUser(user, name);
+      changed({ at, principal: by, action: "user.rename", repo: "", subject: `user:${name}`, digest: null, ip: DEMO_IP, details: { from, name, source: "api" } });
+    }
+  }
+  return user;
+}
+
+/** POST /api/v1/users/{user}/password. */
+export function setPassword(user: User, body: unknown, by: string): Refusal | null {
+  const refused = bodyRefusal(body, ["password"]);
+  if (refused) return refused;
+  const password = str((body as Record<string, unknown>).password);
+  const bad = passwordRefusal(password);
+  if (bad) return bad;
+  passwords.set(user.name, sha256Hex(password));
+  changed({ at: new Date().toISOString(), principal: by, action: "user.password", repo: "", subject: `user:${user.name}`, digest: null, ip: DEMO_IP, details: { name: user.name, source: "api" } });
+  return null;
+}
+
+/** DELETE /api/v1/users/{user}: its live tokens revoked, its bindings deleted, the row kept as
+ * ~<uid> and the name free at once. Not the last enabled user with an admin binding. */
+export function deleteUser(user: User, by: string): Refusal | null {
+  const own = (b: MockBinding) => b.principal === `user:${user.name}`;
+  if (bindings.some((b) => own(b) && b.role === "admin") && !anyAdmin(own)) return lastAdmin(user.name);
+  const now = new Date().toISOString();
+  let tokensRevoked = 0;
+  for (const t of tokens) {
+    if (t.kind !== "pat" || t.user !== user.name) continue;
+    if (t.revokedAt === null) {
+      t.revokedAt = now;
+      tokensRevoked++;
+    }
+    t.user = `~${user.uid}`;
+  }
+  const bindingsDeleted = bindings.filter(own).length;
+  for (let i = bindings.length - 1; i >= 0; i--) if (own(bindings[i]!)) bindings.splice(i, 1);
+  users.splice(users.indexOf(user), 1);
+  deletedUsers.push({ ...user, disabled: true, name: `~${user.uid}`, deletedName: user.name });
+  formerUids.set(user.name, user.uid);
+  passwords.delete(user.name);
+  changed({ at: now, principal: by, action: "user.delete", repo: "", subject: `user:${user.name}`, digest: null, ip: DEMO_IP, details: { name: user.name, tokensRevoked, bindingsDeleted, source: "api" } });
+  return null;
+}
+
+/** A principal that a binding may name, `user:<name or uid>` or `group:<name>`, or why it cannot
+ * be bound (bindable of the server). Whether the user exists is asked last. */
+function bindable(principal: string): Refusal | null {
+  const cannot = () =>
+    invalid(`principal: ${principal} cannot be bound: a binding is for user:<name> or group:<name>; anonymous reads through a repo's anonymousRead, a deploy token gets its repo and scopes`);
+  if (principal === "anonymous") return cannot();
+  const i = principal.indexOf(":");
+  const [kind, name] = i < 0 ? [principal, ""] : [principal.slice(0, i), principal.slice(i + 1)];
+  if (name === "") return invalid(`principal: "${principal}": want <kind>:<name> or anonymous`);
+  if (kind === "user") return null;
+  if (kind === "group") {
+    if (bytes(name) > 256) return invalid("principal: a group name is at most 256 bytes");
+    if (/\p{C}/u.test(name)) return invalid("principal: a group name is printable UTF-8");
+    if (name.trim() !== name) return invalid("principal: a group name has no space at either end");
+    return null;
+  }
+  if (kind === "token") return /^\d+$/.test(name) ? cannot() : invalid(`principal: "${principal}": token id must be decimal`);
+  if (kind === "anonymous") return invalid(`principal: "${principal}": anonymous takes no name`);
+  return invalid(`principal: "${principal}": unknown kind "${kind}"`);
+}
+
+/** POST /api/v1/bindings. A user's binding names it by its name or its uid, and counts for the
+ * user whatever its name later; a group need not have members. */
+export function createBinding(body: unknown, by: string): Binding | Refusal {
+  const refused = bodyRefusal(body, ["principal", "role", "repoMask"]);
+  if (refused) return refused;
+  const b = body as Record<string, unknown>;
+  const sent = str(b.principal);
+  const role = str(b.role);
+  const repoMask = str(b.repoMask);
+  const bad = bindable(sent) ?? (Object.hasOwn(roleActions, role) ? null : invalid(`role: "${role}" is not reader, writer, maintainer or admin`)) ?? maskRefusal(repoMask);
+  if (bad) return bad;
+  if (role === "admin" && repoMask !== "*/*") return invalid("repoMask: an admin binding is on */*: the admin role is every repo and the system");
+  // Stored by the user's name inside the mock; the API answers its uid.
+  let principal = sent;
+  if (sent.startsWith("user:")) {
+    const user = userByRef(sent.slice(5));
+    if (!user) return invalid(`principal: user ${sent.slice(5)} does not exist`);
+    principal = `user:${user.name}`;
+  }
+  if (bindings.some((x) => x.principal === principal && x.role === role && x.repoMask === repoMask)) {
+    return conflict(`binding ${sent} ${role} on ${repoMask} exists already`);
+  }
+  const row: MockBinding = { id: nextBindingId++, principal, role: role as MockBinding["role"], repoMask, createdAt: new Date().toISOString() };
+  bindings.push(row);
+  changed({ at: row.createdAt, principal: by, action: "binding.create", repo: "", subject: principal, digest: null, ip: DEMO_IP, details: { id: row.id, role, repoMask, source: "api" } });
+  return bindingJson(row);
+}
+
+/** DELETE /api/v1/bindings/{id}: not the last admin binding of an enabled user. */
+export function deleteBinding(idText: string, by: string): Refusal | null {
+  const id = /^\d+$/.test(idText) ? Number(idText) : 0;
+  if (!Number.isSafeInteger(id) || id < 1) return invalid(`id: "${idText}" is not the id of a binding`);
+  const i = bindings.findIndex((b) => b.id === id);
+  if (i < 0) return notFound(`binding ${id} does not exist`);
+  const row = bindings[i]!;
+  const holder = users.find((u) => row.principal === `user:${u.name}`);
+  if (row.role === "admin" && holder && !holder.disabled && !anyAdmin((b) => b.id === id)) {
+    return conflict(`binding ${id} is the last admin binding of an enabled user: create another first (lajstrom admin binding create, or admin user create --admin)`);
+  }
+  bindings.splice(i, 1);
+  changed({ at: new Date().toISOString(), principal: by, action: "binding.delete", repo: "", subject: row.principal, digest: null, ip: DEMO_IP, details: { id, role: row.role, repoMask: row.repoMask, source: "api" } });
+  return null;
 }
 
 // --- Repos ----------------------------------------------------------------------------------
@@ -741,10 +1015,10 @@ function auditLog(): (MockEvent & { id: number })[] {
   for (const s of repoSeeds) {
     events.push({ at: s.createdAt, principal: "user:admin", action: "repo.create", repo: keyOf(s), subject: keyOf(s), digest: null, ip: ipOf["user:admin"]!, details: { registry: s.registry, anonymousRead: s.anonymousRead } });
   }
-  for (const u of users.filter((u) => u.name !== "admin" && u.uid !== firstAdmin?.user.uid)) {
+  for (const u of seedUsers.filter((u) => u.name !== "admin")) {
     events.push({ at: u.createdAt, principal: "user:admin", action: "user.create", repo: "", subject: `user:${u.name}`, digest: null, ip: ipOf["user:admin"]!, details: {} });
   }
-  for (const b of bindings.filter((b) => b.id !== 1 && b.id !== firstAdmin?.binding.id)) {
+  for (const b of seedBindings.filter((b) => b.id !== 1)) {
     events.push({ at: b.createdAt, principal: "user:admin", action: "binding.create", repo: "", subject: b.principal, digest: null, ip: ipOf["user:admin"]!, details: { role: b.role, repoMask: b.repoMask, binding: b.id } });
   }
   for (const t of tokens) {
@@ -788,7 +1062,7 @@ function auditJson(e: MockEvent & { id: number }): AuditEvent {
     id: e.id,
     at: e.at,
     principal: apiPrincipal(e.principal),
-    principalName: e.principal.startsWith("user:") ? e.principal.slice(5) : undefined,
+    principalName: e.principal.startsWith("user:") ? nameFor(e.principal.slice(5)) : undefined,
     action: e.action,
     repo: e.repo || undefined,
     subject: e.subject ? apiPrincipal(e.subject) : undefined,
@@ -915,37 +1189,24 @@ keep("db", {
 
 // --- The first admin ------------------------------------------------------------------------
 // The admin made with the bootstrap token (POST /api/v1/bootstrap, src/mocks/bootstrap.ts): a
-// local user with the binding (user:<uid>, admin, */*), made together, and one user.create event
-// by anonymous with the source bootstrap (docs/auth.md, Bootstrap), not one derived from the seed
-// (auditLog). Kept by src/mocks/state.ts; its event is kept with the others of the demo.
+// local user with its password and the binding (user:<uid>, admin, */*), made together, and one
+// user.create event by anonymous with the source bootstrap (docs/auth.md, Bootstrap), not one
+// derived from the seed (auditLog). Kept with the users and the events of the demo.
 
 type MockUser = (typeof users)[number];
 
-let firstAdmin: { user: MockUser; binding: MockBinding } | null = null;
-
-function addFirstAdmin(admin: { user: MockUser; binding: MockBinding }): void {
-  firstAdmin = admin;
-  if (!users.some((u) => u.uid === admin.user.uid)) users.push(admin.user);
-  if (!bindings.some((b) => b.id === admin.binding.id)) bindings.push(admin.binding);
-}
-
-/** Makes the first admin called name; the caller has checked the name, and that it is free. */
-export function makeFirstAdmin(name: string): MockUser {
+/** Makes the first admin called name; the caller has checked the name, that it is free, and the
+ * password. */
+export function makeFirstAdmin(name: string, password: string): MockUser {
   const at = new Date().toISOString();
-  const user: MockUser = { uid: uidOf(name), name, kind: "local", disabled: false, createdAt: at };
-  const binding: MockBinding = { id: Math.max(0, ...bindings.map((b) => b.id)) + 1, principal: `user:${name}`, role: "admin", repoMask: "*/*", createdAt: at };
-  addFirstAdmin({ user, binding });
+  // A fresh uid, as createUser makes: a user deleted in the demo may have had the name.
+  const user: MockUser = { uid: uidOf(`${name} ${at}`), name, kind: "local", disabled: false, createdAt: at };
+  users.push(user);
+  bindings.push({ id: nextBindingId++, principal: `user:${name}`, role: "admin", repoMask: "*/*", createdAt: at });
+  passwords.set(name, sha256Hex(password));
   changed({ at, principal: "anonymous", action: "user.create", repo: "", subject: `user:${name}`, digest: null, ip: DEMO_IP, details: { admin: true, name, source: "bootstrap" } });
   return user;
 }
-
-keep("first admin", {
-  save: () => firstAdmin,
-  load: (data) => {
-    const d = data as { user?: MockUser; binding?: MockBinding } | null;
-    if (d?.user && d.binding) addFirstAdmin({ user: d.user, binding: d.binding });
-  },
-});
 
 /** A refusal the handler answers: the status, and the message of the server's error. */
 export type Refusal = { status: number; code: string; message: string };

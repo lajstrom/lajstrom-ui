@@ -128,12 +128,20 @@ export type AuditEvent = Schemas["AuditEntry"];
 /** A page of the audit log, newest first; `next` is the cursor of the page after it. */
 export type AuditList = Schemas["AuditList"];
 
-/** A local user. Whether it is an admin follows from its bindings (rbac.md §3). */
+/** A user, local or made by an OIDC login. Whether it is an admin follows from its bindings and
+ * its groups' (rbac.md §3, §8). */
 export type User = Schemas["User"];
 
 /** The body of POST /api/v1/bootstrap: the server's one-time bootstrap token, and the name and
  * the password of the first admin. */
 export type BootstrapRequest = Schemas["BootstrapRequest"];
+
+/** POST /api/v1/users: a local user and its password; `admin` binds it to the admin role on
+ * `*\/*` in the same step. */
+export type UserRequest = Schemas["UserRequest"];
+
+/** PATCH /api/v1/users/{user}: the name, disabled, or both. */
+export type UserPatch = Schemas["UserPatch"];
 
 /** A personal access token or a deploy token (docs/api.md, Tokens). The secret is answered only
  * once, by the creation: CreatedToken. */
@@ -153,6 +161,10 @@ export type MaskTokenRequest = Schemas["MaskTokenRequest"];
 /** A role binding; `principal` is canonical, `user:<uid>` or `group:<name>`, and `name` the
  * user's name now. */
 export type Binding = Schemas["Binding"];
+
+/** POST /api/v1/bindings: the principal as `user:<name>`, `user:<uid>` or `group:<name>`, the
+ * role and the mask. */
+export type BindingRequest = Schemas["BindingRequest"];
 
 /** An open publication session (proposed): maven deploys file by file until
  * maven-metadata.xml. */
