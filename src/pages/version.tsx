@@ -494,15 +494,18 @@ function DetailsCard({ view }: { view: View }) {
 }
 
 function AttributesCard({ view, format }: { view: View; format: string }) {
-  const attrs = Object.entries(view.attrs).filter(([k]) => k.startsWith(`lajstrom.${format}.`));
+  // The keys of the profile type: the format's name, but deb for apt (manifest-profile.md §3).
+  const prefix = `lajstrom.${format === "apt" ? "deb" : format}.`;
+  const attrs = Object.entries(view.attrs).filter(([k]) => k.startsWith(prefix));
   if (!attrs.length) return null;
   return (
     <Card>
-      <CardHeader title="Attributes" description="lajstrom.<format>.* annotations" />
+      <CardHeader title="Attributes" description={`${prefix}* annotations`} />
       <CardBody>
         <Properties className="grid-cols-[7rem_1fr]">
           {attrs.map(([k, v]) => (
-            <Property key={k} label={<span className="font-mono text-xs">{k}</span>}>
+            // The key without the prefix the header names: a whole key overran its column.
+            <Property key={k} label={<span title={k} className="font-mono text-xs break-all">{k.slice(prefix.length)}</span>}>
               <span className="font-mono text-xs break-all">{v}</span>
             </Property>
           ))}
