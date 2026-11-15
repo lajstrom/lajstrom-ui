@@ -211,7 +211,10 @@ function AuditRow({ event: e, showRepo }: { event: AuditEvent; showRepo: boolean
       </TD>
       {showRepo ? (
         <TD>
-          {e.repo ? (
+          {e.repo?.includes("*") ? (
+            // A mask, such as a webhook's of every mask (rbac.md §5): no one repo to open.
+            <span className="font-mono text-xs">{e.repo}</span>
+          ) : e.repo ? (
             <Link to="/$format/$repo" params={{ format, repo }} className="font-mono text-xs text-primary hover:underline">
               {e.repo}
             </Link>
