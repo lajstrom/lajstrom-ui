@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import specText from "../../openapi/server.yaml?raw";
+import specText from "../../public/openapi.yaml?raw";
 import { generate } from "../../scripts/openapi-types.ts";
-import generated from "./server.gen.ts?raw";
+import generated from "./openapi.gen.ts?raw";
 
-describe("src/api/server.gen.ts", () => {
-  it("is what npm run gen:api makes of openapi/server.yaml", () => {
+describe("src/api/openapi.gen.ts", () => {
+  it("is what npm run gen:api makes of public/openapi.yaml", () => {
     expect(generated).toBe(generate(specText));
   });
 
@@ -13,7 +13,7 @@ describe("src/api/server.gen.ts", () => {
     const header = "# Vendored from lajstrom/lajstrom@" + "0".repeat(40) + ", internal/api/openapi.yaml.\n";
     expect(() => generate(header + "components: {schemas: {A: {$ref: 'other.yaml#/A'}}}")).toThrow(/unsupported \$ref/);
     expect(() => generate(header + "components: {schemas: {A: {type: file}}}")).toThrow(/unsupported type/);
-    expect(() => generate("components: {}")).toThrow(/Vendored from/);
+    expect(() => generate("components: {}")).toThrow(/lajstrom\/lajstrom@<commit>/);
   });
 
   it("types nullable unions, enums with null and intersections", () => {

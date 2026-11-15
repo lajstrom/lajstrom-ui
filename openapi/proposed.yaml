@@ -285,14 +285,38 @@ components:
         retiredAt: {type: [string, "null"], format: date-time}
 
     PackageDetail:
-      description: A package with the facts of its list row, its OCI repository and the newest metadata (lajstrom/lajstrom#958).
-      allOf:
-        - $ref: "#/components/schemas/Package"
-        - type: object
-          required: [nameOci, latestVersion, versions, manifests, latestVariants, size, summary, attrs, updatedAt, ociRepository, latestMetadata]
-          properties:
-            ociRepository: {type: string, description: "<format>/<repo>/<nameOci>, below the instance prefix."}
-            latestMetadata: {type: [object, "null"], description: The metadata layer of the newest manifest.}
+      description: >-
+        A package with every fact of its list row, its OCI repository and the newest metadata
+        (lajstrom/lajstrom#958).
+      type: object
+      required:
+        - name
+        - createdAt
+        - nameOci
+        - latestVersion
+        - versions
+        - manifests
+        - latestVariants
+        - size
+        - summary
+        - attrs
+        - updatedAt
+        - ociRepository
+        - latestMetadata
+      properties:
+        name: {type: string}
+        createdAt: {type: string, format: date-time}
+        nameOci: {type: string}
+        latestVersion: {type: [string, "null"]}
+        versions: {type: integer}
+        manifests: {type: integer}
+        latestVariants: {type: array, items: {type: string}}
+        size: {type: integer}
+        summary: {type: [string, "null"]}
+        attrs: {type: object, additionalProperties: {type: string}}
+        updatedAt: {type: string, format: date-time}
+        ociRepository: {type: string, description: "<format>/<repo>/<nameOci>, below the instance prefix."}
+        latestMetadata: {type: [object, "null"], description: The metadata layer of the newest manifest.}
 
     FacetValue:
       type: object

@@ -1,5 +1,5 @@
-// npm run gen:api: writes src/api/server.gen.ts from openapi/server.yaml, and public/openapi.yaml
-// from it and openapi/proposed.yaml.
+// npm run gen:api: writes public/openapi.yaml from openapi/server.yaml and openapi/proposed.yaml,
+// and src/api/openapi.gen.ts from it.
 
 import { readFileSync, writeFileSync } from "node:fs";
 
@@ -8,6 +8,6 @@ import { generate } from "./openapi-types.ts";
 
 const root = new URL("../", import.meta.url);
 const read = (path: string) => readFileSync(new URL(path, root), "utf8");
-const server = read("openapi/server.yaml");
-writeFileSync(new URL("src/api/server.gen.ts", root), generate(server));
-writeFileSync(new URL("public/openapi.yaml", root), mergeSpec(server, read("openapi/proposed.yaml")));
+const spec = mergeSpec(read("openapi/server.yaml"), read("openapi/proposed.yaml"));
+writeFileSync(new URL("public/openapi.yaml", root), spec);
+writeFileSync(new URL("src/api/openapi.gen.ts", root), generate(spec));
