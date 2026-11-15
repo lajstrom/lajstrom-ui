@@ -35,7 +35,6 @@ const notMocked = new Set([
   "post /api/v1/users/{user}/password",
   "post /api/v1/bindings",
   "delete /api/v1/bindings/{id}",
-  "post /api/v1/bootstrap",
   "get /api/v1/openapi.yaml",
   // Webhooks.
   "get /api/v1/repos/{format}/{repo}/webhooks",

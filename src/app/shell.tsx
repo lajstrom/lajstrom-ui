@@ -165,9 +165,9 @@ export function AppShell() {
   const session = useSession();
   const location = useRouterState({ select: (s) => s.location });
   // The demo opens at its sign-in page, like the tool behind a login will; signed out, every
-  // page leads there and back after signing in.
+  // page leads there and back after signing in, but the page that sets up the first admin.
   const signedOutDemo = demo.active && !session;
-  const walled = signedOutDemo && location.pathname !== "/sign-in";
+  const walled = signedOutDemo && location.pathname !== "/sign-in" && location.pathname !== "/first-admin";
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

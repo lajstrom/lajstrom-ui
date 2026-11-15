@@ -1,11 +1,12 @@
-// Sign-in and sign-out (src/api/session.ts has the why). Only endpoints the server has:
-// POST/GET/DELETE /api/v1/users/{name}/tokens and GET /api/v1/whoami (docs/api.md).
+// Sign-in and sign-out (src/api/session.ts has the why), and the first admin of a new server.
+// Only endpoints the server has: POST/GET/DELETE /api/v1/users/{name}/tokens, GET
+// /api/v1/whoami and POST /api/v1/bootstrap (docs/api.md).
 
 import { sha256Hex } from "@/lib/sha256";
 
 import { ApiError, apiGetAs, apiPath, apiSend, basicAuth } from "./client";
 import { getSession, setSession } from "./session";
-import type { CreatedToken, Token, WhoAmI } from "./types";
+import type { BootstrapRequest, CreatedToken, Token, User, WhoAmI } from "./types";
 
 /** How long the token created at sign-in lives; the server allows up to 365 days. */
 export const SESSION_LIFETIME = "12h";
@@ -85,4 +86,22 @@ export async function signOut(): Promise<void> {
     }
   }
   setSession(null);
+}
+
+/**
+ * Creates the first admin of a new server with its one-time bootstrap token (POST
+ * /api/v1/bootstrap, docs/api.md "The first admin"), then signs in as it with its password, as
+ * signInWithPassword does. The token is the request's credential: no session goes with it.
+ */
+export async function createFirstAdmin(req: BootstrapRequest): Promise<User> {
+  // A token is one word, and a name has no spaces: what is around them was pasted along.
+  const body: BootstrapRequest = { token: req.token.trim(), name: req.name.trim(), password: req.password };
+  const user = await apiSend<User>("POST", apiPath("bootstrap"), { body, authorization: "" });
+  try {
+    await signInWithPassword(user.name, req.password);
+  } catch (err) {
+    const why = err instanceof Error ? err.message.replace(/\.$/, "") : "the request failed";
+    throw new SignInError(`The admin ${user.name} is created, but signing in failed (${why}). Sign in with its name and password.`);
+  }
+  return user;
 }

@@ -6,6 +6,7 @@ import { delay, http, HttpResponse, type PathParams } from "msw";
 import type { ApiErrorBody } from "@/api/types";
 
 import { authenticate, byPassword, createToken, revokeToken, type Refusal } from "./auth";
+import { bootstrapOpen, exchangeBootstrapToken } from "./bootstrap";
 import * as db from "./db";
 import { getPersona, setPersona } from "./persona";
 
@@ -122,6 +123,20 @@ export const handlers = [
   get("*/api/v1/whoami", async () => {
     if (getPersona() === "anonymous") return unauthorized("credentials are needed");
     return HttpResponse.json(db.whoami());
+  }),
+
+  // The first admin, for the bootstrap token in the body, which is the credential (docs/api.md).
+  // How the demo's server, which has its admin, takes it: src/mocks/bootstrap.ts.
+  post("*/api/v1/bootstrap", async ({ request }) => {
+    if (!bootstrapOpen()) return fail(404, "NOT_FOUND", `POST ${new URL(request.url).pathname} is not an endpoint of this version (docs/api.md)`);
+    const made = exchangeBootstrapToken(await body(request));
+    if ("status" in made) {
+      return HttpResponse.json<ApiErrorBody>(
+        { error: { code: made.code, message: made.message } },
+        { status: made.status, headers: made.retryAfter ? { "Retry-After": String(made.retryAfter) } : {} },
+      );
+    }
+    return HttpResponse.json(made, { status: 201, headers: { Location: `/api/v1/users/${made.name}` } });
   }),
 
   get("*/api/v1/repos", async ({ request }) => {
