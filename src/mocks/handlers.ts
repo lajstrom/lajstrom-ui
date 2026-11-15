@@ -114,11 +114,6 @@ const num = (v: string | null, fallback: number) => {
 };
 
 export const handlers = [
-  get("*/-/version", async () => {
-    const { version, commit, date } = db.serverInfo;
-    return HttpResponse.json({ version, commit, date });
-  }),
-
   get("*/api/v1/info", async () => {
     return HttpResponse.json({ ...db.serverInfo, caller: db.caller() });
   }),
@@ -249,17 +244,17 @@ export const handlers = [
     return adminOr403() ?? HttpResponse.json({ tokens: db.tokens });
   }),
 
-  get("*/api/v1/users/:name/tokens", async ({ params }) => {
-    const user = db.userByRef(decode(params.name))?.name;
-    if (!user) return fail(404, "NOT_FOUND", `user ${decode(params.name)} not found`);
+  get("*/api/v1/users/:user/tokens", async ({ params }) => {
+    const user = db.userByRef(decode(params.user))?.name;
+    if (!user) return fail(404, "NOT_FOUND", `user ${decode(params.user)} not found`);
     const denied = ownOr403(user);
     if (denied) return denied;
     return HttpResponse.json({ tokens: db.tokens.filter((t) => t.kind === "pat" && t.user === user) });
   }),
 
-  post("*/api/v1/users/:name/tokens", async ({ params, request }) => {
-    const user = db.userByRef(decode(params.name))?.name;
-    if (!user) return fail(404, "NOT_FOUND", `user ${decode(params.name)} not found`);
+  post("*/api/v1/users/:user/tokens", async ({ params, request }) => {
+    const user = db.userByRef(decode(params.user))?.name;
+    if (!user) return fail(404, "NOT_FOUND", `user ${decode(params.user)} not found`);
     const denied = ownOr403(user);
     if (denied) return denied;
     const created = createToken({ user }, await body(request));
@@ -267,9 +262,9 @@ export const handlers = [
     return HttpResponse.json(created, { status: 201, headers: { Location: `/api/v1/users/${user}/tokens/${created.id}` } });
   }),
 
-  del("*/api/v1/users/:name/tokens/:id", async ({ params }) => {
-    const user = db.userByRef(decode(params.name))?.name;
-    if (!user) return fail(404, "NOT_FOUND", `user ${decode(params.name)} not found`);
+  del("*/api/v1/users/:user/tokens/:id", async ({ params }) => {
+    const user = db.userByRef(decode(params.user))?.name;
+    if (!user) return fail(404, "NOT_FOUND", `user ${decode(params.user)} not found`);
     const denied = ownOr403(user);
     if (denied) return denied;
     return revokeToken({ user }, Number(decode(params.id)))
@@ -334,7 +329,9 @@ export const handlers = [
     return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
   }),
 
-  get("*/api/v1/*", async () => {
-    return fail(404, "NOT_FOUND", "no such endpoint in the mock API");
-  }),
+  // Any other request under /api/ gets the server's answer to a path it does not know.
+  http.all(
+    "*/api/v1/*",
+    answered(({ request }) => fail(404, "NOT_FOUND", `${request.method} ${new URL(request.url).pathname} is not in this version`)),
+  ),
 ];

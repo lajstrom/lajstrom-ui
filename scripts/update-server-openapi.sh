@@ -18,7 +18,7 @@ trap 'rm -f "$tmp"' EXIT
 curl -fsSL "https://raw.githubusercontent.com/lajstrom/lajstrom/$sha/internal/api/openapi.yaml" > "$tmp"
 {
   echo "# Vendored from lajstrom/lajstrom@$sha, internal/api/openapi.yaml. Do not edit:"
-  echo "# npm run update:openapi -- <ref> replaces it and regenerates src/api/server.gen.ts."
+  echo "# npm run update:openapi -- <ref> replaces it and regenerates src/api/server.gen.ts and public/openapi.yaml."
   cat "$tmp"
 } > openapi/server.yaml
 

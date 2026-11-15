@@ -210,11 +210,9 @@ export function AppShell() {
             <NavLink to="/" icon={<Boxes />}>
               Repositories
             </NavLink>
-            {demo.active ? (
-              <NavLink to="/api-docs" icon={<Braces />}>
-                API
-              </NavLink>
-            ) : null}
+            <NavLink to="/api-docs" icon={<Braces />}>
+              API
+            </NavLink>
             {who.data?.admin ? (
               <>
                 <NavLink to="/registries" icon={<Server />}>

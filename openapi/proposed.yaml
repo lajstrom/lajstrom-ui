@@ -1,0 +1,427 @@
+# What the UI reads and the server does not answer yet (docs/api-proposal.md), as additions to
+# openapi/server.yaml. npm run gen:api merges the two into public/openapi.yaml, the spec of the
+# demo's API page (scripts/openapi-merge.ts). This file may only add: an operation, a schema, a
+# property or a parameter; each is marked proposed in the merged spec. One that the server has
+# already fails the merge: the server has it now, so it goes from here. A description is
+# appended to the server's.
+info:
+  description: >-
+    This is the spec of the UI's demo: the server's, merged with what the UI reads and the server
+    does not answer yet, each marked proposed (x-lajstrom-status: proposed). "Try it out" is
+    answered in the browser by the demo's mock, on generated data, as the signed-in demo user;
+    nothing reaches a server.
+
+paths:
+  /api/v1/repos/{format}/{repo}/packages:
+    get:
+      parameters:
+        - name: attr
+          in: query
+          description: >-
+            A format attribute as key:value without lajstrom., deb.suite:jammy; repeat for
+            several. A package matches when one of its manifests does (lajstrom/lajstrom#955).
+          schema: {type: array, items: {type: string}}
+          style: form
+          explode: true
+        - name: sort
+          in: query
+          description: The order of the page, name when absent (lajstrom/lajstrom#955).
+          schema: {type: string, enum: [name, updated, size, versions]}
+        - name: order
+          in: query
+          schema: {type: string, enum: [asc, desc]}
+        - name: dir
+          in: query
+          description: >-
+            A raw repo only: list one directory, its files as packages and its subdirectories as
+            directories (lajstrom/lajstrom#955).
+          schema: {type: string}
+
+  /api/v1/repos/{format}/{repo}/packages/{name}:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/package"
+    get:
+      tags: [repos]
+      operationId: getPackage
+      summary: One package, with the facts of its list row and the newest metadata (read).
+      description: >-
+        lajstrom/lajstrom#958. Without it, the UI builds the package page from the versions.
+      responses:
+        "200":
+          description: The package.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PackageDetail"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/repos/{format}/{repo}/sessions:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+    get:
+      tags: [repos]
+      operationId: listSessions
+      summary: The open deploys of a maven repo, file by file until maven-metadata.xml (read).
+      description: lajstrom/lajstrom#960.
+      responses:
+        "200":
+          description: The sessions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions: {type: array, items: {$ref: "#/components/schemas/PublishSession"}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/search:
+    get:
+      tags: [repos]
+      operationId: search
+      summary: Packages by name, manifests and files by digest, over the repos the caller may read.
+      description: >-
+        Names match exactly, then by prefix, then as a substring, then in the summary. A sha256
+        digest, sha256: optional and 8 hex digits at least, matches manifest and file digests by
+        prefix (lajstrom/lajstrom#956).
+      parameters:
+        - {name: q, in: query, required: true, schema: {type: string}}
+        - {name: format, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, default: 20, maximum: 200}}
+      responses:
+        "200":
+          description: The hits.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SearchResult"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/registries:
+    get:
+      tags: [meta]
+      operationId: listRegistries
+      summary: The backend registries, their capabilities and health (admin).
+      description: lajstrom/lajstrom#952; status and support tiers, lajstrom/lajstrom#953.
+      responses:
+        "200":
+          description: The registries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [registries]
+                properties:
+                  registries: {type: array, items: {$ref: "#/components/schemas/Registry"}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/tokens:
+    get:
+      tags: [tokens]
+      operationId: listAllTokens
+      summary: Every token, of every user and every repo (admin).
+      description: lajstrom/lajstrom#959.
+      responses:
+        "200":
+          description: The tokens.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TokenList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+components:
+  schemas:
+    Repo:
+      properties:
+        stats:
+          $ref: "#/components/schemas/RepoStats"
+          description: Counts over the index (lajstrom/lajstrom#957).
+        permissions:
+          type: array
+          description: What the caller may do on the repo, rbac.md §2 (lajstrom/lajstrom#957).
+          items: {type: string, enum: [read, write, delete, manage]}
+        reindex:
+          $ref: "#/components/schemas/ReindexStatus"
+          description: Reindex and reconcile state (lajstrom/lajstrom#957).
+        signingKeys:
+          type: array
+          description: An apt repo only, the current key first, then the retired ones (lajstrom/lajstrom#957).
+          items: {$ref: "#/components/schemas/SigningKey"}
+
+    Package:
+      properties:
+        nameOci:
+          type: string
+          description: The escaped package path (lajstrom/lajstrom#955).
+        latestVersion:
+          type: [string, "null"]
+        versions:
+          type: integer
+          description: Distinct versions.
+        manifests:
+          type: integer
+          description: Versions times variants.
+        latestVariants:
+          type: array
+          description: The variants of the latest version.
+          items: {type: string}
+        size: {type: integer}
+        summary:
+          type: [string, "null"]
+          description: >-
+            One line from the metadata layer: pypi summary, deb Description, maven name
+            (lajstrom/lajstrom#954).
+        attrs:
+          type: object
+          description: The format attributes of the latest version without lajstrom., deb.suite.
+          additionalProperties: {type: string}
+        updatedAt: {type: string, format: date-time}
+
+    PackageList:
+      properties:
+        facets:
+          type: object
+          description: >-
+            The values of the format's filter keys over the whole repo, with package counts; an
+            answer with facets takes attr, sort, order and dir (lajstrom/lajstrom#955).
+          additionalProperties:
+            type: array
+            items: {$ref: "#/components/schemas/FacetValue"}
+        directories:
+          type: array
+          description: A raw repo with dir only, the subdirectories of dir.
+          items: {$ref: "#/components/schemas/RawDirectory"}
+
+    Variant:
+      properties:
+        artifactType: {type: string}
+        attrs:
+          type: object
+          description: The manifest's lajstrom.* annotations by their full key, as VariantDetail has them.
+          additionalProperties: {type: string}
+        size: {type: integer}
+        fileCount: {type: integer}
+        degraded:
+          type: boolean
+          description: The row came from the annotations alone.
+        referrers: {$ref: "#/components/schemas/ReferrerCounts"}
+
+    VariantDetail:
+      properties:
+        annotations:
+          type: object
+          description: The manifest's annotations, read from the registry (lajstrom/lajstrom#951).
+          additionalProperties: {type: string}
+        manifest:
+          $ref: "#/components/schemas/OciManifest"
+          description: The manifest, read from the registry (lajstrom/lajstrom#951).
+
+    ReindexRun:
+      properties:
+        report:
+          description: The other fields of the report, as docs/api.md shows them (lajstrom/lajstrom#1128).
+          properties:
+            repo: {type: string}
+            ociRepositories: {type: integer}
+            manifests: {type: integer}
+            added: {type: integer}
+            updated: {type: integer}
+            unchanged: {type: integer}
+            removed: {type: integer}
+            pending: {type: integer}
+            degraded: {type: integer}
+            referrers: {type: integer}
+            foreign:
+              type: array
+              description: Manifests under the repo's path that Lajstrom did not write; not indexed.
+              items:
+                type: object
+                required: [repository, tag, digest, mediaType]
+                properties:
+                  repository: {type: string}
+                  tag: {type: string}
+                  digest: {type: string}
+                  mediaType: {type: string}
+            errors: {type: array, items: {}}
+            truncated: {type: boolean}
+
+    RepoStats:
+      type: object
+      required: [packages, versions, manifests, files, size, lastPushAt]
+      properties:
+        packages: {type: integer}
+        versions: {type: integer, description: "Distinct (package, version) pairs."}
+        manifests: {type: integer, description: "One per (package, version, variant)."}
+        files: {type: integer}
+        size: {type: integer}
+        lastPushAt: {type: [string, "null"], format: date-time}
+
+    ReindexStatus:
+      type: object
+      required: [state, startedAt, finishedAt, errors, nextReconcileAt]
+      properties:
+        state: {type: string, enum: [idle, running, failed]}
+        startedAt: {type: [string, "null"], format: date-time}
+        finishedAt: {type: [string, "null"], format: date-time}
+        errors: {type: integer}
+        nextReconcileAt:
+          type: [string, "null"]
+          format: date-time
+          description: The next scheduled reconcile; null when it is off.
+
+    SigningKey:
+      type: object
+      required: [algorithm, fingerprint, createdAt, retiredAt]
+      properties:
+        algorithm: {type: string, enum: [ed25519, rsa4096]}
+        fingerprint: {type: string}
+        createdAt: {type: string, format: date-time}
+        retiredAt: {type: [string, "null"], format: date-time}
+
+    PackageDetail:
+      description: A package with the facts of its list row, its OCI repository and the newest metadata (lajstrom/lajstrom#958).
+      allOf:
+        - $ref: "#/components/schemas/Package"
+        - type: object
+          required: [nameOci, latestVersion, versions, manifests, latestVariants, size, summary, attrs, updatedAt, ociRepository, latestMetadata]
+          properties:
+            ociRepository: {type: string, description: "<format>/<repo>/<nameOci>, below the instance prefix."}
+            latestMetadata: {type: [object, "null"], description: The metadata layer of the newest manifest.}
+
+    FacetValue:
+      type: object
+      required: [value, count]
+      properties:
+        value: {type: string}
+        count: {type: integer}
+
+    RawDirectory:
+      type: object
+      required: [name, path, files, size, updatedAt]
+      properties:
+        name: {type: string}
+        path: {type: string}
+        files: {type: integer}
+        size: {type: integer}
+        updatedAt: {type: string, format: date-time}
+
+    ReferrerCounts:
+      type: object
+      required: [signatures, sboms, attestations]
+      properties:
+        signatures: {type: integer}
+        sboms: {type: integer}
+        attestations: {type: integer}
+
+    OciDescriptor:
+      type: object
+      required: [mediaType, digest, size]
+      properties:
+        mediaType: {type: string}
+        digest: {type: string}
+        size: {type: integer}
+        annotations: {type: object, additionalProperties: {type: string}}
+
+    OciManifest:
+      type: object
+      required: [schemaVersion, mediaType, artifactType, config, layers, annotations]
+      properties:
+        schemaVersion: {const: 2}
+        mediaType: {type: string}
+        artifactType: {type: string}
+        config: {$ref: "#/components/schemas/OciDescriptor"}
+        layers: {type: array, items: {$ref: "#/components/schemas/OciDescriptor"}}
+        annotations: {type: object, additionalProperties: {type: string}}
+
+    SearchHit:
+      oneOf:
+        - type: object
+          required: [kind, format, repo, name, latestVersion, summary, updatedAt]
+          properties:
+            kind: {const: package}
+            format: {type: string}
+            repo: {type: string}
+            name: {type: string}
+            latestVersion: {type: [string, "null"]}
+            summary: {type: [string, "null"]}
+            updatedAt: {type: string, format: date-time}
+        - type: object
+          required: [kind, format, repo, name, version, variant, digest, matched]
+          properties:
+            kind: {const: version}
+            format: {type: string}
+            repo: {type: string}
+            name: {type: string}
+            version: {type: string}
+            variant: {type: string}
+            digest: {type: string}
+            matched: {type: string, description: "What matched: manifest, or the name of the file whose digest did."}
+
+    SearchResult:
+      type: object
+      required: [hits, total]
+      properties:
+        hits: {type: array, items: {$ref: "#/components/schemas/SearchHit"}}
+        total: {type: integer}
+
+    Registry:
+      type: object
+      required: [name, type, product, url, prefix, capabilities, support, status, repos]
+      properties:
+        name: {type: string}
+        type: {type: string, enum: [generic, ecr]}
+        product: {type: string, description: The product detected, from the registry comparison of docs/registries/.}
+        url: {type: string}
+        prefix: {type: string}
+        capabilities:
+          type: object
+          description: provider.Capabilities.
+          required: [createOnPush, referrers, catalog, deleteManifest, immutableTags, blobRedirect, maxBlobSize]
+          properties:
+            createOnPush: {type: boolean}
+            referrers: {type: boolean}
+            catalog: {type: boolean}
+            deleteManifest: {type: boolean}
+            immutableTags: {type: boolean}
+            blobRedirect: {type: boolean}
+            maxBlobSize: {type: integer}
+        support:
+          type: string
+          enum: [ci, manual, untested]
+          description: "The support tier: tested in CI, tested by hand, untested (lajstrom/lajstrom#953)."
+        status:
+          type: object
+          required: [state, checkedAt, latencyMs, message]
+          properties:
+            state: {type: string, enum: [ok, degraded, down]}
+            checkedAt: {type: string, format: date-time}
+            latencyMs: {type: [integer, "null"]}
+            message: {type: [string, "null"]}
+        repos: {type: array, items: {type: string}}
+
+    PublishSession:
+      type: object
+      required: [id, key, principal, state, files, createdAt, updatedAt, expiresAt]
+      properties:
+        id: {type: integer}
+        key: {type: string, description: "groupId:artifactId:version"}
+        principal: {type: string}
+        state: {type: string, enum: [open, committed, aborted, expired]}
+        files:
+          type: array
+          items:
+            type: object
+            required: [name, size, digest]
+            properties:
+              name: {type: string}
+              size: {type: integer}
+              digest: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}

@@ -1,25 +1,25 @@
-import { FlaskConical } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { getSession } from "@/api/session";
-import { demoMode, enterDemo } from "@/app/demo";
+import { config } from "@/app/config";
+import { demoMode } from "@/app/demo";
 import { PageHeader } from "@/components/common";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState, Skeleton } from "@/components/ui/misc";
 
 /**
- * The API of the demo in Swagger UI, from public/openapi.yaml. "Try it out" goes through the same
- * mock as the UI, as the signed-in demo user, so the requests and answers show in the browser's
- * developer tools. Demo only: against a server, the page offers the demo.
+ * /api/v1 in Swagger UI. Against a server, from the server's own description,
+ * GET /api/v1/openapi.yaml, and "Try it out" sends real requests as the signed-in user. In the
+ * demo, from public/openapi.yaml: the server's description with what the UI proposes, answered
+ * by the same mock as the UI, so the requests and answers show in the browser's developer tools.
  */
 export function ApiDocsPage() {
   const demo = demoMode().active;
+  const spec = demo ? `${import.meta.env.BASE_URL}openapi.yaml` : `${config().apiBaseUrl}/api/v1/openapi.yaml`;
   const host = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
 
   useEffect(() => {
-    if (!demo) return;
     let cancelled = false;
     // Swagger UI is about 450 KiB gzipped: its own chunk, loaded on this page only.
     Promise.all([import("swagger-ui-dist/swagger-ui-es-bundle.js"), import("swagger-ui-dist/swagger-ui.css")])
@@ -27,17 +27,21 @@ export function ApiDocsPage() {
         if (cancelled || !host.current) return;
         SwaggerUIBundle({
           domNode: host.current,
-          url: `${import.meta.env.BASE_URL}openapi.yaml`,
-          tryItOutEnabled: true,
+          url: spec,
+          // Against a server, a request is sent only after "Try it out" on its operation.
+          tryItOutEnabled: demo,
+          showExtensions: true,
           deepLinking: false,
           displayRequestDuration: true,
           defaultModelsExpandDepth: 0,
           docExpansion: "list",
           filter: true,
-          // As the demo user who is signed in, unless "Authorize" set other credentials.
+          // As the user who is signed in, unless "Authorize" set other credentials; the token goes
+          // to the origin of the description only, which is the API's.
           requestInterceptor: (req) => {
             const session = getSession();
-            if (session && !req.headers.Authorization) req.headers.Authorization = `Bearer ${session.token}`;
+            const toApi = new URL(req.url, location.href).origin === new URL(spec, location.href).origin;
+            if (session && toApi && !req.headers.Authorization) req.headers.Authorization = `Bearer ${session.token}`;
             return req;
           },
         });
@@ -49,43 +53,32 @@ export function ApiDocsPage() {
     return () => {
       cancelled = true;
     };
-  }, [demo]);
-
-  if (!demo) {
-    return (
-      <>
-        <PageHeader title="API" />
-        <Card>
-          <EmptyState
-            icon={<FlaskConical />}
-            title="The API page is part of the demo"
-            action={
-              <Button onClick={enterDemo}>
-                <FlaskConical />
-                Open the demo
-              </Button>
-            }
-          >
-            There, every operation of /api/v1 can be tried against generated data, answered in your browser.
-          </EmptyState>
-        </Card>
-      </>
-    );
-  }
+  }, [demo, spec]);
 
   return (
     <>
       <PageHeader
         title="API"
         description={
-          <>
-            /api/v1 as the UI uses it: what the server has, and what it does not have yet, marked proposed. "Try it out" is
-            answered by the demo, as the signed-in user; the requests show in the developer tools. The spec:{" "}
-            <a className="text-primary hover:underline" href={`${import.meta.env.BASE_URL}openapi.yaml`}>
-              openapi.yaml
-            </a>
-            .
-          </>
+          demo ? (
+            <>
+              /api/v1 of the server, and what the UI needs that the server does not have yet, marked proposed. "Try it
+              out" is answered by the demo, as the signed-in user; the requests show in the developer tools. The spec:{" "}
+              <a className="text-primary hover:underline" href={spec}>
+                openapi.yaml
+              </a>
+              .
+            </>
+          ) : (
+            <>
+              /api/v1 of this server, from its own description. "Try it out" sends real requests, as the signed-in user.
+              The spec:{" "}
+              <a className="text-primary hover:underline" href={spec}>
+                openapi.yaml
+              </a>
+              .
+            </>
+          )
         }
       />
       {state === "failed" ? (
