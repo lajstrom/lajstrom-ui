@@ -62,9 +62,12 @@ fills the form.
   session is kept apart and is still there afterwards.
 - "Reset data" starts the demo over.
 - **API** in the header: `/api/v1` in Swagger UI, from [public/openapi.yaml](public/openapi.yaml):
-  what the server has and, marked `proposed`, what the UI needs from it. "Try it out" is
-  answered by the demo as the signed-in user, errors included (try deleting `raw/scratch`).
-  `src/mocks/openapi.test.ts` keeps the description and the mock's routes the same, both ways.
+  the server's description and, marked `proposed`, what the UI needs from it
+  ([openapi/proposed.yaml](openapi/proposed.yaml)). "Try it out" is answered by the demo as the
+  signed-in user, errors included (try deleting `raw/scratch`). `src/mocks/openapi.test.ts`
+  keeps the description and the mock's routes the same, both ways, but for the server's
+  operations it lists as not answered yet. Against a server, the page shows the server's own
+  description, `GET /api/v1/openapi.yaml`.
 - **Seeing the requests.** The mock answers through a service worker, so every request of the
   UI and of Swagger shows in the Network panel of the developer tools, with its answer, and each
   one is also logged in the console. Over plain `http://` to an IP or a `.local` name browsers
@@ -173,12 +176,14 @@ src/
     profile.ts  Escape, EscapeComponent, tags and package paths (manifest profile §4)
   mocks/        the demo's API: handlers, authentication and tokens (auth.ts), an in-memory
                 "server" (db.ts), seed data per format
-openapi/        server.yaml: the server's OpenAPI description, vendored at a commit
-scripts/        vendoring it and generating src/api/server.gen.ts; the Pages build
+openapi/        server.yaml: the server's OpenAPI description, vendored at a commit;
+                proposed.yaml: what the UI adds to it (docs/api-proposal.md)
+scripts/        vendoring it, generating src/api/server.gen.ts and public/openapi.yaml; the
+                Pages build
 docker/         nginx.conf and the start script of the image
 deploy/         Kubernetes and compose examples
 docs/           the API proposal and the ADRs of the UI
-public/         config.json of the dev server, openapi.yaml, the mock's service worker
+public/         config.json of the dev server, openapi.yaml (generated), the mock's service worker
 ```
 
 ## Relation to the server repository
@@ -213,7 +218,7 @@ the snippet scan has nothing to match.
 - **Images per environment**: dev, test and prod images are a requirement; one image configured
   by environment variables exists today. What differs between them is still open.
 - **Management screens** (repositories, users, bindings): after the read-only UI. The server's
-  repo endpoints can be tried on the API page of the demo meanwhile.
+  endpoints can be tried on the API page meanwhile.
 - Code splitting per page (the main chunk is about 190 KiB gzipped).
 
 ## Contributing and license

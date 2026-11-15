@@ -22,13 +22,44 @@ const mockOps = new Set(
     .map(([, method, path]) => `${method === "del" ? "delete" : method} ${path!.replace(/:([a-zA-Z]+)/g, "{$1}")}`),
 );
 
+/** The server's operations the mock does not answer yet: "Try it out" gets the 404 the server
+ * answers to a path it does not know. The UI does none of them yet. */
+const notMocked = new Set([
+  "delete /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}",
+  "put /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/yank",
+  "delete /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/yank",
+  "post /api/v1/repos/{format}/{repo}/versions:delete",
+  "delete /api/v1/repos/{format}/{repo}/upstream-cache",
+  "post /api/v1/repos/{format}/{repo}/prefetch",
+  "post /api/v1/users",
+  "get /api/v1/users/{user}",
+  "patch /api/v1/users/{user}",
+  "delete /api/v1/users/{user}",
+  "post /api/v1/users/{user}/password",
+  "post /api/v1/bindings",
+  "delete /api/v1/bindings/{id}",
+  "post /api/v1/bootstrap",
+  "get /api/v1/openapi.yaml",
+]);
+
 describe("public/openapi.yaml against the mock", () => {
   it("documents every route the mock answers", () => {
     expect([...mockOps].filter((op) => !specOps.has(op))).toEqual([]);
   });
 
-  it("has a mock answer for every operation, so that Try it out works in the demo", () => {
-    expect([...specOps].filter((op) => !mockOps.has(op))).toEqual([]);
+  it("has a mock answer for every operation but those listed, so that Try it out works in the demo", () => {
+    expect([...specOps].filter((op) => !mockOps.has(op) && !notMocked.has(op))).toEqual([]);
+    expect([...notMocked].filter((op) => mockOps.has(op) || !specOps.has(op))).toEqual([]);
+  });
+
+  it("has a mock answer for every proposed operation", () => {
+    const proposed = Object.entries(spec.paths).flatMap(([path, item]) =>
+      Object.entries(item)
+        .filter(([m, op]) => METHODS.includes(m) && op["x-lajstrom-status"] === "proposed")
+        .map(([m]) => `${m} ${path}`),
+    );
+    expect(proposed.length).toBeGreaterThan(4);
+    expect(proposed.filter((op) => !mockOps.has(op))).toEqual([]);
   });
 
   it("resolves every $ref", () => {

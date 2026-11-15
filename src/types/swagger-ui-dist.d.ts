@@ -11,6 +11,7 @@ declare module "swagger-ui-dist/swagger-ui-es-bundle.js" {
     defaultModelsExpandDepth?: number;
     docExpansion?: "list" | "full" | "none";
     filter?: boolean;
+    showExtensions?: boolean;
     persistAuthorization?: boolean;
   };
   const SwaggerUIBundle: (options: SwaggerOptions) => unknown;
