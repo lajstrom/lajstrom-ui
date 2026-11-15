@@ -183,8 +183,8 @@ export const users: User[] = [
   { uid: uidOf("dave"), name: "dave", kind: "local", disabled: true, createdAt: ago(240) },
 ];
 
-// Deploy tokens are bound to exactly one repo (rbac.md §1); uploads in the seed use only the
-// tokens bound to their repo, and users only where a binding lets them write.
+// A deploy token is bound to one repo, or to a mask of repos (rbac.md §1); uploads in the seed
+// use only the tokens bound to their repo, and users only where a binding lets them write.
 export const tokens: Token[] = [
   { id: 3, kind: "pat", name: "laptop", user: "alice", scopes: [], expiresAt: ahead(61), lastUsedAt: before(0, 1), createdAt: ago(29), revokedAt: null, hashPrefix: "019931d4" },
   { id: 4, kind: "pat", name: "ci-local", user: "bob", scopes: ["read"], expiresAt: ahead(20), lastUsedAt: before(1, 2), createdAt: ago(70), revokedAt: null, hashPrefix: "daa0b8d4" },
@@ -197,6 +197,7 @@ export const tokens: Token[] = [
   { id: 18, kind: "deploy", name: "jupyterhub", repo: "pypi/internal", scopes: ["read"], expiresAt: null, lastUsedAt: before(0, 0, 12), createdAt: ago(200), revokedAt: null, hashPrefix: "10df33fe" },
   { id: 21, kind: "deploy", name: "billing CI", repo: "pypi/internal", scopes: ["read", "write"], expiresAt: ahead(45), lastUsedAt: before(4, 2), createdAt: ago(100), revokedAt: null, hashPrefix: "82a21d7c" },
   { id: 22, kind: "deploy", name: "payments CI (pypi)", repo: "pypi/payments", scopes: ["write"], expiresAt: ahead(140), lastUsedAt: before(6, 3), createdAt: ago(60), revokedAt: null, hashPrefix: "9ab0bbe6" },
+  { id: 24, kind: "deploy", name: "payments audit mirror", repoMask: "*/payments", scopes: ["read"], expiresAt: null, lastUsedAt: before(0, 2), createdAt: ago(25), revokedAt: null, hashPrefix: "c4e81f07" },
 ];
 
 /** The mock's bindings name users as `user:<name>`; the API answers `user:<uid>` and the name

@@ -5,7 +5,7 @@ import { delay, http, HttpResponse, type PathParams } from "msw";
 
 import type { ApiErrorBody } from "@/api/types";
 
-import { authenticate, createToken, revokeToken, type Refusal } from "./auth";
+import { authenticate, byPassword, createToken, revokeToken, type Refusal } from "./auth";
 import * as db from "./db";
 import { getPersona, setPersona } from "./persona";
 
@@ -294,6 +294,39 @@ export const handlers = [
 
   get("*/api/v1/tokens", async () => {
     return adminOr403() ?? HttpResponse.json({ tokens: db.tokens });
+  }),
+
+  // Deploy tokens over a mask: the admin's, created with the admin's password only (docs/api.md).
+  get("*/api/v1/deploy-tokens", async ({ request }) => {
+    if (getPersona() === "anonymous") return unauthorized("credentials are needed");
+    const denied = adminOr403();
+    if (denied) return denied;
+    const mask = new URL(request.url).searchParams.get("repoMask");
+    return HttpResponse.json({ tokens: db.tokens.filter((t) => t.repoMask !== undefined && (!mask || t.repoMask === mask)) });
+  }),
+
+  post("*/api/v1/deploy-tokens", async ({ request }) => {
+    if (getPersona() === "anonymous") return unauthorized("credentials are needed");
+    const denied = adminOr403();
+    if (denied) return denied;
+    if (!byPassword(request)) return fail(403, "FORBIDDEN", "a deploy token over a mask is created with the admin's password, not with a token");
+    const b = await body(request);
+    if (typeof b !== "object" || b === null || Array.isArray(b)) return fail(400, "INVALID", "the body must be a JSON object");
+    const { repoMask, ...rest } = b as Record<string, unknown>;
+    const bad = db.maskRefusal(repoMask);
+    if (bad) return refusal(bad);
+    const created = createToken({ repoMask: repoMask as string }, rest);
+    if ("status" in created) return refusal(created);
+    return HttpResponse.json(created, { status: 201, headers: { Location: `/api/v1/deploy-tokens/${created.id}` } });
+  }),
+
+  del("*/api/v1/deploy-tokens/:id", async ({ params }) => {
+    if (getPersona() === "anonymous") return unauthorized("credentials are needed");
+    const denied = adminOr403();
+    if (denied) return denied;
+    return revokeToken("mask", Number(decode(params.id)))
+      ? new HttpResponse(null, { status: 204 })
+      : fail(404, "NOT_FOUND", `no deploy token over a mask has the id ${decode(params.id)}`);
   }),
 
   get("*/api/v1/users/:user/tokens", async ({ params }) => {

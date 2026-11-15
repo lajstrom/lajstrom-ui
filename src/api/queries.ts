@@ -190,6 +190,14 @@ export const userTokensQuery = (user: string) =>
     queryFn: ({ signal }) => apiGet<{ tokens: Token[] }>(apiPath("users", user, "tokens"), undefined, signal).then((r) => r.tokens),
   });
 
+/** The deploy tokens over a mask (admin), or those over one mask as it was written. */
+export const maskTokensQuery = (repoMask: string) =>
+  queryOptions({
+    queryKey: ["deploy-tokens", repoMask],
+    queryFn: ({ signal }) =>
+      apiGet<{ tokens: Token[] }>(apiPath("deploy-tokens"), { repoMask: repoMask || undefined }, signal).then((r) => r.tokens),
+  });
+
 /** Every token (proposed, admin): GET /api/v1/tokens. */
 export const tokensQuery = queryOptions({
   queryKey: ["tokens"],

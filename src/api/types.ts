@@ -139,6 +139,9 @@ export type CreatedToken = Schemas["CreatedToken"];
 /** The body of POST /api/v1/users/{name}/tokens and …/deploy-tokens. */
 export type TokenRequest = Schemas["TokenRequest"];
 
+/** POST /api/v1/deploy-tokens: a deploy token over a mask of repos, oci/* or *\/talos. */
+export type MaskTokenRequest = Schemas["MaskTokenRequest"];
+
 /** A role binding; `principal` is canonical, `user:<uid>` or `group:<name>`, and `name` the
  * user's name now. */
 export type Binding = Schemas["Binding"];

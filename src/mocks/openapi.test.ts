@@ -37,10 +37,7 @@ const notMocked = new Set([
   "delete /api/v1/bindings/{id}",
   "post /api/v1/bootstrap",
   "get /api/v1/openapi.yaml",
-  // Deploy tokens over a mask, and webhooks.
-  "get /api/v1/deploy-tokens",
-  "post /api/v1/deploy-tokens",
-  "delete /api/v1/deploy-tokens/{id}",
+  // Webhooks.
   "get /api/v1/repos/{format}/{repo}/webhooks",
   "post /api/v1/repos/{format}/{repo}/webhooks",
   "get /api/v1/repos/{format}/{repo}/webhooks/{id}",

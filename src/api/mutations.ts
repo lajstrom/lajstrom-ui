@@ -1,7 +1,7 @@
 // The changes the UI makes, against the endpoints the server has (docs/api.md).
 
-import { apiPath, apiSend } from "./client";
-import type { BatchDeleteRequest, BatchDeleteResult, CreatedToken, TokenRequest } from "./types";
+import { apiPath, apiSend, basicAuth } from "./client";
+import type { BatchDeleteRequest, BatchDeleteResult, CreatedToken, MaskTokenRequest, TokenRequest } from "./types";
 
 export function createUserToken(user: string, req: TokenRequest): Promise<CreatedToken> {
   return apiSend<CreatedToken>("POST", apiPath("users", user, "tokens"), { body: req });
@@ -17,6 +17,16 @@ export function createDeployToken(format: string, repo: string, req: TokenReques
 
 export function revokeDeployToken(format: string, repo: string, id: number): Promise<void> {
   return apiSend("DELETE", apiPath("repos", format, repo, "deploy-tokens", id));
+}
+
+/** Creates a deploy token over a mask. The server takes the admin's password only, not a token,
+ * as the request's credential: Basic, the session's bearer left out. */
+export function createMaskToken(req: MaskTokenRequest, user: string, password: string): Promise<CreatedToken> {
+  return apiSend<CreatedToken>("POST", apiPath("deploy-tokens"), { body: req, authorization: basicAuth(user, password) });
+}
+
+export function revokeMaskToken(id: number): Promise<void> {
+  return apiSend("DELETE", apiPath("deploy-tokens", id));
 }
 
 /** Yanks a pypi version, with a reason or none; yanking it again with another reason replaces it. */
