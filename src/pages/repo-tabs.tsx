@@ -16,7 +16,10 @@ import { formatSpec, snippetContext } from "@/lib/formats";
 
 import { AuditTable } from "./audit";
 import { DeployTokens } from "./deploy-tokens";
+import { managesUpstream } from "./proxy-changes";
+import { UpstreamCacheCard } from "./proxy-dialogs";
 import { ReindexFindings, ReindexSummary } from "./reindex-report";
+import { MembersCard, UpstreamCard } from "./repo-kinds";
 
 const NOT_REPORTED = <span className="text-muted-foreground">not reported by this server version</span>;
 
@@ -59,15 +62,19 @@ export function RepoDetails({ repo }: { repo: Repo }) {
               <CopyText value={`${ctx.baseUrl}/${repo.format}/${repo.name}/`} />
             </Property>
             <Property label="OCI path">
-              <CopyText
-                value={`${registry?.prefix ?? ""}${repo.prefix}/`}
-                display={
-                  <>
-                    {registry?.prefix ? <span className="text-muted-foreground">{registry.prefix}</span> : null}
-                    {repo.prefix}/<span className="text-muted-foreground">&lt;package&gt;</span>
-                  </>
-                }
-              />
+              {repo.kind === "group" ? (
+                <span className="text-muted-foreground">none: a group stores nothing</span>
+              ) : (
+                <CopyText
+                  value={`${registry?.prefix ?? ""}${repo.prefix}/`}
+                  display={
+                    <>
+                      {registry?.prefix ? <span className="text-muted-foreground">{registry.prefix}</span> : null}
+                      {repo.prefix}/<span className="text-muted-foreground">&lt;package&gt;</span>
+                    </>
+                  }
+                />
+              )}
             </Property>
             <Property label="Anonymous read">
               {repo.anonymousRead ? (info.data?.anonymousRead === false ? "on, but off server-wide (auth.anonymousRead)" : "on") : "off"}
@@ -130,8 +137,12 @@ export function RepoDetails({ repo }: { repo: Repo }) {
         </CardBody>
       </Card>
 
+      {/* What a proxy asks its upstream; a group's members and routes (proxy-and-group.md §2). */}
+      <UpstreamCard repo={repo} className="lg:col-span-2" />
+      <MembersCard repo={repo} className="lg:col-span-2" />
+
       <Card>
-        <CardHeader title="Backend registry" description={registry ? registry.product : "Details are visible to admins"} />
+        <CardHeader title="Backend registry" description={registry ? registry.product : repo.registry ? "Details are visible to admins" : undefined} />
         <CardBody>
           <Properties>
             <Property label="Name">
@@ -295,6 +306,8 @@ export function RepoMaintenance({ repo }: { repo: Repo }) {
 
   return (
     <div className="space-y-4">
+      {managesUpstream(repo) ? <UpstreamCacheCard repo={repo} /> : null}
+
       <Card>
         <CardHeader
           icon={<RefreshCw />}

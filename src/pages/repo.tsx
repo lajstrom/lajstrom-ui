@@ -17,9 +17,10 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { can } from "@/lib/access";
 import { cn } from "@/lib/cn";
 import { formatBytes, formatNumber, pluralize, shortDigest } from "@/lib/format";
-import { formatSpec, snippetContext, type FormatSpec } from "@/lib/formats";
+import { connectFor, formatSpec, snippetContext, type FormatSpec } from "@/lib/formats";
 import { facetParam, variantShort } from "@/lib/variants";
 
+import { KindBadge, KindEmpty, KindSummary, MembersCard } from "./repo-kinds";
 import { RepoActivity, RepoDetails, RepoMaintenance } from "./repo-tabs";
 import { RepoWebhooks } from "./webhooks";
 
@@ -90,27 +91,21 @@ export function RepoPage() {
           r ? (
             <>
               <AccessBadge repo={r} />
-              <Badge tone="outline">{r.kind}</Badge>
+              <KindBadge repo={r} always />
             </>
           ) : null
         }
         description={
           r ? (
             <span className="tabular">
-              {r.stats ? (
+              {r.stats && r.kind !== "group" ? (
                 <>
                   {pluralize(r.stats.packages, spec.noun.one, spec.noun.many)} · {pluralize(r.stats.versions, "version")} ·{" "}
                   {formatBytes(r.stats.size)} ·{" "}
                 </>
               ) : null}
-              {r.registry ? (
-                <>
-                  stored in <span className="font-mono text-foreground">{r.registry}</span>
-                </>
-              ) : (
-                <>a group of {r.group?.members.join(", ")}</>
-              )}
-              {r.stats ? (
+              <KindSummary repo={r} />
+              {r.stats && r.kind !== "group" ? (
                 <>
                   {" "}
                   · last publish <RelativeTime iso={r.stats.lastPushAt} />
@@ -180,7 +175,7 @@ function ConnectTab({ repo, spec }: { repo: Repo; spec: FormatSpec }) {
   const info = useQuery(infoQuery);
   const facets = useQuery({ ...packagesQuery(repo.format, repo.name, { limit: 1 }), select: (d: PackageList) => d.facets });
   const ctx = snippetContext(info.data, repo, facets.data);
-  const groups = spec.connect(ctx);
+  const groups = connectFor(spec, ctx);
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
       <div className="space-y-4">
@@ -245,7 +240,7 @@ function QuickConnect({ repo, spec, facets }: { repo: Repo; spec: FormatSpec; fa
   const info = useQuery(infoQuery);
   const [, setSearch] = useRepoSearch();
   const ctx = snippetContext(info.data, repo, facets);
-  const first = spec.connect(ctx)[0];
+  const first = connectFor(spec, ctx)[0];
   if (!first) return null;
   return (
     <Card className="mb-4">
@@ -309,7 +304,12 @@ function PackagesTab({ repo, spec, search, setSearch }: PackagesTabProps) {
 
   return (
     <>
-      {(repo.stats?.packages ?? 0) > 0 ? <QuickConnect repo={repo} spec={spec} facets={data?.facets} /> : null}
+      {/* A group is its members: they come first. */}
+      {repo.kind === "group" ? (
+        <MembersCard repo={repo} className="mb-4" />
+      ) : (repo.stats?.packages ?? 0) > 0 ? (
+        <QuickConnect repo={repo} spec={spec} facets={data?.facets} />
+      ) : null}
       <Card>
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
           <SearchInput
@@ -366,8 +366,10 @@ function PackagesTab({ repo, spec, search, setSearch }: PackagesTabProps) {
             <EmptyState icon={<SearchIcon />} title={`No ${spec.noun.many} match`}>
               Nothing matches the search or the filters. Clear them to see everything.
             </EmptyState>
-          ) : (
+          ) : repo.kind === "hosted" ? (
             <EmptyRepo repo={repo} spec={spec} />
+          ) : (
+            <KindEmpty repo={repo} spec={spec} />
           )
         ) : (
           <Table>

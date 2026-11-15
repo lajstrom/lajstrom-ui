@@ -2,7 +2,7 @@
 
 import { apiPath, apiSend, basicAuth } from "./client";
 import { webhooksPath, type WebhookScope } from "./queries";
-import type { BatchDeleteRequest, BatchDeleteResult, CreatedToken, MaskTokenRequest, TokenRequest } from "./types";
+import type { BatchDeleteRequest, BatchDeleteResult, CreatedToken, MaskTokenRequest, PrefetchRequest, PrefetchResult, TokenRequest } from "./types";
 import type { Binding, BindingRequest, User, UserPatch, UserRequest } from "./types";
 import type { CreatedWebhook, Delivery, Webhook, WebhookRequest, WebhookSecret } from "./types";
 
@@ -111,4 +111,16 @@ export function rotateWebhookSecret(scope: WebhookScope, id: number): Promise<We
 /** Sends a webhook.ping now, once, active or not; the answer is its row of the delivery log. */
 export function testWebhook(scope: WebhookScope, id: number): Promise<Delivery> {
   return apiSend<Delivery>("POST", webhooksPath(scope, id, "test"));
+}
+
+// Proxy repos (docs/api.md): both answer when the server is done, with no job to follow.
+
+/** Drops a proxy's cache of its upstream's documents, or of one name; what it fetched stays. */
+export function purgeUpstreamCache(format: string, repo: string, name?: string): Promise<void> {
+  return apiSend("DELETE", apiPath("repos", format, repo, "upstream-cache"), { query: { name: name || undefined } });
+}
+
+/** Fetches versions of names, or images of an oci proxy, before a client asks for them. */
+export function prefetch(format: string, repo: string, req: PrefetchRequest): Promise<PrefetchResult> {
+  return apiSend<PrefetchResult>("POST", apiPath("repos", format, repo, "prefetch"), { body: req });
 }

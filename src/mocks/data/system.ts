@@ -1,4 +1,4 @@
-import type { Binding, Registry, RepoPolicy, ServerInfo, SigningKey, Token, User } from "@/api/types";
+import type { Binding, Registry, RepoGroup, RepoPolicy, ServerInfo, SigningKey, Token, Upstream, User } from "@/api/types";
 import { sha256Hex } from "@/lib/sha256";
 
 import { ago, ahead, before, EXTERNAL_URL } from "./time";
@@ -88,7 +88,8 @@ export const registries: Omit<Registry, "repos">[] = [
 export type RepoSeed = {
   format: "raw" | "pypi" | "apt" | "maven" | "npm" | "rpm" | "oci";
   name: string;
-  registry: string;
+  /** None on a group, which stores nothing (docs/api.md, Repos). */
+  registry?: string;
   anonymousRead: boolean;
   policy: RepoPolicy | null;
   createdAt: string;
@@ -96,6 +97,10 @@ export type RepoSeed = {
   updatedAt?: string;
   reindex: "idle" | "running" | "failed";
   signingKeys?: SigningKey[];
+  /** hosted when absent; a proxy has its upstream, a group its members (proxy-and-group.md §2). */
+  kind?: "hosted" | "proxy" | "group";
+  upstream?: Upstream;
+  group?: RepoGroup;
 };
 
 const fingerprint = (seed: string) => sha256Hex(seed).slice(0, 40).toUpperCase();
@@ -188,6 +193,59 @@ export const repoSeeds: RepoSeed[] = [
     reindex: "idle",
     signingKeys: [{ algorithm: "rsa4096", fingerprint: fingerprint("rpm-key-1"), createdAt: ago(75), retiredAt: null }],
   },
+  // Proxy and group repos are of formats whose plugin has them (npm) or of oci, which needs none
+  // (docs/spec/proxy-and-group.md §11, §12): a hosted oci repo, proxies of Docker Hub and of
+  // ghcr.io, and one pull address over the three, as in §12.1.
+  {
+    format: "oci",
+    name: "internal",
+    registry: "zot",
+    anonymousRead: false,
+    policy: null,
+    createdAt: ago(60),
+    reindex: "idle",
+  },
+  {
+    format: "oci",
+    name: "hub",
+    kind: "proxy",
+    registry: "zot",
+    anonymousRead: false,
+    policy: null,
+    upstream: { name: "dockerhub", metadataTTL: "10m", negativeTTL: "2m", offline: false, allow: [], deny: ["acme/*"] },
+    createdAt: ago(58),
+    reindex: "idle",
+  },
+  {
+    format: "oci",
+    name: "ghcr",
+    kind: "proxy",
+    registry: "zot",
+    anonymousRead: false,
+    policy: { maxFileSize: 2 * 1024 ** 3 },
+    upstream: { name: "ghcr", metadataTTL: "1h", negativeTTL: "5m", offline: false, allow: ["oras-project/*", "sigstore/*"], deny: [] },
+    createdAt: ago(58),
+    reindex: "idle",
+  },
+  {
+    format: "oci",
+    name: "all",
+    kind: "group",
+    anonymousRead: false,
+    policy: null,
+    group: { members: ["internal", "hub", "ghcr"], paths: { internal: ["acme/*"], hub: ["*"], ghcr: ["oras-project/*", "sigstore/*"] } },
+    createdAt: ago(57),
+    reindex: "idle",
+  },
+];
+
+/** upstreams[] of the configuration (proxy-and-group.md §2.1): the API names them, never their
+ * URL or credentials. dockerHub: a path of one component is library/<path> (§11.7). */
+export const upstreams: { name: string; format: string; dockerHub?: boolean }[] = [
+  { name: "dockerhub", format: "oci", dockerHub: true },
+  { name: "ghcr", format: "oci" },
+  { name: "quay", format: "oci" },
+  { name: "npmjs", format: "npm" },
 ];
 
 /** A user's uid in the mock, stable across reloads: the server's are UUIDv7, these only look so. */

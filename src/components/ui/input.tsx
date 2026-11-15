@@ -20,6 +20,19 @@ type SearchInputProps = Omit<ComponentProps<"input">, "onChange" | "value"> & {
   onValueChange: (value: string) => void;
 };
 
+/** A text box of several lines, styled as Input: lists of names, one a line. */
+export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
+  return (
+    <textarea
+      className={cn(
+        "min-h-20 w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground shadow-card outline-none placeholder:text-muted-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
 /** A text input with a search icon and a clear button. */
 export function SearchInput({ value, onValueChange, className, ...props }: SearchInputProps) {
   return (

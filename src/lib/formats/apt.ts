@@ -72,6 +72,7 @@ export const apt: FormatSpec = {
       },
       {
         title: "Publish a .deb",
+        publish: true,
         description: "Suite and component are properties of the upload, not separate repos.",
         snippets: [
           {

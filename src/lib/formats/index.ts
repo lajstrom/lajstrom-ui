@@ -8,7 +8,7 @@ import { oci } from "./oci";
 import { pypi } from "./pypi";
 import { raw } from "./raw";
 import { rpm } from "./rpm";
-import type { FormatSpec, SnippetContext } from "./types";
+import type { FormatSpec, SnippetContext, SnippetGroup } from "./types";
 
 export const formats: Record<FormatName, FormatSpec> = { raw, pypi, apt, maven, npm, rpm };
 
@@ -39,6 +39,17 @@ export function snippetContext(
     readNeedsAuth: !(repo.anonymousRead && (info?.anonymousRead ?? false)),
     facets,
   };
+}
+
+/** How to configure a client for the repo: the format's snippets, without those that publish on
+ * a proxy or a group, which take no publish of their own (docs/spec/proxy-and-group.md §1). */
+export function connectFor(spec: FormatSpec, ctx: SnippetContext): SnippetGroup[] {
+  const groups = spec.connect(ctx);
+  if ((ctx.repo.kind ?? "hosted") === "hosted") return groups;
+  return groups
+    .filter((g) => !g.publish)
+    .map((g) => ({ ...g, snippets: g.snippets.filter((s) => !s.publish) }))
+    .filter((g) => g.snippets.length > 0);
 }
 
 export type { FormatSpec, Snippet, SnippetContext, SnippetGroup, MetadataRow } from "./types";

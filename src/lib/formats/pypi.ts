@@ -47,6 +47,7 @@ export const pypi: FormatSpec = {
       },
       {
         title: "Publish",
+        publish: true,
         description: "One file is one manifest: the wheel tag or sdist is the variant.",
         snippets: [
           {

@@ -44,7 +44,10 @@ import { bindings, registries, repoSeeds, roleActions, serverInfo, tokens, uidOf
 import { passwords } from "./data/system";
 import { ago, ahead, before, HOST } from "./data/time";
 import { getPersona, type Persona } from "./persona";
+import { isPackageName, prefetchImages } from "./proxy";
 import { keep, persist } from "./state";
+import { upstreams } from "./data/system";
+import type { PrefetchResult } from "@/api/types";
 
 type Action = "read" | "write" | "delete" | "manage";
 
@@ -454,6 +457,7 @@ function repoOf(seed: RepoSeed, persona: Persona): MockRepo {
     prefix: keyOf(seed),
     anonymousRead: seed.anonymousRead,
     policy: seed.policy,
+    ...kindOf(seed),
     createdAt: seed.createdAt,
     updatedAt: seed.updatedAt ?? (seed.format === "maven" && seed.name === "payments" ? ago(12, 3) : seed.createdAt),
     stats: {
@@ -474,6 +478,30 @@ function repoOf(seed: RepoSeed, persona: Persona): MockRepo {
     },
     ...(seed.signingKeys ? { signingKeys: seed.signingKeys } : {}),
   };
+}
+
+/** What a proxy or a group has instead of a hosted repo's fields (docs/api.md, The resource): a
+ * proxy every key of its upstream, a group its members with merge, or with paths on oci, and
+ * neither registry nor policy. */
+function kindOf(seed: RepoSeed): Partial<Repo> {
+  if (seed.kind === "proxy" && seed.upstream) {
+    return { kind: "proxy", upstream: { metadataTTL: "10m", negativeTTL: "2m", offline: false, allow: [], deny: [], ...seed.upstream } };
+  }
+  if (seed.kind === "group" && seed.group) {
+    const { members, merge, paths } = seed.group;
+    return {
+      kind: "group",
+      registry: undefined,
+      policy: undefined,
+      group: seed.format === "oci" ? { members, paths: paths ?? {} } : { members, merge: merge ?? [] },
+    };
+  }
+  return {};
+}
+
+/** The groups that have the repo as a member, as <format>/<name>. */
+export function groupsOf(repo: { format: string; name: string }): string[] {
+  return repoSeeds.filter((s) => s.kind === "group" && s.format === repo.format && s.group?.members.includes(repo.name)).map(keyOf);
 }
 
 export function listRepos(persona = getPersona()): MockRepo[] {
@@ -1172,7 +1200,9 @@ keep("db", {
   load: (data) => {
     const d = data as { repos?: RepoSeed[]; deletedRepos?: string[]; events?: MockEvent[]; deletedManifests?: string[]; yanks?: [string, string][] };
     if (!Array.isArray(d.repos)) return;
-    repoSeeds.splice(0, repoSeeds.length, ...d.repos);
+    // Repos the seed has gained since the state was kept join it, but for those deleted since.
+    const added = repoSeeds.filter((s) => !d.repos!.some((r) => keyOf(r) === keyOf(s)) && !d.deletedRepos?.includes(keyOf(s)));
+    repoSeeds.splice(0, repoSeeds.length, ...d.repos, ...added);
     for (const k of d.deletedRepos ?? []) {
       deletedRepos.add(k);
       dropRepoData(k);
@@ -1338,6 +1368,11 @@ export function updateRepo(repo: MockRepo, body: unknown, by: string): MockRepo 
 
 /** DELETE /api/v1/repos/{format}/{repo}[?force=true]: refused with versions unless forced. */
 export function deleteRepo(repo: MockRepo, force: boolean, by: string): Refusal | null {
+  // A member of a group stays, force or not (proxy-and-group.md §2.5).
+  const groups = groupsOf(repo);
+  if (groups.length) {
+    return { status: 409, code: "CONFLICT", message: `repo ${repo.prefix} is a member of ${groups.join(", ")}; change the members of ${groups.length > 1 ? "those groups" : "that group"} first` };
+  }
   const versions = versionCount(repo.prefix);
   if (versions > 0 && !force) {
     return { status: 409, code: "CONFLICT", message: `repo ${repo.prefix} has ${versions} versions; delete them or pass force=true` };
@@ -1463,6 +1498,51 @@ export function deleteVersions(repo: MockRepo, body: unknown, by: string): Batch
     return { ...head, status: "deleted" };
   });
   return { job, dryRun, results };
+}
+
+// --- Proxy repos ----------------------------------------------------------------------------
+// The purge of a proxy's cache and a prefetch (docs/api.md). The mock keeps no documents of an
+// upstream, so a purge only writes its audit row; a prefetch of an oci proxy holds what it
+// fetched, kept in the demo, so that a second run finds it held.
+
+/** What the backend holds of the proxies' fetches, `<repo>@<digest>`. */
+const held = new Set<string>();
+
+keep("proxy", {
+  save: () => ({ held: [...held] }),
+  load: (data) => {
+    for (const k of (data as { held?: string[] }).held ?? []) held.add(k);
+  },
+});
+
+/** DELETE …/upstream-cache[?name=]: a proxy's documents of its upstream, or of one name. */
+export function purgeUpstreamCache(repo: MockRepo, name: string | null, by: string): Refusal | null {
+  if (repo.kind !== "proxy") return invalid(`repo ${repo.prefix} is not a proxy: it has no cache of an upstream`);
+  if (name !== null && !isPackageName(name, repo.format)) return invalid(`name: "${name}" is not a package name of ${repo.format}`);
+  changed({ at: new Date().toISOString(), principal: by, action: "repo.cache.purge", repo: repo.prefix, subject: repo.prefix, digest: null, ip: DEMO_IP, details: { ...(name === null ? {} : { name }), source: "api" } });
+  return null;
+}
+
+/** POST …/prefetch: images of an oci proxy; an offline one asks its upstream nothing (409). A
+ * format proxy would take names, but the mock has none: only oci repos have the kind here. */
+export function prefetch(repo: MockRepo, body: unknown, by: string): PrefetchResult | Refusal {
+  if (repo.kind !== "proxy" || !repo.upstream) return invalid(`repo ${repo.prefix} is not a proxy`);
+  if (repo.format !== "oci") return invalid(`format ${repo.format} has no prefetch`);
+  const upstream = repo.upstream;
+  const config = upstreams.find((u) => u.name === upstream.name && u.format === repo.format);
+  if (upstream.offline || !config) {
+    return { status: 409, code: "CONFLICT", message: `repo ${repo.prefix} is offline${config ? "" : `: upstream ${upstream.name} is not configured`}; it asks its upstream nothing` };
+  }
+  const result = prefetchImages({ repo: repo.prefix, upstream, dockerHub: config.dockerHub ?? false, held }, body);
+  if ("status" in result) return result;
+  // Each push of a fetch is an audit row of the caller's; the prefetch writes none of its own.
+  const at = new Date().toISOString();
+  for (const r of result.results) {
+    if (r.status !== "fetched" || r.kind !== "manifest") continue;
+    demoEvents.push({ at, principal: by, action: "proxy.fetch", repo: repo.prefix, subject: `${r.name}${r.platform ? ` (${r.platform})` : ""}`, digest: r.digest ?? null, ip: DEMO_IP, details: { upstream: upstream.name, ref: r.digest } });
+  }
+  changed();
+  return result;
 }
 
 export { bindings, tokens, users, serverInfo };

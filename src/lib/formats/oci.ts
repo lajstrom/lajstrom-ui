@@ -16,26 +16,39 @@ export const oci: FormatSpec = {
   connect(ctx) {
     const ref = `${ctx.host}/oci/${ctx.repo.name}`;
     const login = `docker login ${ctx.host} -u "${USER}" -p "${TOKEN}"`;
+    // A proxy and a group take no push (proxy-and-group.md §11.9, §12.3): connectFor leaves the
+    // pushes out, and a pull names the upstream's repository, or a path the routes send.
+    const hosted = (ctx.repo.kind ?? "hosted") === "hosted";
+    const image = hosted ? `${ref}/myapp:1.0` : `${ref}/<path>:<tag>`;
+    const pullLogin = (tool: string) => (!hosted && ctx.readNeedsAuth ? `${tool} login ${ctx.host} -u "${USER}" -p "${TOKEN}"\n` : "");
     return [
       {
-        title: "Push and pull with docker",
-        description: "Images pass through to the backend registry as they are; Lajstrom checks who may push and pull.",
+        title: hosted ? "Push and pull with docker" : "Pull with docker",
+        description:
+          ctx.repo.kind === "proxy"
+            ? `A pull of an image the repo does not hold fetches it from the upstream ${ctx.repo.upstream?.name ?? ""} and keeps it in the backend registry; <path> is the upstream's repository, library/nginx on Docker Hub.`
+            : ctx.repo.kind === "group"
+              ? "One pull address for the members: each path comes from the one member the group's routes send it to."
+              : "Images pass through to the backend registry as they are; Lajstrom checks who may push and pull.",
         snippets: [
-          { id: "docker-push", title: "Push", caption: "shell", shell: true, code: `${login}\ndocker tag myapp:1.0 ${ref}/myapp:1.0\ndocker push ${ref}/myapp:1.0` },
-          { id: "docker-pull", title: "Pull", caption: "shell", shell: true, code: `docker pull ${ref}/myapp:1.0` },
+          { id: "docker-push", title: "Push", caption: "shell", shell: true, publish: true, code: `${login}\ndocker tag myapp:1.0 ${image}\ndocker push ${image}` },
+          { id: "docker-pull", title: "Pull", caption: "shell", shell: true, code: `${pullLogin("docker")}docker pull ${image}` },
         ],
       },
       {
         title: "Any artifact with oras",
-        snippets: [
-          {
-            id: "oras",
-            title: "oras",
-            caption: "shell",
-            shell: true,
-            code: `oras login ${ctx.host} -u "${USER}" -p "${TOKEN}"\noras push ${ref}/configs:v1 ./app.yaml\noras pull ${ref}/configs:v1`,
-          },
-        ],
+        snippets: hosted
+          ? [
+              {
+                id: "oras",
+                title: "oras",
+                caption: "shell",
+                shell: true,
+                publish: true,
+                code: `oras login ${ctx.host} -u "${USER}" -p "${TOKEN}"\noras push ${ref}/configs:v1 ./app.yaml\noras pull ${ref}/configs:v1`,
+              },
+            ]
+          : [{ id: "oras-pull", title: "oras pull", caption: "shell", shell: true, code: `${pullLogin("oras")}oras pull ${image}` }],
       },
     ];
   },

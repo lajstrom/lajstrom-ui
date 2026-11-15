@@ -15,6 +15,8 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { formatBytes, formatNumber } from "@/lib/format";
 import { formatOrder, formatSpec, formats } from "@/lib/formats";
 
+import { KindBadge } from "./repo-kinds";
+
 /** Roadmap order; formats without pages (oci) last. */
 const rank = (f: string) => {
   const i = formatOrder.indexOf(f as FormatName);
@@ -137,6 +139,8 @@ export function ReposPage() {
             options={[
               { value: "all", label: "All", count: repos.isSuccess ? all.length : undefined },
               ...formatOrder.map((f) => ({ value: f, label: formats[f].label, count: repos.isSuccess ? counts(f) : undefined })),
+              // oci repos have no format pages, but proxies and groups are mostly theirs.
+              ...(all.some((r) => r.format === "oci") ? [{ value: "oci", label: formatSpec("oci").label, count: all.filter((r) => r.format === "oci").length }] : []),
             ]}
           />
           <SearchInput
@@ -189,7 +193,10 @@ export function ReposPage() {
 function RepoRow({ repo, showWrite }: { repo: Repo; showWrite: boolean }) {
   const navigate = useNavigate();
   const spec = formatSpec(repo.format);
-  const stats = repo.stats;
+  // A group holds nothing: its counts are its members'.
+  const group = repo.kind === "group";
+  const stats = group ? undefined : repo.stats;
+  const none = group ? "A group holds nothing of its own: its members do" : NO_COUNTS;
   return (
     <TR
       className="cursor-pointer transition-colors hover:bg-surface"
@@ -209,8 +216,8 @@ function RepoRow({ repo, showWrite }: { repo: Repo; showWrite: boolean }) {
             <span className="text-muted-foreground">{repo.format}/</span>
             {repo.name}
           </Link>
-          {repo.kind !== "hosted" ? <Badge tone="outline">{repo.kind}</Badge> : null}
-          {showWrite && repo.permissions?.includes("write") ? (
+          <KindBadge repo={repo} />
+          {showWrite && repo.kind === "hosted" && repo.permissions?.includes("write") ? (
             <Tooltip content={`You can publish here (${repo.permissions.join(", ")})`}>
               <Badge tone="primary">can publish</Badge>
             </Tooltip>
@@ -218,13 +225,13 @@ function RepoRow({ repo, showWrite }: { repo: Repo; showWrite: boolean }) {
         </div>
       </TD>
       <TD className="text-right tabular">
-        <Tooltip content={stats ? `${stats.packages} ${stats.packages === 1 ? spec.noun.one : spec.noun.many}` : NO_COUNTS}>
+        <Tooltip content={stats ? `${stats.packages} ${stats.packages === 1 ? spec.noun.one : spec.noun.many}` : none}>
           <span>{stats ? formatNumber(stats.packages) : "—"}</span>
         </Tooltip>
       </TD>
       <TD className="text-right tabular">
         <Tooltip
-          content={stats ? `${stats.manifests} manifests (one per version and ${spec.variantLabel?.toLowerCase() ?? "version"})` : NO_COUNTS}
+          content={stats ? `${stats.manifests} manifests (one per version and ${spec.variantLabel?.toLowerCase() ?? "version"})` : none}
         >
           <span>{stats ? formatNumber(stats.versions) : "—"}</span>
         </Tooltip>
