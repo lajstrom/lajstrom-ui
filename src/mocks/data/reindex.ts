@@ -67,15 +67,15 @@ function pypiInternal(pkgs: Map<string, BuiltVersion[]>): ReindexFindings {
     drift: drifted
       ? [{ package: drifted.packageName, tag: drifted.tag, index: drifted.digest, registry: digestOf(`drift:requests:${drifted.tag}`) }]
       : [],
-    // acme-blobs is stored at the form of its name before ADR 0017, and 1.2.0 was pushed to the
-    // newest form straight to the registry.
+    // acme-blobs is indexed at the newest form of its name (ADR 0017), and a reindex found 1.2.0
+    // at the form before it too, "acme-blobs", where a stand before the ADR had pushed it.
     split: blobs.length
       ? [
           {
             package: "acme-blobs",
             indexed: packagePath("pypi", "acme-blobs"),
             indexedTags: tags(blobs),
-            other: "acme-blob_73",
+            other: "acme-blobs",
             otherTags: ["py3-none-any", "sdist"].map((variant) => tagFor("1.2.0", variant)).sort(),
           },
         ]
