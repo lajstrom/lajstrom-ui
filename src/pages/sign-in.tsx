@@ -56,7 +56,7 @@ export function SignInPage() {
 
   return (
     <div className="mx-auto mt-8 max-w-sm">
-      <h1 className="mb-1 text-xl font-semibold tracking-tight">Sign in to {config().title}</h1>
+      <h1 className="mb-1 text-xl font-semibold tracking-tight">Sign in to {config().branding.title}</h1>
       <p className="mb-5 text-sm text-muted-foreground">
         {session ? (
           <>

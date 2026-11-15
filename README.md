@@ -132,7 +132,7 @@ docker run --rm -p 8081:8080 -e LAJSTROM_UI_MOCK=true ghcr.io/lajstrom/lajstrom-
 
 nginx (unprivileged, uid 101, port 8080) serves the build below `/ui/`. It writes only to
 `/tmp`, so the root filesystem can be read-only. At start, `docker/40-lajstrom-ui.sh` writes the
-runtime configuration from these variables:
+runtime configuration, [config.json](#configuration), from these variables:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -140,7 +140,17 @@ runtime configuration from these variables:
 | `LAJSTROM_UI_DEMO` | `true` | `false`: do not offer the demo next to the server |
 | `LAJSTROM_UI_API_URL` | empty | Base URL of the API as the browser sees it; empty = same origin |
 | `LAJSTROM_UI_TITLE` | `Lajstrom` | Instance name in the header and the title |
+| `LAJSTROM_UI_LOGO` | empty | The header's logo: a path relative to `/ui/`, an http(s) URL or a `data:image` URL; empty = Lajstrom's mark |
+| `LAJSTROM_UI_COLOR` | empty | The primary colour, `#rgb` or `#rrggbb`; empty = Lajstrom's blue |
+| `LAJSTROM_UI_COLOR_DARK` | `LAJSTROM_UI_COLOR` | The primary colour of the dark theme |
+| `LAJSTROM_UI_SUPPORT_URL` | empty | Where to get help, http(s) or `mailto:`: in the about dialog and on the error pages |
+| `LAJSTROM_UI_CONFIG` | `/etc/lajstrom-ui/config.json` | A `config.json` to serve as it is instead, such as a ConfigMap; the variables above are then not read |
 | `LAJSTROM_API_UPSTREAM` | empty | `http://lajstrom:8080`: this nginx proxies `/api/` and `/-/` (use without an Ingress) |
+
+A mounted `config.json` is served as it is, and a change of it shows on the next page load; its
+`apiBaseUrl` and the origin of its logo go into the Content-Security-Policy at start, so a change
+of those needs a restart. A logo of the image's own is mounted below `/usr/share/nginx/html/ui/`
+and named relative to it, such as `branding/logo.svg`.
 
 `/healthz` answers `ok` for probes. Responses carry a Content-Security-Policy without inline
 scripts, `X-Frame-Options: DENY` and `nosniff`.
@@ -167,6 +177,56 @@ Plain `http://` to an IP is not a secure context: browsers offer neither service
 Clipboard API there. The demo still works, because MSW falls back to intercepting `fetch` in the
 page, and copy buttons fall back to a hidden textarea. Each device generates its own demo data;
 what is done in the demo and the theme are kept per browser.
+
+## Configuration
+
+The UI reads `config.json` next to its `index.html` when it starts: the image writes it from
+its variables or serves a mounted one (above); next to the tar.gz you write it yourself
+([Deploying the bundle](#deploying-the-bundle)). Every key but `schema` may be left out:
+
+```json
+{
+  "schema": 1,
+  "apiBaseUrl": "",
+  "mock": false,
+  "demo": true,
+  "branding": {
+    "title": "Acme Artifacts",
+    "logo": "branding/logo.svg",
+    "colors": { "primary": "#c2410c", "primaryDark": "#fb923c" },
+    "supportUrl": "mailto:platform@example.com"
+  }
+}
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `schema` | | `1`, the version of this file; required |
+| `apiBaseUrl` | `""` | Base URL of the API, `https://…`; empty = the UI's own origin |
+| `mock` | `false` | `true`: the demo only, on generated data; no server needed |
+| `demo` | `true` | `false`: do not offer the demo next to the server |
+| `branding.title` | `Lajstrom` | Instance name in the header, the sign-in page and the page title |
+| `branding.logo` | `""` | The header's logo: a path relative to the bundle, an http(s) URL or a `data:image` URL; empty = Lajstrom's mark |
+| `branding.colors.primary` | `""` | The primary colour, `#rgb` or `#rrggbb`, which buttons, links and focus rings take; empty = Lajstrom's blue |
+| `branding.colors.primaryDark` | `primary` | The same for the dark theme; choose one that reads on a dark background |
+| `branding.supportUrl` | `""` | Where to get help, http(s) or `mailto:`: in the about dialog and on the error pages |
+
+The About dialog in the footer keeps naming Lajstrom and the versions of the UI and the server,
+whatever the branding, for support.
+
+The start-up never leaves the page blank:
+
+- No `config.json` (a `404`, or the `index.html` that a static host answers instead) means the
+  defaults. A file that is not JSON, has no `"schema": 1`, or a setting of the wrong kind
+  renders a page that names the problem; a key that schema 1 does not have is a warning in the
+  browser's console.
+- Then, unless it runs the demo, the UI asks the server `GET {apiBaseUrl}/-/version`. No answer,
+  an error status, or an answer that is not Lajstrom's renders a page with the URL and what came
+  back, with "Try again" and, if the demo is offered, "Open the demo".
+- A server older or newer than the API this UI was built for ([Compatibility](#compatibility))
+  gets a warning under the header, and the UI goes on.
+- If the UI's own scripts do not load, such as below a path that `<base href>` does not name,
+  `index.html` says so after a few seconds.
 
 ## Kubernetes
 

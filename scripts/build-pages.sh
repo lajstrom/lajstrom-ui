@@ -17,7 +17,7 @@ out=dist/pages
 npx vite build --base "$base" --outDir "$out" --emptyOutDir
 
 # The demo only: there is no server behind the site.
-printf '{"apiBaseUrl":"","mock":true,"demo":true,"title":"Lajstrom"}\n' >"$out/config.json"
+printf '{"schema":1,"apiBaseUrl":"","mock":true,"demo":true,"branding":{"title":"Lajstrom"}}\n' >"$out/config.json"
 # Pages answers a path it has no file for with 404.html: the app itself, so that a link into it
 # (/lajstrom-ui/apt/ubuntu-internal) opens the page it names.
 cp "$out/index.html" "$out/404.html"

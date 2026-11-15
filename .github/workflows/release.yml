@@ -88,7 +88,7 @@ jobs:
           root="$RUNNER_TEMP/origin"
           mkdir -p "$root"
           tar -xzf dist/release/lajstrom-ui-*.tar.gz -C "$root" --strip-components=1
-          printf '{"apiBaseUrl":"","mock":true,"demo":true,"title":"Lajstrom"}\n' >"$root/config.json"
+          printf '{"schema":1,"mock":true}\n' >"$root/config.json"
           cat >"$RUNNER_TEMP/origin.conf" <<'EOF'
           server {
             listen 8080;

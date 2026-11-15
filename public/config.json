@@ -1,6 +1,9 @@
 {
+  "schema": 1,
   "apiBaseUrl": "",
   "mock": true,
   "demo": true,
-  "title": "Lajstrom"
+  "branding": {
+    "title": "Lajstrom"
+  }
 }

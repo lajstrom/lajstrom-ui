@@ -16,12 +16,16 @@ import { cn } from "@/lib/cn";
 
 import { AboutButton } from "./about";
 import { CommandPalette } from "./command-palette";
-import { config } from "./config";
+import { config, logoSrc } from "./config";
 import { demoMode, exitDemo, resetDemo } from "./demo";
 import { useSession } from "./session";
+import { SkewBar } from "./skew-bar";
 import { setTheme, useTheme, type Theme } from "./theme";
 
 function Logo() {
+  // A logo of the instance's branding (config.json) in place of Lajstrom's mark.
+  const brand = logoSrc();
+  if (brand) return <img src={brand} alt="" className="h-6 w-auto max-w-40 object-contain" />;
   return (
     <svg viewBox="0 0 32 32" className="size-6 text-primary" aria-hidden>
       <rect x="6" y="1" width="9" height="9" rx="2" fill="currentColor" />
@@ -187,7 +191,7 @@ export function AppShell() {
   }, []);
 
   useEffect(() => {
-    document.title = config().title;
+    document.title = config().branding.title;
   }, []);
 
   const isMac = navigator.platform.toLowerCase().includes("mac");
@@ -198,7 +202,7 @@ export function AppShell() {
         <div className="mx-auto flex h-13 max-w-7xl items-center gap-2 px-4 sm:px-6">
           <Link to="/" className="mr-2 flex items-center gap-2 rounded-md">
             <Logo />
-            <span className="text-[15px] font-semibold tracking-tight">{config().title}</span>
+            <span className="text-[15px] font-semibold tracking-tight">{config().branding.title}</span>
           </Link>
           {demo.active ? (
             <Tooltip content="Demo: the API is answered in this browser on generated data; nothing reaches a server.">
@@ -250,6 +254,7 @@ export function AppShell() {
           </div>
         </div>
         {demo.active ? <DemoBar forced={demo.forced} /> : null}
+        <SkewBar />
       </header>
 
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6">

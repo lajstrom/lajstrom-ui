@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { UiConfig } from "./config";
+import { defaultConfig, type UiConfig } from "./config";
 import { initDemo } from "./demo";
 
-const cfg = (over: Partial<UiConfig>): UiConfig => ({ apiBaseUrl: "", mock: false, demo: true, title: "Lajstrom", ...over });
+const cfg = (over: Partial<UiConfig>): UiConfig => ({ ...defaultConfig, ...over });
 
 /** A browser enough for initDemo: localStorage, history and a location. */
 function browser(href: string, stored: Record<string, string> = {}) {
