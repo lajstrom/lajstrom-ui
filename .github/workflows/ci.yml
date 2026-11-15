@@ -70,6 +70,7 @@ jobs:
           curl -sf http://localhost:8080/ui/apt/ubuntu-internal | grep -q '<base href="/ui/">'
           curl -sf http://localhost:8080/ui/build.json | grep -q '"serverCommit"'
           curl -sf http://localhost:8080/ui/config.json | grep -q '"mock":true'
+          curl -sf http://localhost:8080/ui/config.json | grep -q '^{"schema":1,'
           curl -sfI http://localhost:8080/ui/ | grep -qi '^content-security-policy:'
           test "$(curl -s -o /dev/null -w '%{redirect_url}' http://localhost:8080/)" != ""
       - name: Container logs

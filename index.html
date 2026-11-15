@@ -7,9 +7,32 @@
     <meta name="color-scheme" content="light dark" />
     <title>Lajstrom</title>
     <script src="/theme-init.js"></script>
+    <style>
+      /* Seen only when the app never starts: its first render replaces the content of #root. */
+      .startup-stuck {
+        max-width: 36rem;
+        margin: 20vh auto 0;
+        padding: 0 1rem;
+        font: 14px/1.5 system-ui, sans-serif;
+        color: #64748b;
+        opacity: 0;
+        animation: startup-stuck 0s 5s forwards;
+      }
+      @keyframes startup-stuck {
+        to {
+          opacity: 1;
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <noscript>Lajstrom's web UI needs JavaScript.</noscript>
+      <p class="startup-stuck">
+        Lajstrom's web UI did not start: its scripts did not load. When the UI is served below a path, such as /ui/, the
+        &lt;base href&gt; of its index.html has to name that path.
+      </p>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

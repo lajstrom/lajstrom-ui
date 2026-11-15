@@ -70,7 +70,7 @@ export function FirstAdminPage() {
       setRepeat("");
       notify({
         tone: "success",
-        title: `${user.name} is the first admin of ${config().title}`,
+        title: `${user.name} is the first admin of ${config().branding.title}`,
         description: demoMode().active
           ? "The demo's bootstrap token is used: Reset data makes it valid again."
           : "The bootstrap token is used: remove auth.bootstrap.tokenFile from the server's configuration, and its file.",

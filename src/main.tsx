@@ -7,19 +7,42 @@ import { createRoot } from "react-dom/client";
 
 import { ApiError } from "./api/client";
 import { initSession, onSessionChange } from "./api/session";
-import { loadConfig } from "./app/config";
+import { applyBranding } from "./app/branding";
+import { configUrl, loadConfig } from "./app/config";
 import { DEMO_SESSION, initDemo, REAL_SESSION } from "./app/demo";
 import { makeRouter } from "./app/router";
+import { probeServer, setServer, versionUrl } from "./app/startup";
+import { ConfigError, ServerError, Starting } from "./app/startup-pages";
 import { TooltipProvider } from "./components/ui/tooltip";
 
 async function main() {
-  const cfg = await loadConfig();
+  // The start-up never leaves the page blank: it says what it waits for, and a configuration or
+  // a server it cannot use gets a page that names the problem (src/app/startup.ts).
+  const root = createRoot(document.getElementById("root")!);
+  root.render(<Starting />);
+  const loaded = await loadConfig();
+  if (!loaded.ok) {
+    root.render(<ConfigError problem={loaded.problem} url={configUrl().href} />);
+    return;
+  }
+  for (const warning of loaded.warnings) console.warn(warning);
+  const cfg = loaded.config;
+  applyBranding(cfg.branding);
+
   const demo = initDemo(cfg);
   initSession(demo.active ? DEMO_SESSION : REAL_SESSION);
   if (demo.active) {
     // The mock and its data are a separate chunk, loaded only in the demo.
     const { startMock } = await import("./mocks/browser");
     await startMock();
+  } else {
+    root.render(<Starting url={versionUrl(cfg.apiBaseUrl)} />);
+    const probe = await probeServer(cfg.apiBaseUrl);
+    if (!probe.ok) {
+      root.render(<ServerError probe={probe} demoOffered={demo.offered} />);
+      return;
+    }
+    setServer(probe.server);
   }
 
   const queryClient = new QueryClient({
@@ -42,7 +65,7 @@ async function main() {
   });
   const router = makeRouter(queryClient);
 
-  createRoot(document.getElementById("root")!).render(
+  root.render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
         <TooltipProvider delayDuration={300}>
