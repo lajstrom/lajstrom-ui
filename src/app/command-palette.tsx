@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Command } from "cmdk";
-import { Boxes, FileSearch, Fingerprint, History, Moon, Search, Server, Sun, Users } from "lucide-react";
+import { Boxes, FileSearch, Fingerprint, History, Moon, Search, Server, Sun, Users, Webhook } from "lucide-react";
 import { Dialog } from "radix-ui";
 import { useEffect, useMemo, useState } from "react";
 
@@ -178,6 +178,10 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
                       <Command.Item value="go-access" onSelect={() => go(() => void navigate({ to: "/access" }))} className={itemClass}>
                         <Users />
                         Users, tokens and bindings
+                      </Command.Item>
+                      <Command.Item value="go-webhooks" onSelect={() => go(() => void navigate({ to: "/webhooks" }))} className={itemClass}>
+                        <Webhook />
+                        Webhooks of every mask
                       </Command.Item>
                     </>
                   ) : null}

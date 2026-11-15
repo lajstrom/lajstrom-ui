@@ -49,6 +49,10 @@ server's specs. The read endpoints the UI needs are proposed in
   then signs in as it.
 - **Tokens**: your personal access tokens and a repository's deploy tokens: create one, copy the
   secret the one time it is shown, revoke.
+- **Webhooks**: a repository's on its Webhooks tab, for whoever manages it, and those of every
+  mask (`oci/*`, `*/*`) on an admin page: create one and copy its secret the one time it is
+  shown, change its URL and events, turn it on or off, give it a new secret, send a ping, and
+  read its delivery log.
 - Every screen state is in the URL (`/ui/apt/ubuntu-internal?suite=jammy&arch=arm64`), so a link
   shows the same view. Light and dark theme.
 
