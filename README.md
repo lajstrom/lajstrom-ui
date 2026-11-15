@@ -171,7 +171,7 @@ alone.
 ```
 src/
   api/          types of /api/v1 (openapi.gen.ts from public/openapi.yaml), fetch client, session
-                and sign-in, queries and mutations
+                and sign-in, queries and mutations; change.ts, how a change shows (ADR 0003)
   app/          bootstrap, runtime config, demo mode, router, shell (header, menus), palette, theme
   pages/        one file per screen; package-model.ts groups versions and builds breadcrumbs
   components/   shared pieces; ui/ holds the primitives (button, table, tooltip, …)

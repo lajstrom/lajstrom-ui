@@ -1,7 +1,8 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, type QueryKey } from "@tanstack/react-query";
 import { AlertTriangle, KeyRound, Plus } from "lucide-react";
 import { useId, useState, type FormEvent } from "react";
 
+import { realistic, type ChangeState } from "@/api/change";
 import type { CreatedToken, Token, TokenRequest, TokenScope } from "@/api/types";
 import { cn } from "@/lib/cn";
 import { errorText } from "@/lib/errors";
@@ -53,9 +54,11 @@ type TokenTableProps = {
   /** The token of this browser's session, marked and revoked with a warning. */
   currentId?: number | null;
   onRevoke?: (token: Token) => void;
+  /** The revokes in flight or refused, by token id (useChanges). */
+  changes?: Map<string | number, ChangeState>;
 };
 
-export function TokenTable({ tokens, currentId, onRevoke }: TokenTableProps) {
+export function TokenTable({ tokens, currentId, onRevoke, changes }: TokenTableProps) {
   // A deploy token is a principal of its own, token:<id>: what the audit log and whoami name.
   const deploy = tokens.some((t) => t.kind === "deploy");
   return (
@@ -80,6 +83,7 @@ export function TokenTable({ tokens, currentId, onRevoke }: TokenTableProps) {
       <TBody>
         {tokens.map((t) => {
           const live = tokenState(t) === "active" || tokenState(t) === "expiring";
+          const change = changes?.get(t.id);
           return (
             <TR key={t.id} className={cn(!live && "opacity-60")}>
               <TD className="font-medium">
@@ -89,6 +93,7 @@ export function TokenTable({ tokens, currentId, onRevoke }: TokenTableProps) {
                     this browser
                   </Badge>
                 ) : null}
+                {change?.error ? <div className="mt-0.5 text-xs font-normal text-danger">Not revoked. {errorText(change.error)}</div> : null}
               </TD>
               {deploy ? <TD className="font-mono text-xs">token:{t.id}</TD> : null}
               <TD>
@@ -112,7 +117,7 @@ export function TokenTable({ tokens, currentId, onRevoke }: TokenTableProps) {
               {onRevoke ? (
                 <TD className="text-right">
                   {live ? (
-                    <Button size="sm" variant="ghost" onClick={() => onRevoke(t)}>
+                    <Button size="sm" variant="ghost" disabled={change?.pending} onClick={() => onRevoke(t)}>
                       Revoke
                     </Button>
                   ) : null}
@@ -136,11 +141,13 @@ type CreateTokenDialogProps = {
   /** What the secret is for, shown with it: the user name for a personal access token, `deploy`
    * for a deploy token (Basic deploy:<token>, docs/auth.md). */
   login: string;
-  onCreated?: () => void;
+  /** The query of the list the token joins. */
+  list: QueryKey;
 };
 
-/** Creates a token and shows its secret, the one time the server answers it. */
-export function CreateTokenDialog({ kind, create, login, onCreated }: CreateTokenDialogProps) {
+/** Creates a token and shows its secret, the one time the server answers it. Realistic: the
+ * secret exists only in the answer, and the dialog waits for the list to have the token. */
+export function CreateTokenDialog({ kind, create, login, list }: CreateTokenDialogProps) {
   const ids = { name: useId(), access: useId(), expiry: useId() };
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -153,7 +160,7 @@ export function CreateTokenDialog({ kind, create, login, onCreated }: CreateToke
         ...(accessScopes[access].length ? { scopes: accessScopes[access] } : {}),
         ...(expiry === "never" ? {} : { expiresIn: expiry }),
       }),
-    onSuccess: () => onCreated?.(),
+    ...realistic(list),
   });
 
   const reset = () => {
@@ -298,30 +305,15 @@ type RevokeTokenDialogProps = {
   token: Token | null;
   /** The token of this browser's session: revoking it signs out. */
   current?: boolean;
-  revoke: (token: Token) => Promise<void>;
+  /** Revokes it; the dialog closes at once, the list shows the revoke (docs/adr/0003-changes.md). */
+  onConfirm: (token: Token) => void;
   onClose: () => void;
-  onRevoked?: () => void;
 };
 
 /** Asks before revoking: clients using the token are refused from their next request on. */
-export function RevokeTokenDialog({ token, current = false, revoke, onClose, onRevoked }: RevokeTokenDialogProps) {
-  const mutation = useMutation({
-    mutationFn: (t: Token) => revoke(t),
-    onSuccess: () => {
-      onRevoked?.();
-      onClose();
-    },
-  });
+export function RevokeTokenDialog({ token, current = false, onConfirm, onClose }: RevokeTokenDialogProps) {
   return (
-    <Dialog
-      open={token !== null}
-      onOpenChange={(o) => {
-        if (!o) {
-          mutation.reset();
-          onClose();
-        }
-      }}
-    >
+    <Dialog open={token !== null} onOpenChange={(o) => !o && onClose()}>
       {token ? (
         <DialogContent title={`Revoke ${token.name}?`}>
           <p className="text-sm">
@@ -333,15 +325,18 @@ export function RevokeTokenDialog({ token, current = false, revoke, onClose, onR
               This is the token of this browser: revoking it signs you out.
             </p>
           ) : null}
-          <div className="mt-3">
-            <FormError error={errorText(mutation.error)} />
-          </div>
           <DialogActions>
             <DialogClose asChild>
               <Button>Cancel</Button>
             </DialogClose>
-            <Button variant="danger" disabled={mutation.isPending} onClick={() => mutation.mutate(token)}>
-              {mutation.isPending ? "Revoking…" : "Revoke"}
+            <Button
+              variant="danger"
+              onClick={() => {
+                onConfirm(token);
+                onClose();
+              }}
+            >
+              Revoke
             </Button>
           </DialogActions>
         </DialogContent>
