@@ -463,10 +463,6 @@ npx license-checker-rseidelsohn@5.0.1 --production --excludePrivatePackages \
 The UI primitives are written for this project rather than copied from a component registry, so
 the snippet scan has nothing to match.
 
-## Not done yet
-
-- Code splitting per page (the main chunk is about 190 KiB gzipped).
-
 ## Contributing and license
 
 See [CONTRIBUTING.md](CONTRIBUTING.md): every commit is signed off (DCO), contributors sign the

@@ -31,6 +31,23 @@ async function main() {
 
   const demo = initDemo(cfg);
   initSession(demo.active ? DEMO_SESSION : REAL_SESSION);
+
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: 30_000,
+        refetchOnWindowFocus: false,
+        // 4xx answers are final; retry network and 5xx errors once.
+        retry: (count, err) => !(err instanceof ApiError && err.status >= 400 && err.status < 500) && count < 1,
+      },
+    },
+  });
+  const router = makeRouter(queryClient);
+  // The chunk of the page at the address (src/app/router.tsx) loads while the mock starts or the
+  // server answers, and the app renders once it is there: the start-up gives way to the page
+  // itself, not to an empty shell.
+  const firstPage = router.load();
+
   if (demo.active) {
     // The mock and its data are a separate chunk, loaded only in the demo.
     const { startMock } = await import("./mocks/browser");
@@ -45,16 +62,6 @@ async function main() {
     setServer(probe.server);
   }
 
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: {
-        staleTime: 30_000,
-        refetchOnWindowFocus: false,
-        // 4xx answers are final; retry network and 5xx errors once.
-        retry: (count, err) => !(err instanceof ApiError && err.status >= 400 && err.status < 500) && count < 1,
-      },
-    },
-  });
   // What the API answers depends on who asks: sign-in, sign-out, another tab, or a token the
   // server refused (src/api/client.ts) start every query over.
   onSessionChange(() => void queryClient.resetQueries());
@@ -63,7 +70,7 @@ async function main() {
   window.addEventListener("beforeunload", (e) => {
     if (queryClient.isMutating() > 0) e.preventDefault();
   });
-  const router = makeRouter(queryClient);
+  await firstPage;
 
   root.render(
     <StrictMode>
