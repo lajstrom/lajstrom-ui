@@ -242,13 +242,14 @@ function ReindexRunView({ run }: { run: ReindexRun }) {
       <CardBody>
         <p className="mb-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm">
           <Badge tone={runTone[run.state as keyof typeof runTone] ?? "neutral"}>{run.state}</Badge>
-          {run.allRepos ? "a run of every repo" : "a run of this repo"}, from {run.source}, by <Principal value={run.principal} />, started{" "}
-          <RelativeTime iso={run.startedAt} />
-          {run.finishedAt ? (
-            <>
-              , took {Math.max(1, Math.round((Date.parse(run.finishedAt) - Date.parse(run.startedAt)) / 1000))} s
-            </>
-          ) : null}
+          {/* One flex item: the row's gap would otherwise come before each comma. */}
+          <span>
+            {run.allRepos ? "a run of every repo" : "a run of this repo"}, from {run.source}, by <Principal value={run.principal} />, started{" "}
+            <RelativeTime iso={run.startedAt} />
+            {run.finishedAt
+              ? `, took ${Math.max(1, Math.round((Date.parse(run.finishedAt) - Date.parse(run.startedAt)) / 1000))} s`
+              : null}
+          </span>
           {run.prune ? <Badge tone="outline">prune</Badge> : null}
           {run.verify ? <Badge tone="outline">verify</Badge> : null}
         </p>
