@@ -20,7 +20,9 @@ server's specs. The read endpoints the UI needs are proposed in
 
 - No server-side rendering: a fully static build; all data comes from API calls in the browser.
 - Without a backend the UI still works: in the demo, on data generated in the browser.
-- Separate images for dev, test and prod (not built yet; see [Not done yet](#not-done-yet)).
+- One image for dev, test and prod: the environment is a profile chosen at start
+  ([ADR 0004](docs/adr/0004-one-image-profile-at-start.md); not built yet, see
+  [Not done yet](#not-done-yet)).
 
 ## What is in it
 
@@ -428,11 +430,10 @@ the snippet scan has nothing to match.
 
 ## Not done yet
 
-- **Images per environment**: dev, test and prod images are a requirement; one image configured
-  by environment variables exists today. What differs between them is still open
-  ([#16](https://github.com/lajstrom/lajstrom-ui/issues/16)). A release builds one tar.gz and
-  one image of it; images per environment would be built from that same tar.gz in the release's
-  job `publish`, so that no environment gets a bundle of its own.
+- **The image's profile**: dev, test and prod are profiles of the one image, chosen at start
+  with `LAJSTROM_UI_PROFILE` ([ADR 0004](docs/adr/0004-one-image-profile-at-start.md)). Until
+  [#57](https://github.com/lajstrom/lajstrom-ui/issues/57) brings it, the image has today's
+  defaults: the demo offered, the source maps served.
 - Code splitting per page (the main chunk is about 190 KiB gzipped).
 
 ## Contributing and license

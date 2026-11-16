@@ -61,4 +61,5 @@ and does not serve it.
 - Single-binary installs get no UI unless an embedded build is added later.
 - Before management screens, the browser needs a login that does not keep tokens in JavaScript:
   the cookie session proposed in api-proposal.md §5.
-- Dev, test and prod images are not built yet; what differs between them is still open.
+- Dev, test and prod are one image with a profile chosen at start, not three images
+  ([ADR 0004](0004-one-image-profile-at-start.md)).
