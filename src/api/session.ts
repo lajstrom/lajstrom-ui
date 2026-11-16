@@ -1,12 +1,16 @@
-// The browser session: a personal access token that the UI sends as `Authorization: Bearer` on
-// every API request (bearer tokens, never cookies: the lead's decision in the repository's
-// README). Signing in with a password creates a short-lived token for this browser
-// (POST /api/v1/users/{name}/tokens); signing out revokes it. A token pasted by the user is only
-// forgotten on sign-out, never revoked: it may be in use elsewhere.
+// The browser session: a personal access token that the UI sends on every API request (tokens in
+// a header, never cookies: the lead's decision in the repository's README). Signing in with a
+// password, or through the server's OIDC login, gets a short-lived token bound to a key of this
+// browser (POST /api/v1/login, DPoP: src/api/dpop.ts), sent as `Authorization: DPoP` with a proof
+// of that key; a server without that route creates the token with the password
+// (POST /api/v1/users/{name}/tokens), sent as `Authorization: Bearer`. Signing out revokes it. A
+// token pasted by the user is a bearer, only forgotten on sign-out, never revoked: it may be in
+// use elsewhere.
 //
 // The token is kept in localStorage, so that every tab of the UI shares it; its lifetime is the
 // token's own expiry on the server. The Content-Security-Policy of the image allows no inline or
-// foreign scripts, which is what keeps it from other code.
+// foreign scripts, which is what keeps it from other code. A bound token is of no use without its
+// key, which WebCrypto keeps non-extractable in IndexedDB (src/api/dpop-key.ts).
 
 export type Session = {
   /** The secret: ljs_pat_… */
@@ -18,6 +22,9 @@ export type Session = {
   tokenId: number | null;
   /** RFC 3339; null when unknown (a pasted token). */
   expiresAt: string | null;
+  /** How the token is sent: "DPoP", with a proof of this browser's key, for the token of
+   * POST /api/v1/login (its tokenType); a bearer when absent, for any other token. */
+  tokenType?: "Bearer" | "DPoP";
 };
 
 /** Where the session is kept: the demo has its own (src/app/demo.ts). Set by initSession. */
@@ -34,7 +41,8 @@ function valid(v: unknown): v is Session {
     typeof s.token === "string" &&
     typeof s.user === "string" &&
     (typeof s.tokenId === "number" || s.tokenId === null) &&
-    (typeof s.expiresAt === "string" || s.expiresAt === null)
+    (typeof s.expiresAt === "string" || s.expiresAt === null) &&
+    (s.tokenType === undefined || s.tokenType === "Bearer" || s.tokenType === "DPoP")
   );
 }
 

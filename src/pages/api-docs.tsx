@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { getSession } from "@/api/session";
+import { sessionHeaders } from "@/api/client";
 import { basePath } from "@/app/base";
 import { config } from "@/app/config";
 import { demoMode } from "@/app/demo";
@@ -38,11 +38,18 @@ export function ApiDocsPage() {
           docExpansion: "list",
           filter: true,
           // As the user who is signed in, unless "Authorize" set other credentials; the token goes
-          // to the origin of the description only, which is the API's.
-          requestInterceptor: (req) => {
-            const session = getSession();
-            const toApi = new URL(req.url, location.href).origin === new URL(spec, location.href).origin;
-            if (session && toApi && !req.headers.Authorization) req.headers.Authorization = `Bearer ${session.token}`;
+          // to /api/ on the origin of the description only, which is the API's. A token of a
+          // sign-in goes as DPoP, with a proof of this browser's key for the request. The fetch of
+          // the description itself comes here too, without a method.
+          requestInterceptor: async (req) => {
+            const url = new URL(req.url, location.href);
+            const toApi = url.origin === new URL(spec, location.href).origin && url.pathname.startsWith("/api/");
+            if (!toApi || req.headers.Authorization) return req;
+            try {
+              Object.assign(req.headers, await sessionHeaders((req.method ?? "GET").toUpperCase(), url));
+            } catch {
+              // The session's key is gone, and the session with it: the request goes without.
+            }
             return req;
           },
         });

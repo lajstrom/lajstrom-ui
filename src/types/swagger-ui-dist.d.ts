@@ -1,10 +1,11 @@
 // The part of swagger-ui-dist's bundle the API page uses; the package ships no types.
 declare module "swagger-ui-dist/swagger-ui-es-bundle.js" {
-  export type SwaggerRequest = { url: string; method: string; headers: Record<string, string>; body?: unknown };
+  export type SwaggerRequest = { url: string; method?: string; headers: Record<string, string>; body?: unknown };
   export type SwaggerOptions = {
     domNode: HTMLElement;
     url: string;
-    requestInterceptor?: (req: SwaggerRequest) => SwaggerRequest;
+    /** Swagger UI awaits it. */
+    requestInterceptor?: (req: SwaggerRequest) => SwaggerRequest | Promise<SwaggerRequest>;
     tryItOutEnabled?: boolean;
     deepLinking?: boolean;
     displayRequestDuration?: boolean;

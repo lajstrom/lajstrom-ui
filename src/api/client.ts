@@ -1,6 +1,8 @@
 import { config } from "@/app/config";
 
-import { getSession, setSession } from "./session";
+import { clockSkew, createProof, dpopChallenge, learnServerClock, refusedForIat } from "./dpop";
+import { sessionKey } from "./dpop-key";
+import { getSession, setSession, type Session } from "./session";
 import type { ApiErrorBody } from "./types";
 
 /** An error answered by the API, with the code of the error envelope (http-routing.md §4). */
@@ -58,11 +60,47 @@ type RequestOptions = {
   query?: Query;
   body?: unknown;
   signal?: AbortSignal;
-  /** Overrides the session's bearer, for sign-in: Basic credentials or a token being checked. */
+  /** Overrides the session's credentials, for sign-in: Basic credentials, a token being checked,
+   * or "" for none. */
   authorization?: string;
+  /** Signs a DPoP proof of this key without a token: the sign-in, POST /api/v1/login. */
+  dpopKey?: CryptoKeyPair;
   /** Conditions of a request, such as If-Match. */
   headers?: Record<string, string>;
 };
+
+/** The key of a DPoP session; a session whose key this browser has lost is over. */
+async function keyOf(session: Session): Promise<CryptoKeyPair> {
+  const key = await sessionKey(session.token);
+  if (key) return key;
+  if (getSession()?.token === session.token) setSession(null);
+  throw new ApiError(401, "UNAUTHENTICATED", "This browser no longer has the key of its sign-in: sign in again.", false);
+}
+
+/**
+ * The headers that carry the session to a request of the API: Authorization: Bearer, or for a
+ * token of POST /api/v1/login Authorization: DPoP with a new proof of this browser's key in DPoP
+ * (docs/api.md of the server, The DPoP-bound token). Empty when signed out. The API page's
+ * "Try it out" sends them too (src/pages/api-docs.tsx).
+ */
+export async function sessionHeaders(method: string, url: string | URL, session = getSession()): Promise<Record<string, string>> {
+  if (!session) return {};
+  if (session.tokenType !== "DPoP") return { Authorization: `Bearer ${session.token}` };
+  const proof = await createProof(await keyOf(session), { method, url, token: session.token });
+  return { Authorization: `DPoP ${session.token}`, DPoP: proof };
+}
+
+type Failure = { code: string; message: string; fromServer: boolean };
+
+/** The error envelope of an answer that is not ok; a proxy's page has none. */
+async function failure(res: Response): Promise<Failure> {
+  try {
+    const body = (await res.json()) as ApiErrorBody;
+    return { code: body.error.code, message: body.error.message, fromServer: true };
+  } catch {
+    return { code: "UNAVAILABLE", message: `${res.status} ${res.statusText}`.trim(), fromServer: false };
+  }
+}
 
 async function request(method: string, path: string, opts: RequestOptions = {}): Promise<Response> {
   const url = new URL(config().apiBaseUrl + path, window.location.origin);
@@ -72,42 +110,59 @@ async function request(method: string, path: string, opts: RequestOptions = {}):
     else url.searchParams.set(k, String(v));
   }
   const session = opts.authorization === undefined ? getSession() : null;
-  const headers: Record<string, string> = { Accept: "application/json", ...opts.headers };
-  const authorization = opts.authorization ?? (session ? `Bearer ${session.token}` : undefined);
-  if (authorization) headers.Authorization = authorization;
-  if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+  const dpop = session?.tokenType === "DPoP";
 
   let res: Response;
-  try {
-    res = await fetch(url, {
-      method,
-      headers,
-      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
-      // The server answers 401 with a Basic challenge; with credentials the browser would show
-      // its own login dialog. The Authorization header above is sent either way.
-      credentials: "omit",
-      signal: opts.signal,
-    });
-  } catch (err) {
-    if ((err as Error).name === "AbortError") throw err;
-    throw new ApiError(0, "UNAVAILABLE", "The Lajstrom API cannot be reached.", false);
-  }
-  if (!res.ok) {
-    let code = "UNAVAILABLE";
-    let message = `${res.status} ${res.statusText}`.trim();
-    let fromServer = false;
+  let failed: Failure | null = null;
+  for (let attempt = 0; ; attempt++) {
+    // A new proof for every request, a retry too: the server takes a jti once.
+    const signedBy = clockSkew();
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      ...opts.headers,
+      ...(opts.authorization === undefined ? await sessionHeaders(method, url, session) : {}),
+    };
+    if (opts.authorization) headers.Authorization = opts.authorization;
+    if (opts.dpopKey) headers.DPoP = await createProof(opts.dpopKey, { method, url });
+    if (opts.body !== undefined) headers["Content-Type"] = "application/json";
     try {
-      const body = (await res.json()) as ApiErrorBody;
-      code = body.error.code;
-      message = body.error.message;
-      fromServer = true;
-    } catch {
-      // Not the error envelope: a proxy error page, for example.
+      res = await fetch(url, {
+        method,
+        headers,
+        body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+        // The server answers 401 with a Basic challenge; with credentials the browser would show
+        // its own login dialog. The Authorization header above is sent either way.
+        credentials: "omit",
+        signal: opts.signal,
+      });
+    } catch (err) {
+      if ((err as Error).name === "AbortError") throw err;
+      throw new ApiError(0, "UNAVAILABLE", "The Lajstrom API cannot be reached.", false);
     }
-    // The session's token was refused: revoked, expired, or its user disabled. Signed out.
-    if (res.status === 401 && session && getSession()?.token === session.token) setSession(null);
+    if (res.ok) break;
+    failed = await failure(res);
+    // A proof refused for its iat: this browser's clock is off. Once more, by the server's clock,
+    // from the Date of the refusal (ADR 0022 §8.4 of the server); the server did nothing else.
+    // The clock may have been set right meanwhile by a request refused alongside this one.
+    const signed = dpop || opts.dpopKey !== undefined;
+    if (!signed || attempt > 0 || !refusedForIat(res.status, res.headers.get("WWW-Authenticate"), failed.message)) break;
+    learnServerClock(res.headers.get("Date"));
+    if (Math.abs(clockSkew() - signedBy) < 1000) break;
+  }
+  if (failed && !res.ok) {
+    // The session's token was refused: revoked, expired, its user disabled, or bound to a key
+    // this browser no longer has. Signed out. A refused proof is this browser's doing, not the
+    // token's: the session stays.
+    const proofRefused = dpop && dpopChallenge(res.headers.get("WWW-Authenticate"))?.error === "invalid_dpop_proof";
+    if (res.status === 401 && session && !proofRefused && getSession()?.token === session.token) setSession(null);
     const retryAfter = Number(res.headers.get("Retry-After") ?? NaN);
-    throw new ApiError(res.status, code, message, fromServer, Number.isInteger(retryAfter) && retryAfter >= 0 ? retryAfter : null);
+    throw new ApiError(
+      res.status,
+      failed.code,
+      failed.message,
+      failed.fromServer,
+      Number.isInteger(retryAfter) && retryAfter >= 0 ? retryAfter : null,
+    );
   }
   return res;
 }
