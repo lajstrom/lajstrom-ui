@@ -66,13 +66,14 @@ type SegmentedProps<T extends string> = {
   "aria-label"?: string;
 };
 
-/** A row of mutually exclusive filter buttons. */
+/** A row of mutually exclusive filter buttons. Where the row does not fit, the buttons wrap onto
+ * more rows, each whole, so every option stays in view. */
 export function Segmented<T extends string>({ value, options, onChange, className, ...rest }: SegmentedProps<T>) {
   return (
     <div
       role="radiogroup"
       aria-label={rest["aria-label"]}
-      className={cn("inline-flex items-center gap-0.5 rounded-md border border-border bg-surface p-0.5", className)}
+      className={cn("inline-flex flex-wrap items-center gap-0.5 rounded-md border border-border bg-surface p-0.5", className)}
     >
       {options.map((o) => (
         <button
@@ -82,7 +83,7 @@ export function Segmented<T extends string>({ value, options, onChange, classNam
           aria-checked={o.value === value}
           onClick={() => onChange(o.value)}
           className={cn(
-            "inline-flex h-6 cursor-pointer items-center gap-1.5 rounded px-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground",
+            "inline-flex h-6 cursor-pointer items-center gap-1.5 rounded px-2 text-xs font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground",
             o.value === value && "bg-background text-foreground shadow-card",
           )}
         >
