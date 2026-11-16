@@ -1,6 +1,6 @@
 // Every screen of the UI against a real server, as the admin that e2e/server.sh made: the
-// repositories, a package and a version of each, tokens, the audit log, access, the proposed
-// screens and the API page. A test fails on an uncaught error, an answer of the API the UI does
+// repositories, a package and a version of each, tokens, the audit log, access, the registries,
+// search and the API page. A test fails on an uncaught error, an answer of the API the UI does
 // not expect (e2e/test.ts) or a page that stays empty.
 
 import type { Page } from "@playwright/test";
@@ -37,7 +37,13 @@ test("each repo, its first package and that package's newest version", async ({ 
       const pkg = packages[0];
       if (!pkg) return;
 
-      await page.getByRole("link", { name: pkg.name, exact: true }).first().click();
+      // A raw repo shows its files a directory at a time, each by its name in the directory.
+      const slash = r.format === "raw" ? pkg.name.lastIndexOf("/") + 1 : 0;
+      if (slash > 0) {
+        await page.goto(`${r.format}/${r.name}?dir=${pkg.name.slice(0, slash)}`);
+        await shown(page, r.name);
+      }
+      await page.getByRole("link", { name: pkg.name.slice(slash), exact: true }).first().click();
       await expect(page).toHaveURL((url) => url.pathname.startsWith(`/ui/${r.format}/${r.name}/`));
       await shown(page);
       const { versions } = await api<Schemas["VersionList"]>(request, `${path}/${segment(pkg.name)}/versions`);
@@ -76,14 +82,17 @@ test("a user's page: its bindings and its tokens", async ({ page }) => {
   await expect(page.getByText("e2e npm publish").first()).toBeVisible();
 });
 
-test("the screens of proposed endpoints say the server lacks them", async ({ page }) => {
-  for (const path of ["registries", "search?q=hello"]) {
-    await test.step(path, async () => {
-      await page.goto(path);
-      await shown(page);
-      await expect(page.getByText("Not in this server version yet")).toBeVisible();
-    });
-  }
+test("the registries, with what the probe found", async ({ page, request }) => {
+  const { registries } = await api<Schemas["RegistryList"]>(request, "/api/v1/registries");
+  await page.goto("registries");
+  await shown(page, "Registries");
+  for (const r of registries) await expect(page.getByText(r.name, { exact: true }).first()).toBeVisible();
+});
+
+test("search finds the packages of every format by name", async ({ page }) => {
+  await page.goto("search?q=hello");
+  await shown(page, "Search");
+  await expect(page.getByText("hello-e2e", { exact: true }).first()).toBeVisible();
 });
 
 test("the API page shows the server's own description", async ({ page }) => {
