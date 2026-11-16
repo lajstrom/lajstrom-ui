@@ -31,8 +31,10 @@ function text(status: number, message: string, headers: Record<string, string> =
 }
 
 /** A repo as the server answers it: without prefix, which the UI derives (src/api/queries.ts). */
-function repoJson({ prefix: _prefix, ...repo }: db.MockRepo) {
-  return repo;
+/** A repo as the server answers it: a group and an oci repo, which index no versions, have no
+ * stats. */
+function repoJson({ prefix: _prefix, seedReindex: _seedReindex, stats, ...repo }: db.MockRepo) {
+  return repo.kind === "group" || repo.format === "oci" ? repo : { ...repo, stats };
 }
 
 function refusal(r: Refusal) {
@@ -252,7 +254,7 @@ export const handlers = [
         order: sp.get("order") ?? undefined,
         limit: num(sp.get("limit"), 100),
         cursor: sp.get("cursor") ?? undefined,
-        dir: sp.has("dir") ? (sp.get("dir") ?? "") : null,
+        facet: sp.getAll("facet"),
       }),
     );
   }),
@@ -341,6 +343,26 @@ export const handlers = [
     return list ? HttpResponse.json(list) : fail(404, "NOT_FOUND", `version ${decode(params.version)} of ${decode(params.name)} not found in ${repo.prefix}`);
   }),
 
+  get("*/api/v1/repos/:format/:repo/packages/:name/versions/:version/manifest", async ({ params, request }) => {
+    const repo = repoOr404(params);
+    if (repo instanceof Response) return repo;
+    const variant = new URL(request.url).searchParams.get("variant");
+    const list = db.getManifests(repo, decode(params.name), decode(params.version), variant);
+    if (!list) return fail(404, "NOT_FOUND", `version ${decode(params.version)} of ${decode(params.name)} not found in ${repo.prefix}`);
+    // One variant's answer is named by its digest.
+    const headers: Record<string, string> = { "Cache-Control": "no-cache" };
+    if (list.manifests.length === 1) headers.ETag = `"${list.manifests[0]!.digest}"`;
+    return HttpResponse.json(list, { headers });
+  }),
+
+  get("*/api/v1/repos/:format/:repo/packages/:name/versions/:version/referrers", async ({ params, request }) => {
+    const repo = repoOr404(params);
+    if (repo instanceof Response) return repo;
+    const sp = new URL(request.url).searchParams;
+    const list = db.listReferrers(repo, decode(params.name), decode(params.version), sp.get("variant"), sp.get("artifactType"));
+    return list ? HttpResponse.json(list) : fail(404, "NOT_FOUND", `version ${decode(params.version)} of ${decode(params.name)} not found in ${repo.prefix}`);
+  }),
+
   get("*/api/v1/repos/:format/:repo/reindex", async ({ params }) => {
     const repo = repoOr404(params);
     if (repo instanceof Response) return repo;
@@ -370,6 +392,7 @@ export const handlers = [
   get("*/api/v1/repos/:format/:repo/sessions", async ({ params }) => {
     const repo = repoOr404(params);
     if (repo instanceof Response) return repo;
+    if (!repo.permissions.includes("manage")) return fail(403, "FORBIDDEN", "deploy sessions need manage on the repo");
     return HttpResponse.json({ sessions: db.listSessions(repo) });
   }),
 
@@ -382,7 +405,7 @@ export const handlers = [
 
   get("*/api/v1/search", async ({ request }) => {
     const sp = new URL(request.url).searchParams;
-    return HttpResponse.json(db.search(sp.get("q") ?? "", sp.get("format"), num(sp.get("limit"), 20)));
+    return HttpResponse.json(db.search(sp.get("q") ?? "", sp.get("format"), num(sp.get("limit"), 20), sp.get("cursor")));
   }),
 
   get("*/api/v1/registries", async () => {

@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { AlertTriangle, CheckCircle2, Clock, KeyRound, Loader2, RefreshCw, ShieldCheck, Upload } from "lucide-react";
 
-import { callerQuery, infoQuery, registriesQuery, sessionsQuery } from "@/api/queries";
+import { callerQuery, infoQuery, registriesQuery, reindexQuery, sessionsQuery } from "@/api/queries";
 import type { ReindexRun, Repo } from "@/api/types";
 import { ErrorState, Principal, RelativeTime } from "@/components/common";
 import { Badge } from "@/components/ui/badge";
@@ -25,12 +25,15 @@ import { defaultMaxFileSize } from "./repo-form";
 import { MembersCard, UpstreamCard } from "./repo-kinds";
 
 const NOT_REPORTED = <span className="text-muted-foreground">not reported by this server version</span>;
+const MANAGERS_ONLY = <span className="text-muted-foreground">visible to those who manage the repo</span>;
 
 export function RepoDetails({ repo }: { repo: Repo }) {
   const info = useQuery(infoQuery);
   const who = useQuery(callerQuery);
   const regs = useQuery({ ...registriesQuery, enabled: who.data?.admin ?? false });
   const registry = regs.data?.find((r) => r.name === repo.registry);
+  // The state of a reindex is not part of the repo: GET …/reindex has it, for whoever manages it.
+  const run = useQuery({ ...reindexQuery(repo.format, repo.name), enabled: reindexes(repo) });
   const spec = formatSpec(repo.format);
   const ctx = snippetContext(info.data, repo);
   const p = repo.policy ?? {};
@@ -133,7 +136,7 @@ export function RepoDetails({ repo }: { repo: Repo }) {
       <MembersCard repo={repo} className="lg:col-span-2" />
 
       <Card>
-        <CardHeader title="Backend registry" description={registry ? registry.product : repo.registry ? "Details are visible to admins" : undefined} />
+        <CardHeader title="Backend registry" description={registry ? (registry.vendor ?? "not probed yet") : repo.registry ? "Details are visible to admins" : undefined} />
         <CardBody>
           <Properties>
             <Property label="Name">
@@ -167,12 +170,9 @@ export function RepoDetails({ repo }: { repo: Repo }) {
         <CardHeader title="Index" description="Derived from the registry; reindex rebuilds it from manifest annotations" />
         <CardBody>
           <Properties>
-            <Property label="State">
-              <ReindexState repo={repo} />
-            </Property>
-            <Property label="Last reconcile">{repo.reindex ? <RelativeTime iso={repo.reindex.finishedAt} /> : NOT_REPORTED}</Property>
-            <Property label="Next reconcile">
-              {repo.reindex ? repo.reindex.nextReconcileAt ? <RelativeTime iso={repo.reindex.nextReconcileAt} /> : "—" : NOT_REPORTED}
+            <Property label="State">{reindexes(repo) ? <ReindexState run={run.data} /> : MANAGERS_ONLY}</Property>
+            <Property label="Last run">
+              {!reindexes(repo) ? MANAGERS_ONLY : run.data?.finishedAt ? <RelativeTime iso={run.data.finishedAt} /> : run.data === undefined ? null : "—"}
             </Property>
             <Property label="Contents">
               {repo.stats ? `${formatNumber(repo.stats.manifests)} manifests, ${formatNumber(repo.stats.files)} files` : NOT_REPORTED}
@@ -254,6 +254,8 @@ function ReindexRunView({ run }: { run: ReindexRun }) {
           {run.verify ? <Badge tone="outline">verify</Badge> : null}
         </p>
         {run.error ? <p className="mb-3 text-sm text-danger">{run.error}</p> : null}
+        {/* An encrypted repo whose keys do not open is skipped whole. */}
+        {r?.skipped ? <p className="mb-3 text-sm text-warning">The run skipped this repo: {r.skipped}.</p> : null}
         {!r ? (
           <p className="text-xs text-muted-foreground">
             {run.state === "running" ? "The report comes when the run finishes." : "The run stopped before it reached this repo."}
@@ -267,9 +269,11 @@ function ReindexRunView({ run }: { run: ReindexRun }) {
   );
 }
 
-export function ReindexState({ repo }: { repo: Repo }) {
-  const r = repo.reindex;
-  if (!r) return NOT_REPORTED;
+/** The state of the latest run that covered the repo: running, done, failed or abandoned (its
+ * heartbeat stopped); null when none has. */
+export function ReindexState({ run: r }: { run: ReindexRun | null | undefined }) {
+  if (r === undefined) return null;
+  if (r === null) return <span className="text-sm text-muted-foreground">never reindexed</span>;
   if (r.state === "running")
     return (
       <span className="inline-flex items-center gap-1.5 text-sm text-primary">
@@ -277,17 +281,17 @@ export function ReindexState({ repo }: { repo: Repo }) {
         reindex running since <RelativeTime iso={r.startedAt} />
       </span>
     );
-  if (r.state === "failed")
+  if (r.state === "failed" || r.state === "abandoned")
     return (
       <span className="inline-flex items-center gap-1.5 text-sm text-danger">
         <AlertTriangle className="size-3.5" />
-        failed with {r.errors} errors
+        {r.state}
       </span>
     );
   return (
     <span className="inline-flex items-center gap-1.5 text-sm text-success">
       <CheckCircle2 className="size-3.5" />
-      in sync
+      {r.state}
     </span>
   );
 }
@@ -308,7 +312,7 @@ export function RepoMaintenance({ repo }: { repo: Repo }) {
           description="Reconcile compares the index with the registry every hour; reindex rebuilds it from the annotations"
           actions={
             <>
-              <ReindexState repo={repo} />
+              <ReindexState run={report.data} />
               {reindexes(repo) ? <StartReindexButton repo={repo} running={report.data?.state === "running"} /> : null}
             </>
           }
@@ -338,7 +342,7 @@ export function RepoMaintenance({ repo }: { repo: Repo }) {
             description="mvn deploy uploads file by file; the PUT of maven-metadata.xml commits the session as one manifest"
           />
           {sessions.data && sessions.data.length === 0 ? (
-            <EmptyState title="No sessions" className="py-6" />
+            <EmptyState title="No open sessions" className="py-6" />
           ) : (
             <Table>
               <THead>
@@ -356,7 +360,7 @@ export function RepoMaintenance({ repo }: { repo: Repo }) {
                   <TR key={s.id}>
                     <TD className="font-mono text-xs">{s.key}</TD>
                     <TD>
-                      <Principal value={s.principal} />
+                      <Principal value={s.principal} name={s.principalName} />
                     </TD>
                     <TD>
                       <Tooltip content={s.files.map((f) => f.name).join(", ")}>
@@ -366,14 +370,25 @@ export function RepoMaintenance({ repo }: { repo: Repo }) {
                       </Tooltip>
                     </TD>
                     <TD>
-                      {s.state === "open" ? (
+                      {/* Only open sessions are listed: one commits, or it expires with nothing published. */}
+                      {s.committing ? (
+                        <Badge tone="primary">
+                          <Loader2 className="animate-spin" />
+                          committing
+                        </Badge>
+                      ) : (
                         <Badge tone="primary">
                           <Clock />
                           open
                         </Badge>
-                      ) : (
-                        <Badge>{s.state}</Badge>
                       )}
+                      {s.refused ? (
+                        <Tooltip content={Object.entries(s.refused).map(([name, why]) => `${name}: ${why}`).join("; ")}>
+                          <Badge tone="warning" className="ml-1">
+                            {Object.keys(s.refused).length} refused
+                          </Badge>
+                        </Tooltip>
+                      ) : null}
                     </TD>
                     <TD>
                       <RelativeTime iso={s.createdAt} />

@@ -16,7 +16,8 @@ export type ReportCount = {
 };
 
 /** The counts of a report, in the server's order: what the run read, then what it did with the
- * rows. A count that a run of an earlier release did not write is 0. */
+ * rows. A count that a run of an earlier release did not write is 0; the blob map, which only an
+ * encrypted repo has, only when it counts any. */
 export function reportCounts(r: ReindexReport): ReportCount[] {
   const counts: [string, number, string, boolean?][] = [
     ["OCI repositories", r.ociRepositories, "The OCI repositories under the repo's path."],
@@ -41,6 +42,7 @@ export function reportCounts(r: ReindexReport): ReportCount[] {
     ["Referrers", r.referrers, "The referrers listed (signatures, SBOMs, attestations), each digest once."],
     ["Attachments", r.attachments, "The attachment rows of the versions seen or written."],
   ];
+  if (r.blobMap) counts.push(["Blob map", r.blobMap, "The rows of blob_map of an encrypted repo written or seen."]);
   return counts.map(([label, value, hint, warn = false]) => ({ label, value, hint, warn: warn && value > 0 }));
 }
 

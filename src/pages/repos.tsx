@@ -72,8 +72,9 @@ export function ReposPage() {
       size: 0,
       last: null as string | null,
       registries: new Set<string>(),
-      // Counts only when the server reports them for every repo (api-proposal.md §3.2).
-      counted: all.every((r) => r.stats),
+      // Counts only when the server reports them for every repo that indexes versions: a group
+      // and an oci repo have none (docs/api.md, Repos).
+      counted: all.every((r) => r.stats || r.kind === "group" || r.format === "oci"),
     };
     for (const r of all) {
       if (r.registry) t.registries.add(r.registry);
@@ -81,7 +82,7 @@ export function ReposPage() {
       t.packages += r.stats.packages;
       t.versions += r.stats.versions;
       t.size += r.stats.size;
-      if (r.stats.lastPushAt && (!t.last || r.stats.lastPushAt > t.last)) t.last = r.stats.lastPushAt;
+      if (r.stats.lastPublishedAt && (!t.last || r.stats.lastPublishedAt > t.last)) t.last = r.stats.lastPublishedAt;
     }
     return t;
   }, [all]);
@@ -246,7 +247,7 @@ function RepoRow({ repo, showWrite }: { repo: Repo; showWrite: boolean }) {
       <TD>
         <AccessBadge repo={repo} />
       </TD>
-      <TD className="text-muted-foreground">{stats ? <RelativeTime iso={stats.lastPushAt} /> : "—"}</TD>
+      <TD className="text-muted-foreground">{stats ? <RelativeTime iso={stats.lastPublishedAt} /> : "—"}</TD>
     </TR>
   );
 }

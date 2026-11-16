@@ -32,15 +32,14 @@ export function packageCrumbs(format: string, repo: string, name: string, versio
   return crumbs;
 }
 
-/** A row of the version table: a version of the server's list, and the sums over its variants
- * when the answer has the proposed counts (null when it does not). */
+/** A row of the version table: a version of the server's list, and the sums over its variants. */
 export type VersionGroup = {
   version: string;
   variants: VariantSummary[];
   publishedAt: string;
   lastModified: string;
-  size: number | null;
-  signatures: number | null;
+  size: number;
+  signatures: number;
   degraded: boolean;
   /** lajstrom.uploaded-by of the first variant, when the answer has the attributes. */
   uploadedBy: string | null;
@@ -55,14 +54,8 @@ export function latestByPointer(versions: { version: string; pointers: VersionSu
   return versions.find((v) => v.pointers.some((p) => p.name === "latest"))?.version;
 }
 
-function sum(variants: VariantSummary[], of: (v: VariantSummary) => number | undefined): number | null {
-  let total = 0;
-  for (const v of variants) {
-    const n = of(v);
-    if (n === undefined) return null;
-    total += n;
-  }
-  return total;
+function sum(variants: VariantSummary[], of: (v: VariantSummary) => number): number {
+  return variants.reduce((n, v) => n + of(v), 0);
 }
 
 export function groupVersions(list: VersionSummary[]): VersionGroup[] {
@@ -72,7 +65,7 @@ export function groupVersions(list: VersionSummary[]): VersionGroup[] {
     publishedAt: v.publishedAt,
     lastModified: v.lastModified,
     size: sum(v.variants, (x) => x.size),
-    signatures: sum(v.variants, (x) => x.referrers?.signatures),
+    signatures: sum(v.variants, (x) => x.attachments.signature),
     degraded: v.variants.some((x) => x.degraded),
     uploadedBy: v.variants[0]?.attrs?.["lajstrom.uploaded-by"] ?? null,
     yanked: v.yanked,
@@ -80,7 +73,7 @@ export function groupVersions(list: VersionSummary[]): VersionGroup[] {
   }));
 }
 
-/** What the package page shows: the proposed package resource, or what the versions tell. */
+/** What the package page shows: the package resource, or what the versions tell. */
 export type PackageInfo = PackageSummary & Pick<PackageDetail, "ociRepository"> & Partial<Pick<PackageDetail, "latestMetadata">>;
 
 /** The package from a server without GET …/packages/{name}: its versions, newest first, and the
@@ -97,7 +90,6 @@ export function derivePackage(
   const groups = groupVersions(versions);
   const metadata = latest?.variants[0]?.metadata;
   const about = metadata === undefined ? undefined : spec.metadataRows(metadata).find((r) => r.label === "Summary" || r.label === "Description");
-  const sizes = groups.map((g) => g.size);
   const tagged = latestByPointer(versions);
   const latestRow = versions.find((v) => v.version === tagged) ?? versions[0];
   return {
@@ -109,8 +101,11 @@ export function derivePackage(
     versions: versions.length,
     manifests: versions.reduce((n, v) => n + v.variants.length, 0),
     latestVariants: latestRow?.variants.map((v) => v.variant).filter(Boolean) ?? [],
-    ...(sizes.every((s) => s !== null) ? { size: sizes.reduce<number>((n, s) => n + s!, 0) } : {}),
-    ...(about ? { summary: Array.isArray(about.value) ? about.value.join(" ") : about.value } : {}),
+    lastPublished: versions[0]?.version ?? null,
+    size: groups.reduce((n, g) => n + g.size, 0),
+    summary: about ? (Array.isArray(about.value) ? about.value.join(" ") : about.value) : null,
+    attrs: latestRow?.variants[0]?.attrs ?? {},
+    pointers: versions.flatMap((v) => v.pointers.map((p) => ({ ...p, version: v.version }))),
     ociRepository: latest?.ociRepository ?? `${format}/${repo}/${nameOci}`,
     latestMetadata: metadata,
   };

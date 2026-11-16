@@ -6,6 +6,7 @@ import type {
   AuditList,
   Binding,
   DeliveryList,
+  ManifestList,
   PackageDetail,
   PackageList,
   PublishSession,
@@ -69,11 +70,12 @@ export const repoQuery = (format: string, repo: string) =>
 export type PackageParams = {
   /** The server's filter: names that start with it. */
   prefix?: string;
-  /** Proposed (lajstrom/lajstrom#955): attribute filters, a sort, and a raw directory. */
+  /** Attribute filters, <full key>:<value>; a sort and its order. */
   attr?: string[];
   sort?: string;
   order?: string;
-  dir?: string;
+  /** The keys whose facets the answer has, over the whole repo. */
+  facet?: string[];
   cursor?: string;
   limit?: number;
 };
@@ -86,7 +88,7 @@ export const packagesQuery = (format: string, repo: string, params: PackageParam
     placeholderData: keepPreviousData,
   });
 
-/** GET …/packages/{name} (proposed); null from a server without it, and the package page
+/** GET …/packages/{name}; null from a server before it, and the package page
  * derives what it shows from the versions. */
 export const packageQuery = (format: string, repo: string, name: string) =>
   queryOptions({
@@ -123,6 +125,29 @@ export const attachmentsQuery = (format: string, repo: string, name: string, ver
       apiGet<AttachmentList>(apiPath("repos", format, repo, "packages", name, "versions", version, "attachments"), { variant }, signal),
   });
 
+/** The manifest of one variant of a version, read from the registry by the server; null from a
+ * server before GET …/manifest, or when the registry does not answer (503): the page then names
+ * the command that reads it on /v2. */
+export const manifestQuery = (format: string, repo: string, name: string, version: string, variant: string) =>
+  queryOptions({
+    queryKey: ["repos", format, repo, "package", name, "versions", version, "manifest", variant],
+    queryFn: async ({ signal }) => {
+      try {
+        const list = await apiGet<ManifestList>(
+          apiPath("repos", format, repo, "packages", name, "versions", version, "manifest"),
+          { variant },
+          signal,
+        );
+        return list.manifests[0] ?? null;
+      } catch (err) {
+        if (isUnavailable(err) || (err instanceof ApiError && err.status === 503)) return null;
+        throw err;
+      }
+    },
+    // The digest names it: the answer of a variant does not change.
+    staleTime: Infinity,
+  });
+
 /** The latest reindex run that covered the repo; null when none has (the server's 404, for a
  * repo the page has already read). */
 export const reindexQuery = (format: string, repo: string) =>
@@ -138,11 +163,11 @@ export const reindexQuery = (format: string, repo: string) =>
     },
   });
 
+/** The open deploy sessions of a maven repo. */
 export const sessionsQuery = (format: string, repo: string) =>
   queryOptions({
     queryKey: ["repos", format, repo, "sessions"],
-    queryFn: ({ signal }) =>
-      apiGet<{ sessions: PublishSession[] }>(apiPath("repos", format, repo, "sessions"), undefined, signal).then((r) => r.sessions),
+    queryFn: ({ signal }) => allPages<PublishSession>(apiPath("repos", format, repo, "sessions"), "sessions", signal),
   });
 
 export const deployTokensQuery = (format: string, repo: string) =>

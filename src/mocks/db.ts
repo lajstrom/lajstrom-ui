@@ -3,6 +3,7 @@
 
 import type {
   Attachment,
+  AttachmentCounts,
   AttachmentList,
   AuditEvent,
   AuditList,
@@ -12,23 +13,25 @@ import type {
   Caller,
   FacetValue,
   PackageDetail,
+  ManifestList,
   PackageList,
   Pointer,
   PublishSession,
   VariantDetail,
   VersionDetail,
-  RawDirectory,
   ReindexReport,
   ReindexRun,
   Repo,
   RepoPolicy,
+  ReferrerList,
   SearchHit,
+  SearchResult,
   VersionSummary,
   WhoAmI,
   Yank,
 } from "@/api/types";
 import type { User } from "@/api/types";
-import { formatSpec } from "@/lib/formats";
+import type { MockReferrer } from "./data/model";
 import { packagePath } from "@/lib/profile";
 import { sha256Hex } from "@/lib/sha256";
 
@@ -52,8 +55,9 @@ import type { PrefetchResult, RepoGroup, Upstream } from "@/api/types";
 
 type Action = "read" | "write" | "delete" | "manage";
 
-/** The mock answers the proposed fields of api-proposal.md §3.2 too, so its repos have them all. */
-export type MockRepo = Repo & Required<Pick<Repo, "stats" | "permissions" | "reindex">>;
+/** A repo of the mock: it has stats and permissions, which the server answers for every repo,
+ * and the seed's state of its last reindex, which GET …/reindex answers and the repo does not. */
+export type MockRepo = Repo & Required<Pick<Repo, "stats" | "permissions">> & { seedReindex: RepoSeed["reindex"] };
 
 type Row = BuiltVersion & { repoKey: string; format: string };
 
@@ -449,7 +453,6 @@ function repoOf(seed: RepoSeed, persona: Persona): MockRepo {
   const manifests = [...pkgs.values()].flat();
   const versions = new Set(manifests.map((v) => `${v.packageName}\0${v.version}`));
   const lastPush = manifests.reduce<string | null>((m, v) => (!m || v.createdAt > m ? v.createdAt : m), null);
-  const running = seed.reindex === "running";
   return {
     format: seed.format,
     name: seed.name,
@@ -467,16 +470,10 @@ function repoOf(seed: RepoSeed, persona: Persona): MockRepo {
       manifests: manifests.length,
       files: manifests.reduce((n, v) => n + v.fileCount, 0),
       size: manifests.reduce((n, v) => n + v.size, 0),
-      lastPushAt: lastPush,
+      lastPublishedAt: lastPush,
     },
     permissions: permissions(persona, seed),
-    reindex: demoReindexState(keyOf(seed)) ?? {
-      state: seed.reindex,
-      startedAt: running ? before(0, 0, 0.3) : before(0, 0, 21),
-      finishedAt: running ? null : before(0, 0, 20),
-      errors: 0,
-      nextReconcileAt: running ? null : ahead(0, 0, 39),
-    },
+    seedReindex: seed.reindex,
     ...(seed.signingKeys ? { signingKeys: seed.signingKeys } : {}),
   };
 }
@@ -535,18 +532,14 @@ function summaryLine(v: BuiltVersion): string | null {
   return null;
 }
 
-/** A package with every proposed fact, as the mock answers it. */
+/** A package as the list answers it. */
 type Summary = Omit<PackageDetail, "ociRepository" | "latestMetadata">;
 
 function summarize(name: string, list: Row[]): Summary {
   // npm: the version the dist-tag latest names, which npm installs; else the newest.
   const latest = latestTagged(list) ?? list[0]!;
   const latestVariants = list.filter((v) => v.version === latest.version).map((v) => v.variant).filter(Boolean);
-  const attrs = { ...latest.attrs };
-  const pyMeta = latest.metadata as Record<string, unknown> | null;
-  if (latest.artifactType.includes("pypi") && typeof pyMeta?.requires_python === "string") {
-    attrs.requiresPython = pyMeta.requires_python;
-  }
+  const tags = distTags.get(`${latest.repoKey} ${name}`) ?? {};
   return {
     name,
     nameOci: packagePath(latest.format, name),
@@ -556,7 +549,12 @@ function summarize(name: string, list: Row[]): Summary {
     latestVariants: [...new Set(latestVariants)].sort(),
     size: list.reduce((n, v) => n + v.size, 0),
     summary: summaryLine(latest),
-    attrs,
+    attrs: lajstromAttrs(latest),
+    lastPublished: list[0]!.version,
+    pointers: Object.entries(tags)
+      .filter(([, version]) => list.some((v) => v.version === version))
+      .map(([tag, version]) => ({ kind: "dist-tag" as const, name: tag, version }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
     createdAt: list[list.length - 1]!.createdAt,
     updatedAt: list[0]!.createdAt,
   };
@@ -568,9 +566,10 @@ export type PackageQuery = {
   attr?: string[];
   sort?: string;
   order?: string;
+  /** Keys whose facets the answer has: lajstrom.deb.suite. */
+  facet?: string[];
   limit?: number;
   cursor?: string;
-  dir?: string | null;
 };
 
 const encodeCursor = (offset: number) => btoa(`o:${offset}`);
@@ -599,12 +598,13 @@ export function listPackages(repo: Repo, query: PackageQuery): PackageList {
   const pkgs = byRepo.get(repo.prefix) ?? new Map<string, Row[]>();
   let rows = [...pkgs.entries()].map(([name, list]) => ({ summary: summarize(name, list), list }));
 
-  // Facets count packages over the whole repo, before filters, so the filter bar never empties.
-  const facets: Record<string, FacetValue[]> = {};
-  for (const { key } of formatSpec(repo.format).facets) {
+  // Facets only when asked, over the whole repo, before filters, so the filter bar never empties.
+  let facets: Record<string, FacetValue[]> | undefined;
+  for (const key of query.facet ?? []) {
+    facets ??= {};
     const counts = new Map<string, number>();
     for (const { list } of rows) {
-      for (const value of new Set(list.map((v) => v.attrs[key]).filter(Boolean) as string[])) {
+      for (const value of new Set(list.map((v) => lajstromAttrs(v)[key]).filter(Boolean) as string[])) {
         counts.set(value, (counts.get(value) ?? 0) + 1);
       }
     }
@@ -614,34 +614,19 @@ export function listPackages(repo: Repo, query: PackageQuery): PackageList {
   if (query.prefix) rows = rows.filter(({ summary }) => summary.name.startsWith(query.prefix!));
   const q = query.q?.trim().toLowerCase();
   if (q) rows = rows.filter(({ summary }) => summary.name.toLowerCase().includes(q) || summary.summary?.toLowerCase().includes(q));
+  // Two values of one key are alternatives; different keys hold on the same manifest.
+  const wanted = new Map<string, Set<string>>();
   for (const f of query.attr ?? []) {
     const i = f.indexOf(":");
-    const k = f.slice(0, i);
-    const val = f.slice(i + 1);
-    rows = rows.filter(({ list }) => list.some((v) => v.attrs[k] === val));
+    wanted.set(f.slice(0, i), (wanted.get(f.slice(0, i)) ?? new Set()).add(f.slice(i + 1)));
   }
-
-  let directories: RawDirectory[] | undefined;
-  if (repo.format === "raw" && query.dir !== undefined && query.dir !== null && !q && !query.prefix) {
-    const prefix = query.dir ? query.dir.replace(/\/?$/, "/") : "";
-    const inDir = rows.filter(({ summary }) => summary.name.startsWith(prefix));
-    const dirs = new Map<string, RawDirectory>();
-    rows = [];
-    for (const row of inDir) {
-      const rest = row.summary.name.slice(prefix.length);
-      const slash = rest.indexOf("/");
-      if (slash === -1) {
-        rows.push(row);
-        continue;
-      }
-      const name = rest.slice(0, slash);
-      const d = dirs.get(name) ?? { name, path: prefix + name + "/", files: 0, size: 0, updatedAt: "" };
-      d.files += 1;
-      d.size += row.summary.size;
-      if (row.summary.updatedAt > d.updatedAt) d.updatedAt = row.summary.updatedAt;
-      dirs.set(name, d);
-    }
-    directories = [...dirs.values()].sort((a, b) => a.name.localeCompare(b.name));
+  if (wanted.size) {
+    rows = rows.filter(({ list }) =>
+      list.some((v) => {
+        const attrs = lajstromAttrs(v);
+        return [...wanted].every(([k, values]) => values.has(attrs[k] ?? ""));
+      }),
+    );
   }
 
   const dirSign = query.order === "asc" ? 1 : query.order === "desc" ? -1 : null;
@@ -657,7 +642,7 @@ export function listPackages(repo: Repo, query: PackageQuery): PackageList {
   rows.sort((a, b) => by(a.summary, b.summary) * (dirSign ?? defaultSign));
 
   const { page, next } = paginate(rows, query.limit ?? 100, query.cursor);
-  return { packages: page.map((r) => r.summary), next: next ?? undefined, facets, ...(directories ? { directories } : {}) };
+  return { packages: page.map((r) => r.summary), next: next ?? undefined, ...(facets ? { facets } : {}) };
 }
 
 function manifestsOf(repo: Repo, name: string): Row[] | null {
@@ -711,7 +696,7 @@ export function listVersions(repo: Repo, name: string): VersionSummary[] | null 
       size: v.size,
       fileCount: v.fileCount,
       degraded: v.degraded,
-      referrers: v.referrers,
+      attachments: attachmentCounts(v),
     })),
   }));
 }
@@ -727,9 +712,42 @@ function variantDetail(v: Row): VariantDetail {
     metadata: v.metadata,
     degraded: v.degraded,
     indexedAt: v.indexedAt,
+    size: v.size,
+    fileCount: v.fileCount,
+    attachments: attachmentCounts(v),
     files: v.files,
-    annotations: v.annotations,
-    manifest: v.manifest,
+    ociRepository: `${v.repoKey}/${packagePath(v.format, v.packageName)}`,
+  };
+}
+
+/** The rows of a version, one variant or all in variant order; null when there is none. */
+function variantRows(repo: Repo, name: string, version: string, variant: string | null): Row[] | null {
+  const rows = manifestsOf(repo, name)?.filter((m) => m.version === version && (variant === null || m.variant === variant));
+  return rows?.length ? [...rows].sort((a, b) => (a.variant < b.variant ? -1 : a.variant > b.variant ? 1 : 0)) : null;
+}
+
+/** GET …/versions/{version}/manifest[?variant=]: each variant's manifest, as the registry has it. */
+export function getManifests(repo: Repo, name: string, version: string, variant: string | null): ManifestList | null {
+  const rows = variantRows(repo, name, version, variant);
+  if (!rows) return null;
+  return {
+    manifests: rows.map((v) => {
+      const json = JSON.stringify(v.manifest);
+      return { variant: v.variant, digest: v.digest, mediaType: v.manifest.mediaType, size: json.length, manifest: v.manifest };
+    }),
+  };
+}
+
+/** GET …/versions/{version}/referrers[?variant=&artifactType=]: the referrers the registry lists. */
+export function listReferrers(repo: Repo, name: string, version: string, variant: string | null, artifactType: string | null): ReferrerList | null {
+  const rows = variantRows(repo, name, version, variant);
+  if (!rows) return null;
+  return {
+    referrers: rows.flatMap((v) =>
+      v.referrerList
+        .filter((r) => !artifactType || r.artifactType === artifactType)
+        .map((r) => ({ variant: v.variant, subject: v.digest, digest: r.digest, mediaType: "application/vnd.oci.image.manifest.v1+json", artifactType: r.artifactType, size: r.size, annotations: r.annotations })),
+    ),
   };
 }
 
@@ -755,6 +773,19 @@ const attachmentKind: Record<string, Attachment["kind"]> = {
   "application/vnd.cyclonedx+json": "sbom",
 };
 
+/** The kind the index labels a referrer with: an in-toto statement of SLSA is provenance. */
+function referrerKind(r: MockReferrer): Attachment["kind"] {
+  const predicateType = r.annotations["in-toto.io/predicate-type"] ?? "";
+  return predicateType.startsWith("https://slsa.dev/provenance") ? "provenance" : (attachmentKind[r.artifactType] ?? "other");
+}
+
+/** A variant's attachments by kind, each as many as …/attachments?kind= lists: every kind there. */
+function attachmentCounts(v: Row): AttachmentCounts {
+  const counts: AttachmentCounts = { signature: 0, sbom: 0, scan: 0, provenance: 0, attestation: 0, other: 0 };
+  for (const r of v.referrerList) counts[referrerKind(r)] = (counts[referrerKind(r)] ?? 0) + 1;
+  return counts;
+}
+
 /** GET …/versions/{version}/attachments: the referrers of its variants as the index labels
  * them (docs/api.md, Attachments of a version). Keyless and notation signatures are
  * unsupported, the SBOMs unsigned, the provenance signed by the demo's trusted key. */
@@ -764,7 +795,7 @@ export function listAttachments(repo: Repo, name: string, version: string, varia
   const attachments: Attachment[] = rows.flatMap((v) =>
     v.referrerList.map((r) => {
       const predicateType = r.annotations["in-toto.io/predicate-type"] ?? "";
-      const kind = predicateType.startsWith("https://slsa.dev/provenance") ? "provenance" : (attachmentKind[r.artifactType] ?? "other");
+      const kind = referrerKind(r);
       const verification: Attachment["verification"] = kind === "signature" ? "unsupported" : kind === "provenance" ? "verified" : "unsigned";
       return {
         variant: v.variant,
@@ -792,10 +823,11 @@ export function listAttachments(repo: Repo, name: string, version: string, varia
 
 // --- Search ---------------------------------------------------------------------------------
 
-export function search(q: string, format: string | null, limit = 20, persona = getPersona()) {
+/** GET /api/v1/search: a page of hits, rank after rank, and the cursor of the next; no total. */
+export function search(q: string, format: string | null, limit = 20, cursor: string | null = null, persona = getPersona()): SearchResult {
   const visible = new Set(listRepos(persona).map((r) => r.prefix));
   const needle = q.trim().toLowerCase();
-  if (!needle) return { hits: [] as SearchHit[], total: 0 };
+  if (!needle) return { hits: [] };
   const hex = needle.replace(/^sha256:/, "");
   const hits: (SearchHit & { score: number })[] = [];
 
@@ -805,7 +837,9 @@ export function search(q: string, format: string | null, limit = 20, persona = g
       const [fmt, repo] = v.repoKey.split("/") as [SearchHit["format"], string];
       const base = { kind: "version" as const, format: fmt, repo, name: v.packageName, version: v.version, variant: v.variant, digest: v.digest };
       if (v.digest.slice(7).startsWith(hex)) hits.push({ ...base, matched: "manifest", score: 0 });
-      for (const f of v.files) if (f.digest.slice(7).startsWith(hex)) hits.push({ ...base, matched: f.name, score: 1 });
+      for (const f of v.files) {
+        if (f.digest.slice(7).startsWith(hex)) hits.push({ ...base, matched: "file", file: { name: f.name, digest: f.digest }, score: 1 });
+      }
     }
   }
 
@@ -827,7 +861,8 @@ export function search(q: string, format: string | null, limit = 20, persona = g
     }
   }
   hits.sort((a, b) => a.score - b.score || (a.kind === "package" && b.kind === "package" ? b.updatedAt.localeCompare(a.updatedAt) : 0));
-  return { hits: hits.slice(0, limit).map(({ score: _s, ...h }) => h as SearchHit), total: hits.length };
+  const { page, next } = paginate(hits, limit, cursor);
+  return { hits: page.map(({ score: _s, ...h }) => h as SearchHit), ...(next ? { next } : {}) };
 }
 
 // --- Registries, sessions, reindex -----------------------------------------------------------
@@ -845,7 +880,7 @@ const sessions: (PublishSession & { repo: string })[] = [
     repo: "maven/payments",
     key: "com.acme.payments:payments-api:3.8.1",
     principal: "token:12",
-    state: "open",
+    committing: false,
     files: ["payments-api-3.8.1.jar", "payments-api-3.8.1-sources.jar", "payments-api-3.8.1.pom"].map((name, i) => ({
       name,
       size: [221_502, 156_902, 4_488][i]!,
@@ -855,19 +890,9 @@ const sessions: (PublishSession & { repo: string })[] = [
     updatedAt: before(0, 0, 1),
     expiresAt: ahead(0, 0, 41),
   },
-  {
-    id: 38,
-    repo: "maven/releases",
-    key: "com.acme.tools:schema-cli:1.0.1",
-    principal: "user:carol",
-    state: "expired",
-    files: [{ name: "schema-cli-1.0.1.jar", size: 64_330, digest: `sha256:${sha256Hex("session:schema-cli-1.0.1.jar")}` }],
-    createdAt: before(1, 4),
-    updatedAt: before(1, 3, 30),
-    expiresAt: before(1, 3, 30),
-  },
 ];
 
+/** GET …/sessions: the open sessions; a committed or expired one is gone from the list. */
 export function listSessions(repo: Repo): PublishSession[] {
   return sessions.filter((s) => s.repo === repo.prefix).map(({ repo: _r, ...s }) => s);
 }
@@ -910,8 +935,8 @@ function reindexReport(repo: MockRepo, run: { prune: boolean; verify: boolean } 
     ...found.split.map((s) => s.other),
   ]);
   const degraded = manifests.filter((v) => v.degraded).length;
-  const attachments = manifests.reduce((n, v) => n + v.referrers.signatures + v.referrers.sboms + v.referrers.attestations, 0);
-  const noReferrersApi = registries.find((r) => r.name === repo.registry)?.capabilities.referrers === false;
+  const attachments = manifests.reduce((n, v) => n + v.referrerList.length, 0);
+  const noReferrersApi = registries.find((r) => r.name === repo.registry)?.capabilities?.referrers === false;
   const repairedReferrers: NonNullable<ReindexReport["repairedReferrers"]> =
     run.verify && noReferrersApi
       ? manifests.slice(0, 2).map((v) => ({
@@ -942,6 +967,9 @@ function reindexReport(repo: MockRepo, run: { prune: boolean; verify: boolean } 
     repositoryUnknown: found.repositoryUnknown,
     repairedReferrers,
     errors: found.errors,
+    // The demo's repos are not encrypted: no blob map, nothing skipped.
+    blobMap: 0,
+    skipped: "",
     truncated: false,
   };
 }
@@ -960,20 +988,6 @@ keep("reindex", {
     nextRunId = Math.max(nextRunId, d.nextRunId ?? 0);
   },
 });
-
-/** The repo's reindex state (proposed) while a run of the demo covers it. */
-function demoReindexState(key: string): MockRepo["reindex"] | null {
-  const run = demoRuns.get(key);
-  if (!run) return null;
-  const running = Date.now() - run.startedAt < RUN_SECONDS * 1000;
-  return {
-    state: running ? "running" : "idle",
-    startedAt: new Date(run.startedAt).toISOString(),
-    finishedAt: running ? null : new Date(run.startedAt + RUN_SECONDS * 1000).toISOString(),
-    errors: 0,
-    nextReconcileAt: ahead(0, 0, 39),
-  };
-}
 
 /** GET …/reindex: the latest run that covered the repo, or null when none has: a repo created
  * since the reconcile loop's last run, and a group, which the loop passes by. The seed's runs
@@ -999,7 +1013,8 @@ export function reindexRun(repo: MockRepo): ReindexRun | null {
       report: running ? null : reindexReport(repo, demo),
     };
   }
-  const state = repo.reindex.state === "running" ? "running" : repo.reindex.state === "failed" ? "failed" : "done";
+  const state = repo.seedReindex === "running" ? "running" : repo.seedReindex === "failed" ? "failed" : "done";
+  const finishedAt = state === "running" ? null : before(0, 0, 20);
   return {
     id: 31,
     state,
@@ -1009,9 +1024,9 @@ export function reindexRun(repo: MockRepo): ReindexRun | null {
     allRepos: true,
     prune: true,
     verify: false,
-    startedAt: repo.reindex.startedAt ?? before(0, 0, 21),
-    heartbeatAt: repo.reindex.finishedAt ?? before(0, 0, 0.1),
-    finishedAt: repo.reindex.finishedAt,
+    startedAt: state === "running" ? before(0, 0, 0.3) : before(0, 0, 21),
+    heartbeatAt: finishedAt ?? before(0, 0, 0.1),
+    finishedAt,
     error: state === "failed" ? "the registry answered 503 to the tag list of the repo's first OCI repository" : undefined,
     report: state === "running" ? null : reindexReport(repo),
   };
@@ -1549,7 +1564,7 @@ export function yankVersion(repo: MockRepo, name: string, version: string, reaso
 /** Whether the repo's registry deletes manifests; null when it does, else the 501 of the delete. */
 function deletes(repo: MockRepo): Refusal | null {
   const registry = registries.find((r) => r.name === repo.registry);
-  return registry && !registry.capabilities.deleteManifest
+  return registry?.capabilities?.deleteManifest === false
     ? { status: 501, code: "UNAVAILABLE", message: `registry ${registry.name} does not delete manifests (capabilities.deleteManifest false); nothing was deleted` }
     : null;
 }
@@ -1559,7 +1574,7 @@ function deleteRows(repo: MockRepo, rows: Row[], by: string, details: Record<str
   for (const v of rows) {
     deletedManifests.add(v.digest);
     dropManifest(v.digest);
-    const referrers = v.referrers.signatures + v.referrers.sboms + v.referrers.attestations;
+    const referrers = v.referrerList.length;
     changed({ at: new Date().toISOString(), principal: by, action: "delete", repo: repo.prefix, subject: `${v.packageName}@${v.version}${v.variant ? ` (${v.variant})` : ""}`, digest: v.digest, ip: DEMO_IP, details: { referrers, source: "api", ...details } });
   }
 }

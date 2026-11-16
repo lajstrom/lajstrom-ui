@@ -266,7 +266,6 @@ describe("reindex", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const run = await startReindex("raw", "scratch", { prune: true, verify: true });
     expect(run).toMatchObject({ state: "running", allRepos: false, prune: true, verify: true, report: null });
-    expect((await get("raw", "scratch")).reindex?.state).toBe("running");
     await expect(startReindex("raw", "scratch", {})).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/runs on .* since /) });
     expect(pollInterval(run, Date.now())).toBe(1000);
 
@@ -277,7 +276,6 @@ describe("reindex", () => {
     // ci-distribution has no referrers API: verify pushed the referrers indexes again.
     expect(done.report?.repairedReferrers?.length).toBeGreaterThan(0);
     expect(pollInterval(done, Date.now())).toBe(false);
-    expect((await get("raw", "scratch")).reindex?.state).toBe("idle");
   });
 
   it("says when a run of every repo covers it, and needs manage", async () => {

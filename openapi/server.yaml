@@ -1,4 +1,4 @@
-# Vendored from lajstrom/lajstrom@f0d887d5ebd9b34f49c9a1d528af6c6b60df2531 (v0.0.1-959-gf0d887d), internal/api/openapi.yaml. Do not edit:
+# Vendored from lajstrom/lajstrom@6c5bf5c64d0d60c51820114f6fff8937cb1fce07 (v0.0.1-1080-g6c5bf5c), internal/api/openapi.yaml. Do not edit:
 # npm run update:openapi -- <ref> replaces it and regenerates public/openapi.yaml and src/api/openapi.gen.ts.
 openapi: 3.1.0
 info:
@@ -31,11 +31,14 @@ tags:
     description: The audit log.
   - name: webhooks
     description: Where the events of the repos of a mask are sent, and the delivery log.
+  - name: policy
+    description: Policy rules and verdicts, what a repo serves (docs/spec/policy.md).
   - name: meta
     description: Who is asking, the server, and this document.
 security:
   - basic: []
   - bearer: []
+  - dpop: []
 paths:
   /api/v1/repos:
     get:
@@ -68,6 +71,7 @@ paths:
         "201":
           description: The repo.
           headers:
+            ETag: {$ref: "#/components/headers/ETag"}
             Location: {$ref: "#/components/headers/Location"}
           content:
             application/json:
@@ -84,12 +88,18 @@ paths:
       tags: [repos]
       operationId: getRepo
       summary: One repo (read).
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
       responses:
         "200":
           description: The repo.
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Repo"}
+        "304": {$ref: "#/components/responses/NotModified"}
+        "400": {$ref: "#/components/responses/Invalid"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
     patch:
@@ -105,9 +115,13 @@ paths:
         content:
           application/json:
             schema: {$ref: "#/components/schemas/RepoPatch"}
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
       responses:
         "200":
           description: The repo as it is then.
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Repo"}
@@ -116,6 +130,7 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
+        "412": {$ref: "#/components/responses/Changed"}
         "501": {$ref: "#/components/responses/Unavailable"}
     delete:
       tags: [repos]
@@ -125,6 +140,7 @@ paths:
         - name: force
           in: query
           schema: {type: boolean}
+        - $ref: "#/components/parameters/IfMatch"
       responses:
         "204": {description: Deleted.}
         "400": {$ref: "#/components/responses/Invalid"}
@@ -132,6 +148,7 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
+        "412": {$ref: "#/components/responses/Changed"}
   /api/v1/repos/{format}/{repo}/reindex:
     parameters:
       - $ref: "#/components/parameters/format"
@@ -176,21 +193,80 @@ paths:
     get:
       tags: [repos]
       operationId: listPackages
-      summary: A page of the repo's packages, by name (read).
+      summary: A page of the repo's packages, by name unless sort says otherwise (read).
       parameters:
         - name: prefix
           in: query
           description: Only the packages whose name starts with it.
           schema: {type: string}
+        - name: q
+          in: query
+          description: >-
+            Only the packages whose name, or the summary of one of whose manifests, contains it;
+            ASCII letters in either case.
+          schema: {type: string}
+        - name: attr
+          in: query
+          description: >-
+            Only the packages with a manifest that has the attribute, <key>:<value> with the
+            annotation's full key (lajstrom.deb.suite:jammy). Two values of one key are
+            alternatives; different keys hold on the same manifest. At most 16.
+          schema:
+            type: array
+            maxItems: 16
+            items: {type: string, pattern: '^lajstrom\.[A-Za-z0-9._-]+:'}
+          style: form
+          explode: true
+        - name: sort
+          in: query
+          description: >-
+            The order: name, updated (the newest manifest's publish time), versions (how many) or
+            size (of all its files); name when absent. A tie follows by name.
+          schema: {type: string, enum: [name, updated, versions, size], default: name}
+        - name: order
+          in: query
+          description: asc or desc; asc for name and desc for the other sorts when absent.
+          schema: {type: string, enum: [asc, desc]}
+        - name: facet
+          in: query
+          description: >-
+            Adds facets: the values of this key in the repo's manifests, each with the number of
+            packages that have it. They count the whole repo, whatever the other parameters. At
+            most 16.
+          schema:
+            type: array
+            maxItems: 16
+            items: {type: string, pattern: '^lajstrom\.[A-Za-z0-9._-]+$'}
+          style: form
+          explode: true
         - $ref: "#/components/parameters/limit"
         - $ref: "#/components/parameters/cursor"
       responses:
         "200":
-          description: The page; the cursor holds the place of its last package.
+          description: The page; the cursor holds the place of its last package in the order of sort.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/PackageList"}
         "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/repos/{format}/{repo}/packages/{name}:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/package"
+    get:
+      tags: [repos]
+      operationId: getPackage
+      summary: >-
+        One package (read): its row of the package list, the OCI repository that holds it and the
+        metadata layer of its head manifest.
+      responses:
+        "200":
+          description: The package.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PackageDetail"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
   /api/v1/repos/{format}/{repo}/packages/{name}/versions:
@@ -202,11 +278,22 @@ paths:
       tags: [repos]
       operationId: listVersions
       summary: >-
-        A page of the package's versions, newest first (read): each with the digests of its
-        variants, its publish time and the pointers that name it.
+        A page of the package's versions, newest first (read): each with the digests and facts of
+        its variants, its publish time and the pointers that name it.
       parameters:
         - $ref: "#/components/parameters/limit"
         - $ref: "#/components/parameters/cursor"
+        - name: without
+          in: query
+          description: >-
+            Keeps the variants that have no attachment of this kind, whatever its verification
+            (#89); given again, a variant must lack every kind given. A version is listed with
+            those of its variants, at their times, so a cursor is for the same filter.
+          schema:
+            type: array
+            items: {type: string, enum: [signature, sbom, scan, provenance, attestation, other]}
+          style: form
+          explode: true
       responses:
         "200":
           description: The page; the cursor holds the place of its last version.
@@ -230,7 +317,8 @@ paths:
       operationId: getVersion
       summary: >-
         One version (read): its variants, each with what the index has of its manifest and its
-        files, and the OCI repository that holds it. The manifest and its referrers are not in it.
+        files, and the OCI repository that holds it. The manifest and its referrers are not in it:
+        they are GET …/manifest and …/referrers.
       parameters:
         - name: variant
           in: query
@@ -398,6 +486,95 @@ paths:
         "400": {$ref: "#/components/responses/Invalid"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/manifest:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/package"
+      - name: version
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      tags: [repos]
+      operationId: getManifests
+      summary: >-
+        The manifests of a version (read): each variant's, read from the registry by the digest
+        the index has and checked against it. One variant has its digest as ETag.
+      parameters:
+        - name: variant
+          in: query
+          description: Only this variant; empty for a format without variants.
+          schema: {type: string}
+        - name: If-None-Match
+          in: header
+          description: The ETag of an answer of one variant; 304 when it is still its digest, without a registry read.
+          schema: {type: string}
+      responses:
+        "200":
+          description: The manifests, in variant order.
+          headers:
+            ETag:
+              description: "The variant's manifest digest, quoted; only when the answer has one variant."
+              schema: {type: string}
+            Cache-Control:
+              description: no-cache.
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ManifestList"}
+        "304":
+          description: The variant has the digest of If-None-Match; no body.
+          headers:
+            ETag:
+              description: The variant's manifest digest, quoted.
+              schema: {type: string}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "501": {$ref: "#/components/responses/Unavailable"}
+        "503":
+          description: The registry did not answer, or its circuit breaker is open; code UNAVAILABLE.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+  /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/referrers:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/package"
+      - name: version
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      tags: [repos]
+      operationId: listReferrers
+      summary: >-
+        The referrers of a version (read): the manifests whose subject is a variant's manifest,
+        as the registry lists them now, through its referrers API or the tag schema.
+      parameters:
+        - name: variant
+          in: query
+          description: Only this variant; empty for a format without variants.
+          schema: {type: string}
+        - name: artifactType
+          in: query
+          description: Only the referrers of this artifact type.
+          schema: {type: string}
+      responses:
+        "200":
+          description: The referrers, by variant in variant order.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReferrerList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "501": {$ref: "#/components/responses/Unavailable"}
+        "503":
+          description: The registry did not answer, or its circuit breaker is open; code UNAVAILABLE.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
   /api/v1/repos/{format}/{repo}/versions:delete:
     parameters:
       - $ref: "#/components/parameters/format"
@@ -441,6 +618,30 @@ paths:
           schema: {type: string}
       responses:
         "204": {description: Dropped.}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/repos/{format}/{repo}/sessions:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+    get:
+      tags: [repos]
+      operationId: listSessions
+      summary: A page of the repo's open publication sessions, maven deploys that wait for their maven-metadata.xml, by id (manage).
+      description: >-
+        Only the sessions whose time is not up; never one that committed, was aborted or expired, nor
+        a blob upload of /v2. A repo of a format that opens no session, and a group, have none.
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: The sessions.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SessionList"}
         "400": {$ref: "#/components/responses/Invalid"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -581,6 +782,47 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/tokens:
+    get:
+      tags: [tokens]
+      operationId: listAllTokens
+      summary: A page of every token, of every user, every repo and every mask, by id (admin).
+      description: >-
+        The personal access tokens of every user, a deleted user's under the name it had, and the
+        deploy tokens of every repo and over every mask, the revoked and expired ones included; never
+        a secret. The filters add up; a user or a repo that does not exist has none.
+      parameters:
+        - name: kind
+          in: query
+          description: Only the tokens of this kind.
+          schema: {type: string, enum: [pat, deploy]}
+        - name: user
+          in: query
+          description: Only the personal access tokens of the live user of this name or uid.
+          schema: {type: string}
+        - name: repo
+          in: query
+          description: "Only the deploy tokens of this repo, <format>/<name>; not those over a mask that matches it."
+          schema: {type: string}
+        - name: repoMask
+          in: query
+          description: Only the deploy tokens over this mask, as it was written (oci/* does not list a token over */*).
+          schema: {type: string}
+        - name: live
+          in: query
+          description: true keeps the tokens neither revoked nor expired now.
+          schema: {type: boolean}
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: A page of the tokens, in the order of their creation.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TokenPage"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
   /api/v1/repos/{format}/{repo}/webhooks:
     parameters:
       - $ref: "#/components/parameters/format"
@@ -611,6 +853,7 @@ paths:
         "201":
           description: The webhook and its secret.
           headers:
+            ETag: {$ref: "#/components/headers/ETag"}
             Location: {$ref: "#/components/headers/Location"}
           content:
             application/json:
@@ -629,12 +872,18 @@ paths:
       tags: [webhooks]
       operationId: getRepoWebhook
       summary: One webhook (manage).
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
       responses:
         "200":
           description: The webhook; never its secret.
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Webhook"}
+        "304": {$ref: "#/components/responses/NotModified"}
+        "400": {$ref: "#/components/responses/Invalid"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
@@ -647,9 +896,13 @@ paths:
         content:
           application/json:
             schema: {$ref: "#/components/schemas/WebhookRequest"}
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
       responses:
         "200":
           description: The webhook as it is now.
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Webhook"}
@@ -657,15 +910,20 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "412": {$ref: "#/components/responses/Changed"}
     delete:
       tags: [webhooks]
       operationId: deleteRepoWebhook
       summary: Delete a webhook and its delivery log (manage).
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
       responses:
         "204": {description: Deleted.}
+        "400": {$ref: "#/components/responses/Invalid"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "412": {$ref: "#/components/responses/Changed"}
   /api/v1/repos/{format}/{repo}/webhooks/{id}/secret:
     parameters:
       - $ref: "#/components/parameters/format"
@@ -726,6 +984,163 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/policy/rules:
+    get:
+      tags: [policy]
+      operationId: listPolicyRules
+      summary: >-
+        The policy rules by id: every rule for the admin role; with repo, the rules whose mask
+        matches it, for whoever may read the repo.
+      parameters:
+        - name: repo
+          in: query
+          description: A repo, <format>/<repo>.
+          schema: {type: string}
+      responses:
+        "200":
+          description: The rules.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RuleList"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "501": {$ref: "#/components/responses/Unavailable"}
+    post:
+      tags: [policy]
+      operationId: createPolicyRule
+      summary: >-
+        Create a rule: manage on the repo of a mask that names one, the admin role for any other
+        mask. The documents of the repos its mask matches are rendered again; an audit row
+        policy.rule.create and an event policy.rule.created.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RuleRequest"}
+      responses:
+        "201":
+          description: The rule.
+          headers:
+            Location: {$ref: "#/components/headers/Location"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Rule"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "501": {$ref: "#/components/responses/Unavailable"}
+  /api/v1/policy/rules/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: integer}
+    delete:
+      tags: [policy]
+      operationId: deletePolicyRule
+      summary: Delete a rule, with the permission its creation needed; an audit row policy.rule.delete.
+      responses:
+        "204": {description: "Deleted."}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "501": {$ref: "#/components/responses/Unavailable"}
+  /api/v1/policy/verdicts:
+    get:
+      tags: [policy]
+      operationId: listVerdicts
+      summary: The verdicts of a manifest digest, of a repo, or both, in the repos the caller may read, newest first.
+      parameters:
+        - name: digest
+          in: query
+          schema: {type: string}
+        - name: repo
+          in: query
+          description: A repo, <format>/<repo>.
+          schema: {type: string}
+      responses:
+        "200":
+          description: The verdicts.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/VerdictList"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/policy/key:
+    get:
+      tags: [policy]
+      operationId: getPolicyKey
+      summary: The public key of the server's policy key, PEM, to anyone.
+      security: []
+      responses:
+        "200":
+          description: A PEM PUBLIC KEY block.
+          content:
+            application/x-pem-file:
+              schema: {type: string}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/policy/denylist:
+    get:
+      tags: [policy]
+      operationId: getDenylist
+      summary: >-
+        The deny list (docs/spec/policy.md §8), read from the index now, with the entries of the
+        repos the caller may read: the rules in force that deny, the verdicts in force that refuse,
+        the digests and the URL paths they refuse.
+      responses:
+        "200":
+          description: The deny list.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Denylist"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/deny:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/repo"
+      - $ref: "#/components/parameters/package"
+      - name: version
+        in: path
+        required: true
+        schema: {type: string}
+      - name: variant
+        in: query
+        schema: {type: string}
+    post:
+      tags: [policy]
+      operationId: denyVersion
+      summary: >-
+        Sign a deny verdict with the policy key for the manifest of each variant of the version,
+        or of the one variant names, and attach each as a referrer (manage). On an oci repo name
+        is the path and version a tag or a digest.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/DenyRequest"}
+      responses:
+        "201":
+          description: The verdicts attached.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/VerdictList"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "501": {$ref: "#/components/responses/Unavailable"}
+    delete:
+      tags: [policy]
+      operationId: undenyVersion
+      summary: Delete the verdicts of source lajstrom:manual of the version's manifests, their referrers (manage).
+      responses:
+        "204": {description: "Deleted."}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "501": {$ref: "#/components/responses/Unavailable"}
   /api/v1/webhooks:
     get:
       tags: [webhooks]
@@ -753,6 +1168,7 @@ paths:
         "201":
           description: The webhook and its secret.
           headers:
+            ETag: {$ref: "#/components/headers/ETag"}
             Location: {$ref: "#/components/headers/Location"}
           content:
             application/json:
@@ -769,12 +1185,18 @@ paths:
       tags: [webhooks]
       operationId: getWebhook
       summary: One webhook (admin).
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
       responses:
         "200":
           description: The webhook; never its secret.
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Webhook"}
+        "304": {$ref: "#/components/responses/NotModified"}
+        "400": {$ref: "#/components/responses/Invalid"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
@@ -787,9 +1209,13 @@ paths:
         content:
           application/json:
             schema: {$ref: "#/components/schemas/WebhookRequest"}
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
       responses:
         "200":
           description: The webhook as it is now.
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Webhook"}
@@ -797,15 +1223,20 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "412": {$ref: "#/components/responses/Changed"}
     delete:
       tags: [webhooks]
       operationId: deleteWebhook
       summary: Delete a webhook and its delivery log (admin).
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
       responses:
         "204": {description: Deleted.}
+        "400": {$ref: "#/components/responses/Invalid"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "412": {$ref: "#/components/responses/Changed"}
   /api/v1/webhooks/{id}/secret:
     parameters:
       - $ref: "#/components/parameters/id"
@@ -866,6 +1297,10 @@ paths:
       operationId: listUsers
       summary: A page of the live users, by name (admin).
       parameters:
+        - name: kind
+          in: query
+          description: Only the users of this kind; service lists the service accounts (docs/spec/rbac.md §1).
+          schema: {type: string, enum: [local, oidc, service]}
         - $ref: "#/components/parameters/limit"
         - $ref: "#/components/parameters/cursor"
       responses:
@@ -880,7 +1315,7 @@ paths:
     post:
       tags: [users]
       operationId: createUser
-      summary: Create a local user (admin).
+      summary: Create a local user or a service account (admin).
       requestBody:
         required: true
         content:
@@ -890,6 +1325,7 @@ paths:
         "201":
           description: The user.
           headers:
+            ETag: {$ref: "#/components/headers/ETag"}
             Location: {$ref: "#/components/headers/Location"}
           content:
             application/json:
@@ -905,27 +1341,37 @@ paths:
       tags: [users]
       operationId: getUser
       summary: One live user (admin).
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
       responses:
         "200":
           description: The user.
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
           content:
             application/json:
               schema: {$ref: "#/components/schemas/User"}
+        "304": {$ref: "#/components/responses/NotModified"}
+        "400": {$ref: "#/components/responses/Invalid"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
     patch:
       tags: [users]
       operationId: updateUser
-      summary: Change the name and disabled (admin).
+      summary: Change the name, disabled, and a service account's owner (admin).
       requestBody:
         required: true
         content:
           application/json:
             schema: {$ref: "#/components/schemas/UserPatch"}
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
       responses:
         "200":
           description: The user as it is then.
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
           content:
             application/json:
               schema: {$ref: "#/components/schemas/User"}
@@ -934,23 +1380,31 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
+        "412": {$ref: "#/components/responses/Changed"}
     delete:
       tags: [users]
       operationId: deleteUser
       summary: Delete a user (admin); its tokens are revoked and its bindings deleted.
+      description: >-
+        409 for the last enabled user with an admin binding, and for a user that owns a live
+        service account.
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
       responses:
         "204": {description: Deleted.}
+        "400": {$ref: "#/components/responses/Invalid"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
+        "412": {$ref: "#/components/responses/Changed"}
   /api/v1/users/{user}/password:
     parameters:
       - $ref: "#/components/parameters/user"
     post:
       tags: [users]
       operationId: setPassword
-      summary: Set the password of a user (admin).
+      summary: Set the password of a user (admin); a service account has none, 400.
       requestBody:
         required: true
         content:
@@ -984,7 +1438,9 @@ paths:
       summary: Create a personal access token of a user; the answer has its secret, once.
       description: >-
         Only a password creates one: a request whose credential is a personal access token,
-        with scopes or without, or a deploy token is 403.
+        with scopes or without, or a deploy token is 403. A service account's are created by
+        the admin; their expiry is bounded by auth.serviceAccounts.maxTokenTTL, 365 days by
+        default, and with the bound 0 one created without an expiry never expires.
       requestBody:
         required: true
         content:
@@ -1145,6 +1601,58 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Info"}
         "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/v1/search:
+    get:
+      tags: [repos]
+      operationId: search
+      summary: Packages by name and summary, manifests and files by digest, over the repos the caller may read.
+      description: >-
+        A repo the caller may not read adds no hit, and the answer does not tell whether one exists.
+        The hits come in ranks, each in byte order of the repo's format and name and the package's
+        name: when q is a digest's prefix (sha256: or not, 8 to 64 hex digits) the manifests whose
+        digest starts with it, then the file layers whose digest does; then the packages named q,
+        whose name starts with it, whose name contains it, and with a manifest whose summary
+        contains it, ASCII letters in either case. There is no total.
+      security:
+        - {}
+        - basic: []
+        - bearer: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: A name, a part of a name or a summary, or a digest's prefix.
+          schema: {type: string, minLength: 1, maxLength: 256}
+        - name: format
+          in: query
+          description: Only the repos of this format.
+          schema: {type: string}
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: The page; the cursor holds the place of its last hit.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SearchResult"}
+        "400": {$ref: "#/components/responses/Invalid"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/v1/registries:
+    get:
+      tags: [meta]
+      operationId: listRegistries
+      summary: The registries of the configuration, their capabilities, repos and health, as the replica that answers knows them (admin).
+      description: >-
+        Never Lajstrom's credentials for a registry. Each replica probes and pings the registries
+        itself; the answer sends no request to a registry. /-/readyz stays public and without detail.
+      responses:
+        "200":
+          description: The registries, by name.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RegistryList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
   /api/v1/bootstrap:
     post:
       tags: [users]
@@ -1186,6 +1694,68 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
+  /api/v1/login:
+    post:
+      tags: [tokens]
+      operationId: login
+      summary: Sign in a web UI; the answer is a short-lived personal access token, once.
+      description: >-
+        For a local user's name and password, checked as Basic credentials are, with the same
+        throttles of failed logins; or for the code that the callback of an OIDC login started
+        with return_to, code_challenge and dpop_jkt handed the UI, with the PKCE verifier of that
+        challenge, redeemed once. Either way with a DPoP proof (RFC 9449) of the browser's key in
+        the header DPoP, checked before the credential, the key of dpop_jkt for a code. The
+        answer is a personal access token of the user without scopes, bound to that key
+        (dpopJkt, tokenType DPoP), named login <time> <4 hex> or oidc <time> <4 hex>, that
+        expires after auth.login.tokenLifetime (12 hours by default), and for a code after
+        auth.oidc.tokenLifetime when that is shorter; there is no refresh. The UI sends it as
+        Authorization: DPoP with a new proof of the key on every request to /api/, where alone
+        it works, and revokes it at sign-out with DELETE
+        /api/v1/users/{user}/tokens/{id}. The request takes no credential: its Authorization
+        header is ignored. No answer sets a cookie (docs/spec/rbac.md §10).
+      security:
+        - {}
+      parameters:
+        - {$ref: "#/components/parameters/dpopProof"}
+      requestBody:
+        description: The credential of the sign-in.
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/LoginRequest"}
+      responses:
+        "201":
+          description: The token and its secret.
+          headers:
+            Location: {$ref: "#/components/headers/Location"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/LoginToken"}
+        "400":
+          description: >-
+            The body is neither form, the code is unknown, used, expired, of another verifier or
+            of another key, or the DPoP proof is missing, refused or used already; the message
+            says why.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "401":
+          description: >-
+            The user name or the password is wrong, or the user may not sign in, the reason not
+            told; or the user of a code was disabled since its login.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "429":
+          description: Too many failed logins of the account or from the client address; try again after Retry-After.
+          headers:
+            Retry-After:
+              description: Seconds to wait.
+              schema: {type: integer}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "501": {$ref: "#/components/responses/Unavailable"}
   /api/v1/openapi.yaml:
     get:
       tags: [meta]
@@ -1208,12 +1778,36 @@ components:
     bearer:
       type: http
       scheme: bearer
-      description: A personal access token (ljs_pat_…) or a deploy token (ljs_dep_…).
+      description: A personal access token (ljs_pat_…) or a deploy token (ljs_dep_…), but one bound to a DPoP key.
+    dpop:
+      type: http
+      scheme: dpop
+      description: >-
+        The token of a web UI's sign-in (POST /api/v1/login), bound to the browser's key, with a
+        DPoP proof of that key in the header DPoP on every request (RFC 9449): typ dpop+jwt, alg
+        ES256, htm and htu of the request (htu with the scheme and host of server.externalURL),
+        iat within 5 minutes, ath the base64url SHA-256 of the token, a jti used once. On /api/
+        only. A refused proof is 401 with WWW-Authenticate DPoP error="invalid_dpop_proof", a
+        refused token error="invalid_token"; there is no DPoP-Nonce.
   headers:
     Location:
       description: The path of the created resource.
       schema: {type: string}
+    ETag:
+      description: >-
+        The revision of the repo, user or webhook, a strong entity tag, opaque: it changes with
+        every change of the resource, and If-Match sends it back (docs/api.md, Revisions).
+      schema: {type: string}
   parameters:
+    dpopProof:
+      name: DPoP
+      in: header
+      required: true
+      description: >-
+        A DPoP proof (RFC 9449 §4): a JWT with typ dpop+jwt, alg ES256 and the public P-256 key
+        in jwk, whose claims are htm POST, htu <server.externalURL>/api/v1/login, iat within 5
+        minutes of the server's clock and a jti used once. The token is bound to its key.
+      schema: {type: string, maxLength: 4096}
     format:
       name: format
       in: path
@@ -1251,6 +1845,21 @@ components:
       in: query
       description: The next of the page before; opaque.
       schema: {type: string}
+    IfMatch:
+      name: If-Match
+      in: header
+      description: >-
+        The ETags of the revisions the client read, separated by commas, or *: the change is made
+        only while the resource has one of them, by strong comparison, else 412. Without it the
+        change is made whatever the revision.
+      schema: {type: string}
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      description: >-
+        ETags, separated by commas, or *: 304 without a body when the resource has one of them,
+        by weak comparison.
+      schema: {type: string}
   responses:
     Invalid:
       description: The request breaks a rule; the message names the field.
@@ -1285,6 +1894,19 @@ components:
       description: >-
         The version changed since the client read it, or was published after the cut-off; code
         CONFLICT. Nothing was deleted.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    NotModified:
+      description: The resource has a revision that If-None-Match names; no body.
+      headers:
+        ETag: {$ref: "#/components/headers/ETag"}
+    Changed:
+      description: >-
+        If-Match names no revision the resource has: it changed since the client read it; code
+        CONFLICT. Nothing changed; ETag is the resource's revision now.
+      headers:
+        ETag: {$ref: "#/components/headers/ETag"}
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
@@ -1328,6 +1950,41 @@ components:
           description: A group only, with members and merge, or members and paths on a group of oci repos; absent on another kind.
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
+        permissions:
+          type: array
+          description: >-
+            Answered by GET only: of read, write, delete and manage, those the request's principal has
+            on the repo within the scopes of its credential (docs/spec/rbac.md §3), in that order.
+          items: {type: string, enum: [read, write, delete, manage]}
+        stats:
+          $ref: "#/components/schemas/RepoStats"
+          description: Answered by GET only; absent on a group and an oci repo, which index no versions.
+        signingKeys:
+          type: array
+          description: >-
+            Answered by GET only, on an apt or rpm repo: its signing keys, the active one first, then the
+            retired ones, the most recently retired first; [] before its first key.
+          items: {$ref: "#/components/schemas/SigningKey"}
+    RepoStats:
+      type: object
+      description: Counts of the index's rows of a repo (docs/api.md, Repos); reindex rebuilds them.
+      required: [packages, versions, manifests, files, size, lastPublishedAt]
+      properties:
+        packages: {type: integer}
+        versions: {type: integer, description: Distinct versions of its packages.}
+        manifests: {type: integer, description: One per variant of a version.}
+        files: {type: integer, description: The file layers of its manifests.}
+        size: {type: integer, description: "The sum of their sizes in bytes: a blob of two manifests counts twice, the metadata layer not at all."}
+        lastPublishedAt: {type: [string, "null"], format: date-time, description: The newest publish time of its manifests.}
+    SigningKey:
+      type: object
+      description: The public facts of a repo's OpenPGP signing key.
+      required: [fingerprint, algorithm, createdAt, retiredAt]
+      properties:
+        fingerprint: {type: string, description: Uppercase hexadecimal.}
+        algorithm: {type: string, description: "ed25519 or rsa4096 for a key made by Lajstrom; rsa2048, rsa3072, rsa4096 or ecdsa-p256 for one in a KMS."}
+        createdAt: {type: string, format: date-time}
+        retiredAt: {type: [string, "null"], format: date-time, description: Null for the active key.}
     Group:
       type: object
       description: >-
@@ -1387,8 +2044,8 @@ components:
       description: >-
         The policy of a repo: the keys the server reads, with their defaults when absent
         (maxFileSize by format: npm 512 MiB, pypi and maven 4 GiB, apt and raw 8 GiB, oci 16 GiB;
-        blobRedirect auto, maven.sessionTimeout 30m, maven.maxSessionFiles 256, maven.versionPolicy
-        release). Any other key is 400.
+        blobRedirect auto, encryption.mode none, maven.sessionTimeout 30m, maven.maxSessionFiles 256,
+        maven.versionPolicy release). Any other key is 400.
       additionalProperties: false
       properties:
         maxFileSize:
@@ -1397,6 +2054,27 @@ components:
           minimum: 1
           description: The largest file an upload, or a /v2 blob, may carry, in bytes; on every repo, oci included.
         blobRedirect: {type: string, enum: [auto, never]}
+        encryption:
+          type: object
+          description: >-
+            Whether the repo keeps its files encrypted in the registry (ADR 0009). at-rest needs at least one
+            recipient, the recovery recipient, and is refused on an oci repo and on a server without the master
+            key; a change applies to the files stored after it.
+          additionalProperties: false
+          required: [mode]
+          properties:
+            mode: {type: string, enum: [none, at-rest]}
+            key:
+              type: string
+              description: The key URI of an RSA decryption key in a KMS that the repo's next key is, or empty for one Lajstrom makes.
+              examples: ["awskms:///alias/lajstrom-secrets"]
+            recipients:
+              type: array
+              maxItems: 8
+              description: >-
+                PEM public keys (RSA of 2048 bits or more, EC P-256, P-384, P-521) every new data key is wrapped for
+                too; at least one with at-rest.
+              items: {type: string}
         maven:
           type: object
           description: A maven repo only.
@@ -1429,6 +2107,13 @@ components:
       properties:
         maxFileSize: {type: [integer, "null"], format: int64, minimum: 1}
         blobRedirect: {type: [string, "null"], enum: [auto, never, null]}
+        encryption:
+          type: [object, "null"]
+          additionalProperties: false
+          properties:
+            mode: {type: [string, "null"], enum: [none, at-rest, null]}
+            key: {type: [string, "null"]}
+            recipients: {type: [array, "null"], maxItems: 8, items: {type: string}}
         maven:
           type: [object, "null"]
           additionalProperties: false
@@ -1528,7 +2213,7 @@ components:
             entries, after which truncated is true; the counts stay exact. In the report of a run
             of an earlier release, a count it did not write is 0 and a list it did not write null.
           type: [object, "null"]
-          required: [repo, ociRepositories, manifests, added, updated, unchanged, removed, pending, deletedPending, degraded, referrers, attachments, foreign, orphanReferrers, orphanJournal, drift, split, repositoryUnknown, repairedReferrers, errors, truncated]
+          required: [repo, ociRepositories, manifests, added, updated, unchanged, removed, pending, deletedPending, degraded, referrers, attachments, foreign, orphanReferrers, orphanJournal, drift, split, repositoryUnknown, repairedReferrers, blobMap, skipped, errors, truncated]
           properties:
             repo: {type: string, description: "The repo, <format>/<name>."}
             ociRepositories: {type: integer, description: "The OCI repositories under the repo's path."}
@@ -1590,6 +2275,14 @@ components:
                 the reconcile loop and with verify, on a registry without the referrers API.
               type: [array, "null"]
               items: {$ref: "#/components/schemas/RepairedReferrersIndex"}
+            blobMap:
+              type: integer
+              description: The rows of blob_map of an encrypted repo written or seen.
+            skipped:
+              type: string
+              description: >-
+                Why the run skipped the repo whole, an encrypted repo whose keys do not open (no master
+                key, a seal that does not open); empty otherwise.
             errors:
               description: What the run could not read, check or write, each with its error.
               type: array
@@ -1667,6 +2360,41 @@ components:
             DELETE /api/v1/repos/<format>/<name>/packages/<package>/versions/<version>, with
             ?variant=<variant> for a variant, the package and the version path-escaped.
           type: string
+    SessionList:
+      type: object
+      required: [sessions]
+      properties:
+        sessions:
+          type: array
+          items: {$ref: "#/components/schemas/Session"}
+        next: {type: string, description: The cursor of the next page; absent on the last.}
+    Session:
+      type: object
+      description: An open publication session (docs/api.md, Open deploys).
+      required: [id, key, principal, files, committing, createdAt, updatedAt, expiresAt]
+      properties:
+        id: {type: integer}
+        key: {type: string, description: "<groupId>:<artifactId>:<version>; a SNAPSHOT build's version is the build's."}
+        principal: {type: string, description: "Who opened it: user:<uid> or token:<id>."}
+        principalName: {type: string, description: A user's name now; absent for a token.}
+        files:
+          type: array
+          description: The files stored so far, in the order they first came.
+          items:
+            type: object
+            required: [name, digest, size]
+            properties:
+              name: {type: string, description: The path below the repo.}
+              digest: {type: string}
+              size: {type: integer}
+        refused:
+          type: object
+          description: The files a checksum file disagreed with, by name, with the reason; absent when none.
+          additionalProperties: {type: string}
+        committing: {type: boolean, description: A commit of the session runs.}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time, description: Its last change.}
+        expiresAt: {type: string, format: date-time, description: When it ends with nothing published unless it commits.}
     Token:
       type: object
       required: [id, kind, name, scopes, expiresAt, lastUsedAt, createdAt, revokedAt, hashPrefix]
@@ -1679,12 +2407,18 @@ components:
         name: {type: string}
         scopes:
           type: array
-          items: {type: string, enum: [read, write]}
+          items: {type: string, enum: [read, write, attach]}
         expiresAt: {type: [string, "null"], format: date-time}
         lastUsedAt: {type: [string, "null"], format: date-time}
         createdAt: {type: string, format: date-time}
         revokedAt: {type: [string, "null"], format: date-time}
         hashPrefix: {type: string}
+        dpopJkt:
+          type: string
+          description: >-
+            The JWK SHA-256 thumbprint (RFC 7638) of the DPoP key that the token of a web UI's
+            sign-in is bound to; absent for every other token. A bound token works only as
+            Authorization: DPoP with a proof of that key, on /api/.
     CreatedToken:
       allOf:
         - $ref: "#/components/schemas/Token"
@@ -1692,6 +2426,13 @@ components:
           required: [secret]
           properties:
             secret: {type: string, description: Shown this once.}
+    LoginToken:
+      allOf:
+        - $ref: "#/components/schemas/CreatedToken"
+        - type: object
+          required: [dpopJkt, tokenType]
+          properties:
+            tokenType: {type: string, enum: [DPoP], description: "The token_type of RFC 9449 §5: the token is bound to the proof's key."}
     TokenList:
       type: object
       required: [tokens]
@@ -1699,6 +2440,14 @@ components:
         tokens:
           type: array
           items: {$ref: "#/components/schemas/Token"}
+    TokenPage:
+      type: object
+      required: [tokens]
+      properties:
+        tokens:
+          type: array
+          items: {$ref: "#/components/schemas/Token"}
+        next: {type: string, description: The cursor of the next page; absent on the last.}
     TokenRequest:
       type: object
       required: [name]
@@ -1707,7 +2456,7 @@ components:
         name: {type: string}
         scopes:
           type: array
-          items: {type: string, enum: [read, write]}
+          items: {type: string, enum: [read, write, attach]}
         expiresAt: {type: string, format: date-time}
         expiresIn: {type: string, description: A number of days (30d) or a duration (12h).}
     MaskTokenRequest:
@@ -1719,7 +2468,7 @@ components:
         name: {type: string}
         scopes:
           type: array
-          items: {type: string, enum: [read, write]}
+          items: {type: string, enum: [read, write, attach]}
         expiresAt: {type: string, format: date-time}
         expiresIn: {type: string, description: A number of days (30d) or a duration (12h).}
     User:
@@ -1728,9 +2477,12 @@ components:
       properties:
         uid: {type: string, format: uuid}
         name: {type: string}
-        kind: {type: string, enum: [local]}
+        kind: {type: string, enum: [local, oidc, service], description: "service: a service account (docs/spec/rbac.md §1)."}
         disabled: {type: boolean}
         createdAt: {type: string, format: date-time}
+        owner: {type: string, description: "A service account's owner, user:<uid> or group:<name>; absent for every other kind."}
+        ownerName: {type: string, description: The name of a user owner.}
+        ownerDisabled: {type: boolean, description: "A user owner is disabled; the service account is not, for that, unless auth.serviceAccounts.onOwnerDisabled is disable."}
     UserList:
       type: object
       required: [users]
@@ -1741,12 +2493,15 @@ components:
         next: {type: string}
     UserRequest:
       type: object
-      required: [name, password]
+      required: [name]
       additionalProperties: false
+      description: A local user needs a password; a service account (kind service) needs an owner, and has neither a password nor admin.
       properties:
         name: {type: string}
         password: {$ref: "#/components/schemas/Password"}
         admin: {type: boolean}
+        kind: {type: string, enum: [local, service], default: local}
+        owner: {type: string, description: "A service account's owner: user:<name> or user:<uid> of a user that is not a service account, or group:<name>."}
     BootstrapRequest:
       type: object
       required: [token, name, password]
@@ -1755,6 +2510,24 @@ components:
         token: {type: string}
         name: {type: string}
         password: {$ref: "#/components/schemas/Password"}
+    LoginRequest:
+      description: "The body of a sign-in: a local user's name and password, or the code of an OIDC login and its PKCE verifier."
+      oneOf:
+        - type: object
+          required: [username, password]
+          additionalProperties: false
+          properties:
+            username: {type: string}
+            password: {type: string}
+        - type: object
+          required: [code, codeVerifier]
+          additionalProperties: false
+          properties:
+            code: {type: string, description: "The code in the fragment of the page the callback redirected to, #code=<code>."}
+            codeVerifier:
+              type: string
+              description: The PKCE verifier (RFC 7636) whose S256 challenge started the login.
+              pattern: "^[A-Za-z0-9._~-]{43,128}$"
     UserPatch:
       type: object
       additionalProperties: false
@@ -1762,6 +2535,7 @@ components:
       properties:
         name: {type: string}
         disabled: {type: boolean}
+        owner: {type: string, description: "A service account's new owner, as in UserRequest; 400 for a user of another kind."}
     PasswordRequest:
       type: object
       required: [password]
@@ -1778,9 +2552,9 @@ components:
       required: [id, principal, role, repoMask, createdAt]
       properties:
         id: {type: integer, format: int64}
-        principal: {type: string, description: "user:<uid>, or group:<name> (docs/spec/rbac.md §8)."}
+        principal: {type: string, description: "user:<uid>, group:<name> (docs/spec/rbac.md §8), or a cert: or k8s: principal or pattern (§9)."}
         name: {type: string, description: "The user's name now; absent for a group."}
-        role: {type: string, enum: [reader, writer, maintainer, admin]}
+        role: {type: string, enum: [reader, attacher, writer, maintainer, admin]}
         repoMask: {type: string}
         createdAt: {type: string, format: date-time}
     BindingList:
@@ -1796,8 +2570,8 @@ components:
       required: [principal, role, repoMask]
       additionalProperties: false
       properties:
-        principal: {type: string, description: "user:<name>, user:<uid>, or group:<name>, which need not have members (docs/spec/rbac.md §8)."}
-        role: {type: string, enum: [reader, writer, maintainer, admin]}
+        principal: {type: string, description: "user:<name>, user:<uid>, or group:<name>, which need not have members (docs/spec/rbac.md §8); or a cert: or k8s: principal or pattern, never with the admin role (§9)."}
+        role: {type: string, enum: [reader, attacher, writer, maintainer, admin]}
         repoMask: {type: string}
     AuditEntry:
       type: object
@@ -1807,6 +2581,7 @@ components:
         at: {type: string, format: date-time}
         principal: {type: string}
         principalName: {type: string}
+        principalKind: {type: string, enum: [service], description: "service when the principal is a service account's user:<uid>; absent otherwise."}
         action: {type: string}
         repo: {type: string}
         subject: {type: string}
@@ -1824,11 +2599,67 @@ components:
           items: {$ref: "#/components/schemas/AuditEntry"}
         next: {type: string}
     Package:
+      description: A package with the facts of its manifests, all read from the index.
       type: object
-      required: [name, createdAt]
+      required: [name, nameOci, createdAt, updatedAt, latestVersion, latestVariants, lastPublished, versions, manifests, size, summary, attrs,
+        pointers]
       properties:
         name: {type: string, description: The name in the format's spelling.}
-        createdAt: {type: string, format: date-time, description: The publish time of its first version.}
+        nameOci: {type: string, description: The escaped package path of its OCI repository.}
+        createdAt: {type: string, format: date-time, description: The publish time of its first manifest.}
+        updatedAt: {type: string, format: date-time, description: The publish time of its newest manifest.}
+        latestVersion:
+          type: [string, "null"]
+          description: >-
+            The version the format's client installs by default: npm the latest dist-tag, maven the release of
+            maven-metadata.xml, pypi the highest that is not a pre-release and not yanked (as pip picks it), apt and
+            rpm the highest by dpkg's and rpm's order, raw the newest; null when the client installs none.
+        latestVariants:
+          type: array
+          description: The variants of the latest version in byte order; empty for a format without variants and without a latest version.
+          items: {type: string}
+        lastPublished:
+          type: [string, "null"]
+          description: The first version of its versions list, the newest by its first publish time; null without versions.
+        versions: {type: integer, format: int64, description: How many versions it has.}
+        manifests: {type: integer, format: int64, description: "How many manifests it has, one per variant of each version."}
+        size: {type: integer, format: int64, description: "The sizes of the file layers of all its manifests, added up."}
+        summary:
+          type: [string, "null"]
+          description: >-
+            One line of the head manifest's metadata layer (pypi summary, deb Description, npm description,
+            rpm summary); null when it has none.
+        attrs:
+          type: object
+          description: >-
+            The lajstrom.* annotations of the head manifest, the latest version's first variant (else the last
+            published one's), by their full key.
+          additionalProperties: {type: string}
+        pointers:
+          type: array
+          description: "Its pointers that name one of its versions, with the version, by kind and name: npm's dist-tags."
+          items: {$ref: "#/components/schemas/PackagePointer"}
+    PackagePointer:
+      description: A pointer of a package, with the version it names.
+      allOf:
+        - {$ref: "#/components/schemas/Pointer"}
+        - type: object
+          required: [version]
+          properties:
+            version: {type: string, description: The version it names.}
+    PackageDetail:
+      description: "One package: its row of the package list, its OCI repository and the metadata of its head manifest."
+      allOf:
+        - {$ref: "#/components/schemas/Package"}
+        - type: object
+          required: [ociRepository, latestMetadata]
+          properties:
+            ociRepository:
+              type: string
+              description: <format>/<repo>/<package path>, the repository of its manifests on /v2.
+            latestMetadata:
+              type: [object, "null"]
+              description: The metadata layer of the head manifest; null when it is absent or was too large to keep.
     PackageList:
       type: object
       required: [packages]
@@ -1836,7 +2667,66 @@ components:
         packages:
           type: array
           items: {$ref: "#/components/schemas/Package"}
+        facets:
+          type: object
+          description: >-
+            With facet only: for each key, its values in the repo's manifests in byte order, at
+            most 1000.
+          additionalProperties:
+            type: array
+            items: {$ref: "#/components/schemas/FacetValue"}
         next: {type: string}
+    SearchResult:
+      description: A page of the hits of a search, rank after rank.
+      type: object
+      required: [hits]
+      properties:
+        hits:
+          type: array
+          items:
+            oneOf:
+              - {$ref: "#/components/schemas/PackageHit"}
+              - {$ref: "#/components/schemas/VersionHit"}
+        next: {type: string}
+    PackageHit:
+      description: A package found by its name or a summary, with the facts of its row of the package list.
+      type: object
+      required: [kind, format, repo, name, latestVersion, summary, updatedAt]
+      properties:
+        kind: {const: package}
+        format: {type: string}
+        repo: {type: string}
+        name: {type: string}
+        latestVersion: {type: [string, "null"]}
+        summary: {type: [string, "null"]}
+        updatedAt: {type: string, format: date-time}
+    VersionHit:
+      description: A manifest found by its digest, or by the digest of one of its file layers.
+      type: object
+      required: [kind, format, repo, name, version, variant, digest, matched]
+      properties:
+        kind: {const: version}
+        format: {type: string}
+        repo: {type: string}
+        name: {type: string}
+        version: {type: string}
+        variant: {type: string, description: Empty for a format without variants.}
+        digest: {type: string, description: The manifest's digest.}
+        matched: {type: string, enum: [manifest, file], description: Whose digest matched.}
+        file:
+          description: The file whose digest matched; with matched file only.
+          type: object
+          required: [name, digest]
+          properties:
+            name: {type: string}
+            digest: {type: string}
+    FacetValue:
+      description: A value of an attribute in the repo's manifests.
+      type: object
+      required: [value, count]
+      properties:
+        value: {type: string}
+        count: {type: integer, format: int64, description: How many packages have a manifest with the value.}
     Version:
       type: object
       required: [version, publishedAt, lastModified, variants, pointers]
@@ -1864,6 +2754,94 @@ components:
       required: [reason]
       properties:
         reason: {type: string, description: Empty when the yank gave none.}
+    Rule:
+      description: A policy rule (docs/spec/policy.md §1).
+      type: object
+      required: [id, repoMask, name, version, variant, effect, reason, createdBy, createdAt, expiresAt, expired]
+      properties:
+        id: {type: integer}
+        repoMask: {type: string, description: "A repo mask, <format>/<repo>, each * or a name."}
+        name: {type: string, description: "A pattern of the package name; * any run of characters."}
+        version: {type: string, description: "A version constraint: *, or clauses ==, !=, <, <=, >, >= joined with commas."}
+        variant: {type: string, description: "A pattern of the variant; * every variant."}
+        effect: {type: string, enum: [deny, allow]}
+        reason: {type: string}
+        createdBy: {type: string}
+        createdAt: {type: string, format: date-time}
+        expiresAt: {type: [string, "null"], format: date-time}
+        expired: {type: boolean}
+    RuleList:
+      type: object
+      required: [rules]
+      properties:
+        rules:
+          type: array
+          items: {$ref: "#/components/schemas/Rule"}
+    RuleRequest:
+      description: The body of a rule's creation.
+      type: object
+      required: [repoMask, name, reason]
+      properties:
+        repoMask: {type: string}
+        name: {type: string, maxLength: 256}
+        version: {type: string, description: "* when absent."}
+        variant: {type: string, maxLength: 256, description: "* when absent; empty for the empty variant only."}
+        effect: {type: string, enum: [deny, allow], description: "deny when absent."}
+        reason: {type: string, minLength: 1, maxLength: 512}
+        expiresAt: {type: [string, "null"], format: date-time}
+    Verdict:
+      description: A verdict the index holds (docs/spec/policy.md §2).
+      type: object
+      required: [repo, package, subject, attestation, verdict, reason, source, scope, validUntil, signedBy, createdAt, inForce]
+      properties:
+        repo: {type: string}
+        package: {type: string}
+        version: {type: string}
+        variant: {type: string}
+        subject: {type: string, description: "The judged manifest's digest."}
+        attestation: {type: string, description: "The referrer's digest."}
+        verdict: {type: string, enum: [allow, deny, quarantine]}
+        reason: {type: string}
+        source: {type: string}
+        scope: {type: string}
+        validUntil: {type: [string, "null"], format: date-time}
+        signedBy: {type: string}
+        createdAt: {type: [string, "null"], format: date-time}
+        inForce: {type: boolean}
+    VerdictList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/Verdict"}
+    Denylist:
+      description: The deny list (docs/spec/policy.md §8).
+      type: object
+      required: [version, generation, createdAt, rules, verdicts, digests, prefixes]
+      properties:
+        version: {type: integer}
+        generation: {type: integer}
+        createdAt: {type: string, format: date-time}
+        rules:
+          type: array
+          items: {type: object}
+        verdicts:
+          type: array
+          items: {type: object}
+        digests:
+          type: array
+          items: {type: string}
+        prefixes:
+          type: array
+          items: {type: string}
+    DenyRequest:
+      description: The body of a deny.
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 512}
+        validUntil: {type: [string, "null"], format: date-time}
     YankRequest:
       description: The optional body of a yank.
       type: object
@@ -1873,13 +2851,38 @@ components:
           maxLength: 4096
           description: Why the version is yanked, at most 4096 bytes of UTF-8; absent, null or empty for none.
     Variant:
+      description: One manifest of a version with its facts, from the index.
       type: object
-      required: [variant, tag, digest, publishedAt]
+      required: [variant, tag, digest, publishedAt, artifactType, attrs, degraded, size, fileCount, attachments]
       properties:
         variant: {type: string, description: Empty for a format without variants.}
         tag: {type: string}
         digest: {type: string, description: "The manifest digest, the entity tag of If-Match."}
         publishedAt: {type: string, format: date-time}
+        artifactType: {type: string}
+        attrs:
+          type: object
+          description: The manifest's lajstrom.* annotations by their full key.
+          additionalProperties: {type: string}
+        degraded: {type: boolean, description: The row came from the annotations alone; its metadata layer could not be read.}
+        size: {type: integer, format: int64, description: The sizes of its file layers added up.}
+        fileCount: {type: integer, format: int64, description: The number of its file layers.}
+        attachments: {$ref: "#/components/schemas/AttachmentCounts"}
+    AttachmentCounts:
+      description: >-
+        The attachments of a variant counted by kind, as GET …/attachments?variant=&kind= lists
+        them; every kind is there, 0 without attachments, and a kind of a newer server is counted
+        under its own name.
+      type: object
+      required: [signature, sbom, scan, provenance, attestation, other]
+      properties:
+        signature: {type: integer, format: int64}
+        sbom: {type: integer, format: int64}
+        scan: {type: integer, format: int64}
+        provenance: {type: integer, format: int64}
+        attestation: {type: integer, format: int64}
+        other: {type: integer, format: int64}
+      additionalProperties: {type: integer, format: int64}
     Pointer:
       type: object
       required: [kind, name]
@@ -1909,7 +2912,7 @@ components:
         yanked: {$ref: "#/components/schemas/Yank"}
         ociRepository:
           type: string
-          description: <format>/<repo>/<package path>, the repository of its manifests on /v2.
+          description: "The ociRepository of its first variant: <format>/<repo>/<package path>, the repository of its manifest on /v2."
     AttachmentList:
       description: The attachments of a version, newest first.
       type: object
@@ -1961,10 +2964,53 @@ components:
         reason: {type: string, description: Why it is not verified.}
         createdAt: {type: string, format: date-time, description: "The referrer's org.opencontainers.image.created, when it has one."}
         indexedAt: {type: string, format: date-time, description: When ingest or reindex last wrote or saw the row.}
-    VariantDetail:
-      description: One manifest of a version, with its row of the index and its files.
+    ManifestList:
+      description: The manifests of a version's variants, read from the registry.
       type: object
-      required: [variant, tag, digest, publishedAt, artifactType, attrs, metadata, degraded, indexedAt, files]
+      required: [manifests]
+      properties:
+        manifests:
+          type: array
+          items: {$ref: "#/components/schemas/Manifest"}
+    Manifest:
+      description: The manifest of one variant.
+      type: object
+      required: [variant, digest, mediaType, size, manifest]
+      properties:
+        variant: {type: string, description: Empty for a format without variants.}
+        digest: {type: string, description: "The manifest digest, the index's."}
+        mediaType: {type: string}
+        size: {type: integer, format: int64}
+        manifest:
+          type: object
+          description: "The manifest as JSON; its exact bytes are /v2/<ociRepository>/manifests/<digest>."
+    ReferrerList:
+      description: The referrers of a version's variants, as the registry lists them.
+      type: object
+      required: [referrers]
+      properties:
+        referrers:
+          type: array
+          items: {$ref: "#/components/schemas/Referrer"}
+    Referrer:
+      description: One manifest whose subject is a variant's manifest.
+      type: object
+      required: [variant, subject, digest, mediaType, artifactType, size, annotations]
+      properties:
+        variant: {type: string, description: Empty for a format without variants.}
+        subject: {type: string, description: The variant's manifest digest.}
+        digest: {type: string, description: The referrer manifest's digest.}
+        mediaType: {type: string}
+        artifactType: {type: string}
+        size: {type: integer, format: int64}
+        annotations:
+          type: object
+          description: The referrer manifest's annotations, as the registry lists them.
+          additionalProperties: {type: string}
+    VariantDetail:
+      description: One manifest of a version, with its row of the index, its facts and its files.
+      type: object
+      required: [variant, tag, digest, publishedAt, artifactType, attrs, degraded, size, fileCount, attachments, metadata, indexedAt, files, ociRepository]
       properties:
         variant: {type: string, description: Empty for a format without variants.}
         tag: {type: string}
@@ -1975,10 +3021,13 @@ components:
           type: object
           description: The manifest's lajstrom.* annotations by their full key.
           additionalProperties: {type: string}
+        degraded: {type: boolean, description: The row came from the annotations alone.}
+        size: {type: integer, format: int64, description: The sizes of its file layers added up.}
+        fileCount: {type: integer, format: int64, description: The number of its file layers.}
+        attachments: {$ref: "#/components/schemas/AttachmentCounts"}
         metadata:
           description: The metadata layer; null when there is none or it was too large to keep.
           type: [object, "null"]
-        degraded: {type: boolean, description: The row came from the annotations alone.}
         indexedAt:
           type: string
           format: date-time
@@ -1987,6 +3036,11 @@ components:
           type: array
           description: The file layers, in manifest order.
           items: {$ref: "#/components/schemas/File"}
+        ociRepository:
+          type: string
+          description: >-
+            <format>/<repo>/<package path>, the repository of its manifest on /v2: of a package split across
+            two forms of its OCI name, the form where reindex found it (#642).
     File:
       description: One file layer of a manifest.
       type: object
@@ -2153,10 +3207,80 @@ components:
           type: array
           items: {type: string}
           description: A user's groups that count now, from its latest OIDC login (docs/spec/rbac.md §8).
+    RegistryList:
+      type: object
+      required: [replica, registries]
+      properties:
+        replica: {type: string, description: "The replica that answers, as replicas.id names it: host name and process id."}
+        registries:
+          type: array
+          items: {$ref: "#/components/schemas/Registry"}
+    Registry:
+      type: object
+      required: [name, type, url, prefix, vendor, support, capabilities, repos, status]
+      properties:
+        name: {type: string}
+        type: {type: string, enum: [generic, ecr]}
+        url: {type: string}
+        prefix: {type: string}
+        vendor:
+          type: [string, "null"]
+          description: >-
+            The product the probe detected, as lajstrom registry probe names it (distribution, zot,
+            gitlab, ghcr, harbor, nexus, gitea, forgejo, jfrog, quay, dockerhub, ecr, or unknown); null
+            before a probe of the replica got an answer.
+        support:
+          type: [string, "null"]
+          enum: [ci, manual, hosted, untested, null]
+          description: The vendor's support tier in this release (docs/registries/README.md, Support tiers); null with vendor.
+        capabilities:
+          anyOf:
+            - {$ref: "#/components/schemas/Capabilities"}
+            - {type: "null"}
+          description: "What ingest and the facade go by; null before a probe of the replica succeeded."
+        repos:
+          type: array
+          description: "The repos on the registry, <format>/<name>, by format and name."
+          items: {type: string}
+        status: {$ref: "#/components/schemas/RegistryStatus"}
+    Capabilities:
+      type: object
+      description: A registry's capabilities, under the keys of registries[].capabilities (docs/configuration.md).
+      required: [createOnPush, referrers, catalog, deleteManifest, immutableTags, blobRedirect, referrersAlwaysTag, maxBlobSize,
+        consistency, consistencyBound, maxNameDepth, maxNameLength, tagsFoldCase, buildRoutes]
+      properties:
+        createOnPush: {type: boolean}
+        referrers: {type: boolean}
+        catalog: {type: boolean}
+        deleteManifest: {type: boolean}
+        immutableTags: {type: boolean}
+        blobRedirect: {type: boolean}
+        referrersAlwaysTag: {type: boolean}
+        maxBlobSize: {type: integer, description: Bytes; 0 when unknown.}
+        consistency: {type: string, enum: [strong, eventual, ""], description: "\"\" when unknown."}
+        consistencyBound: {type: string, description: "A duration, 2m10s; 0s when none is known."}
+        maxNameDepth: {type: integer, description: 0 for no limit.}
+        maxNameLength: {type: integer, description: 0 for no limit.}
+        tagsFoldCase: {type: boolean}
+        buildRoutes: {type: boolean}
+    RegistryStatus:
+      type: object
+      description: What the replica's readiness ping (GET /v2/ every 20 seconds) and the registry's circuit breaker know.
+      required: [state, checkedAt, answeredAt, latencyMs, message, breaker]
+      properties:
+        state:
+          type: string
+          enum: [ok, degraded, down]
+          description: "down: no ping answered 200 for a minute, or the breaker is open; degraded: the last ping failed, or the breaker is half-open."
+        checkedAt: {type: [string, "null"], format: date-time, description: "The last ping; null before the first, and for a provider that is not pinged."}
+        answeredAt: {type: [string, "null"], format: date-time, description: The last ping answered 200.}
+        latencyMs: {type: [integer, "null"], description: How long the last ping took.}
+        message: {type: [string, "null"], description: "The error of the last ping, as the provider words it: no credential, no instance prefix."}
+        breaker: {type: string, enum: [closed, open, half-open]}
     Info:
       description: "What a client needs before it signs in, and the caller."
       type: object
-      required: [version, commit, date, externalURL, anonymousRead, formats, authModes, caller]
+      required: [version, commit, date, externalURL, anonymousRead, formats, authModes, login, caller]
       properties:
         version: {type: string, description: The release version; dev for an unversioned build.}
         commit: {type: string, description: The short commit hash; empty when unknown.}
@@ -2169,8 +3293,17 @@ components:
           items: {$ref: "#/components/schemas/FormatInfo"}
         authModes:
           type: array
-          description: How a person signs in; the OIDC login adds oidc.
+          description: How a person signs in; oidc while the OIDC login is on.
           items: {type: string, enum: [password, token, oidc]}
+        login:
+          description: >-
+            POST /api/v1/login, whose token is DPoP-bound, which a server before it does not
+            answer; with oidc in authModes, /-/oidc/login takes return_to, code_challenge and
+            dpop_jkt for a web UI.
+          type: object
+          required: [tokenLifetime]
+          properties:
+            tokenLifetime: {type: integer, description: "The seconds of auth.login.tokenLifetime."}
         caller: {$ref: "#/components/schemas/Caller"}
     FormatInfo:
       description: "A format plugin the server serves, and the artifact type of its manifests."

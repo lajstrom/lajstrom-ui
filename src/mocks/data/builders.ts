@@ -2,12 +2,12 @@
 // the manifest of docs/spec/manifest-profile.md with real sha256 digests, the tag of §4.2, the
 // package path of §4.1 and the index rows.
 
-import type { FormatName, OciDescriptor, OciManifest } from "@/api/types";
+import type { FormatName } from "@/api/types";
 import { packagePath, tagFor } from "@/lib/profile";
 import { Rand } from "@/lib/prng";
 import { sha256Hex } from "@/lib/sha256";
 
-import type { MockFile, MockReferrer, MockVersion } from "./model";
+import type { MockFile, MockReferrer, MockVersion, OciDescriptor, OciManifest } from "./model";
 
 export const EMPTY_CONFIG: OciDescriptor = {
   mediaType: "application/vnd.oci.empty.v1+json",
@@ -205,7 +205,6 @@ export function buildVersion(spec: VersionSpec, host: string): BuiltVersion {
   }));
 
   const referrerList = (spec.referrers ?? []).map((k) => referrer(k, digest, spec.createdAt, rand));
-  const count = (kind: MockReferrer["kind"]) => referrerList.filter((r) => r.kind === kind).length;
   const indexedAt = new Date(new Date(spec.createdAt).getTime() + rand.int(1, 3) * 1000).toISOString();
 
   return {
@@ -222,7 +221,6 @@ export function buildVersion(spec: VersionSpec, host: string): BuiltVersion {
     size: spec.files.reduce((n, f) => n + f.size, 0),
     fileCount: spec.files.length,
     uploadedBy: spec.degraded ? null : (spec.uploadedBy ?? null),
-    referrers: { signatures: count("signature"), sboms: count("sbom"), attestations: count("attestation") },
     files,
     metadata: spec.metadata,
     annotations,

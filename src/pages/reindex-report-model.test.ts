@@ -27,6 +27,8 @@ function clean(over: Partial<ReindexReport> = {}): ReindexReport {
     repositoryUnknown: [],
     repairedReferrers: [],
     errors: [],
+    blobMap: 0,
+    skipped: "",
     truncated: false,
     ...over,
   };
@@ -49,6 +51,8 @@ describe("reportCounts", () => {
       ["Referrers", 4],
       ["Attachments", 4],
     ]);
+    // An encrypted repo's run counts its blob map too.
+    expect(reportCounts(clean({ blobMap: 7 })).at(-1)).toMatchObject({ label: "Blob map", value: 7 });
   });
 
   it("warns of pending, deleted pending and degraded rows only when there are some", () => {

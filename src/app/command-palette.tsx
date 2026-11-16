@@ -98,8 +98,8 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
                 <Command.Group heading={looksLikeDigest ? "Digest matches" : "Packages"}>
                   {search.data!.hits.map((h) => (
                     <Command.Item
-                      key={h.kind === "package" ? `p:${h.format}/${h.repo}/${h.name}` : `v:${h.digest}:${h.matched}`}
-                      value={h.kind === "package" ? `p:${h.format}/${h.repo}/${h.name}` : `v:${h.digest}:${h.matched}`}
+                      key={h.kind === "package" ? `p:${h.format}/${h.repo}/${h.name}` : `v:${h.digest}:${h.file?.name ?? ""}`}
+                      value={h.kind === "package" ? `p:${h.format}/${h.repo}/${h.name}` : `v:${h.digest}:${h.file?.name ?? ""}`}
                       onSelect={() => openHit(h)}
                       className={itemClass}
                     >
@@ -120,7 +120,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
                             {h.variant ? ` (${h.variant})` : ""}
                           </span>
                           <span className="min-w-0 flex-1 truncate text-right font-mono text-xs text-muted-foreground">
-                            {h.matched === "manifest" ? "manifest" : h.matched} · {shortDigest(h.digest)}
+                            {h.file ? h.file.name : "manifest"} · {shortDigest(h.digest)}
                           </span>
                         </>
                       )}

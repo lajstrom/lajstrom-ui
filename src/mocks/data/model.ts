@@ -1,7 +1,23 @@
 // How the mock keeps a manifest of a package: one row per (version, variant), with what the
 // prototype's API answered about it. src/mocks/db.ts turns rows into the server's shapes.
 
-import type { OciManifest, ReferrerCounts } from "@/api/types";
+/** A descriptor of the OCI image spec. */
+export type OciDescriptor = {
+  mediaType: string;
+  digest: string;
+  size: number;
+  annotations?: Record<string, string>;
+};
+
+/** An OCI image manifest as manifest-profile.md §2 makes it: an artifact, its file layers. */
+export type OciManifest = {
+  schemaVersion: 2;
+  mediaType: string;
+  artifactType: string;
+  config: OciDescriptor;
+  layers: OciDescriptor[];
+  annotations: Record<string, string>;
+};
 
 /** A file layer. */
 export type MockFile = {
@@ -39,7 +55,6 @@ export type MockVersion = {
   size: number;
   fileCount: number;
   uploadedBy: string | null;
-  referrers: ReferrerCounts;
   files: MockFile[];
   metadata: Record<string, unknown> | null;
   annotations: Record<string, string>;

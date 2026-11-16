@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { apiGet, apiPath, apiSend } from "@/api/client";
 import { createRepo, prefetch, purgeUpstreamCache, updateRepo } from "@/api/mutations";
 import { setSession } from "@/api/session";
-import type { AuditList, PackageList, Repo, VersionDetail, VersionSummary } from "@/api/types";
+import type { AuditList, ManifestList, PackageList, Repo, VersionDetail, VersionSummary } from "@/api/types";
 import { connectFor, formatSpec } from "@/lib/formats";
 import { countResults, failedItems, listItems, prefetchRequest } from "@/pages/proxy-changes";
 
@@ -140,7 +140,8 @@ describe("prefetch an npm proxy", () => {
     const list = await apiGet<VersionList>(apiPath("repos", "npm", "npmjs", "packages", "@types/made-up", "versions"));
     const version = list.versions[0]!.version;
     const d = await apiGet<VersionDetail>(apiPath("repos", "npm", "npmjs", "packages", "@types/made-up", "versions", version));
-    const a = d.variants[0]!.annotations!;
+    const m = await apiGet<ManifestList>(apiPath("repos", "npm", "npmjs", "packages", "@types/made-up", "versions", version, "manifest"));
+    const a = m.manifests[0]!.manifest.annotations as Record<string, string>;
     expect(a["lajstrom.origin.url"]).toBe(`https://registry.npmjs.org/@types/made-up/-/made-up-${version}.tgz`);
     expect(a["lajstrom.origin.checksum"]).toMatch(/^sha512:[0-9a-f]{128}$/);
     expect(a).not.toHaveProperty("lajstrom.uploaded-by");
