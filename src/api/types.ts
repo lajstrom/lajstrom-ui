@@ -157,6 +157,14 @@ export type TokenScope = Token["scopes"][number];
 /** The answer of a token creation: the resource and its secret, shown this one time. */
 export type CreatedToken = Schemas["CreatedToken"];
 
+/** The body of POST /api/v1/login: a local user's name and password, or the code of an OIDC
+ * login and its PKCE verifier. */
+export type LoginRequest = Schemas["LoginRequest"];
+
+/** The answer of POST /api/v1/login: the token of a sign-in, bound to the DPoP key of its proof
+ * (dpopJkt), with tokenType DPoP. */
+export type LoginToken = Schemas["LoginToken"];
+
 /** The body of POST /api/v1/users/{name}/tokens and …/deploy-tokens. */
 export type TokenRequest = Schemas["TokenRequest"];
 

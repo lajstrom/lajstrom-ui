@@ -37,8 +37,6 @@ const notMocked = new Set([
   "get /api/v1/policy/denylist",
   "post /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/deny",
   "delete /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/deny",
-  // The DPoP-bound sign-in of a web UI: the UI signs in with a token of its user still.
-  "post /api/v1/login",
 ]);
 
 describe("public/openapi.yaml against the mock", () => {

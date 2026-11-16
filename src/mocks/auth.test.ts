@@ -8,32 +8,32 @@ const req = (authorization?: string) =>
   new Request("http://localhost/api/v1/whoami", authorization ? { headers: { Authorization: authorization } } : {});
 
 describe("authenticate (docs/auth.md)", () => {
-  it("lets a request without credentials go on as anonymous", () => {
-    expect(authenticate(req())).toEqual({ principal: "anonymous" });
+  it("lets a request without credentials go on as anonymous", async () => {
+    expect(await authenticate(req())).toEqual({ principal: "anonymous" });
   });
 
-  it("takes the user's name as the password, of a user that is not disabled", () => {
-    expect(authenticate(req(basic("alice", "alice")))).toEqual({ principal: "alice" });
-    expect(authenticate(req(basic("alice", "wrong")))).toEqual({ refused: true });
-    expect(authenticate(req(basic("alice", "")))).toEqual({ refused: true });
-    expect(authenticate(req(basic("dave", "dave")))).toEqual({ refused: true });
-    expect(authenticate(req(basic("nobody", "nobody")))).toEqual({ refused: true });
+  it("takes the user's name as the password, of a user that is not disabled", async () => {
+    expect(await authenticate(req(basic("alice", "alice")))).toEqual({ principal: "alice" });
+    expect(await authenticate(req(basic("alice", "wrong")))).toEqual({ refused: true });
+    expect(await authenticate(req(basic("alice", "")))).toEqual({ refused: true });
+    expect(await authenticate(req(basic("dave", "dave")))).toEqual({ refused: true });
+    expect(await authenticate(req(basic("nobody", "nobody")))).toEqual({ refused: true });
   });
 
-  it("refuses a bearer it does not know, and a deploy token as bearer", () => {
-    expect(authenticate(req("Bearer ljs_pat_unknown"))).toEqual({ refused: true });
-    expect(authenticate(req("Bearer ljs_dep_anything"))).toEqual({ refused: true });
-    expect(authenticate(req("Bearer some-jwt"))).toEqual({ principal: "anonymous" });
+  it("refuses a bearer it does not know, and a deploy token as bearer", async () => {
+    expect(await authenticate(req("Bearer ljs_pat_unknown"))).toEqual({ refused: true });
+    expect(await authenticate(req("Bearer ljs_dep_anything"))).toEqual({ refused: true });
+    expect(await authenticate(req("Bearer some-jwt"))).toEqual({ principal: "anonymous" });
   });
 
-  it("accepts a token it created until it is revoked", () => {
+  it("accepts a token it created until it is revoked", async () => {
     const t = createToken({ user: "bob" }, { name: "auth test", expiresIn: "1h" });
     if ("status" in t) throw new Error(t.message);
-    expect(authenticate(req(`Bearer ${t.secret}`))).toEqual({ principal: "bob" });
-    expect(authenticate(req(basic("bob", t.secret)))).toEqual({ principal: "bob" });
-    expect(authenticate(req(basic("alice", t.secret)))).toEqual({ refused: true });
+    expect(await authenticate(req(`Bearer ${t.secret}`))).toEqual({ principal: "bob" });
+    expect(await authenticate(req(basic("bob", t.secret)))).toEqual({ principal: "bob" });
+    expect(await authenticate(req(basic("alice", t.secret)))).toEqual({ refused: true });
     expect(revokeToken({ user: "bob" }, t.id)).toBe(true);
-    expect(authenticate(req(`Bearer ${t.secret}`))).toEqual({ refused: true });
+    expect(await authenticate(req(`Bearer ${t.secret}`))).toEqual({ refused: true });
   });
 });
 
