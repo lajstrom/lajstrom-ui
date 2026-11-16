@@ -2,8 +2,8 @@
 
 The UI image, with `LAJSTROM_API_UPSTREAM`, in front of a Lajstrom built from source. Playwright
 signs in through the form and opens every screen: the repository list, each repo with its first
-package and that package's newest version, tokens, the audit log, access, the screens of the
-proposed endpoints and the API page. A test fails on an uncaught error, a page that stays empty,
+package and that package's newest version, tokens, the audit log, access, the registries,
+search and the API page. A test fails on an uncaught error, a page that stays empty,
 or an answer of the API that the UI does not expect. A `404` for a path the server does not know
 is expected only for an operation the UI proposes (`x-lajstrom-status: proposed` in
 `public/openapi.yaml`). Anything else means the UI calls what the server does not have.
