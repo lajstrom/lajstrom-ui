@@ -98,6 +98,40 @@ describe("create", () => {
     expect(await refusal({ ...group, group: { members: ["hub"], paths: { hub: ["a/**"] } } })).toMatchObject({ field: "group.paths.hub" });
   });
 
+  it("creates an npm proxy of the upstream npmjs and an npm group of a hosted repo and proxies, in order (proxy-and-group.md §2.4)", async () => {
+    signIn("admin");
+    const proxy = await createRepo({ format: "npm", name: "registry", registry: "zot", kind: "proxy", upstream: { name: "npmjs", metadataTTL: "1h", allow: ["@types/*", "react*"] } });
+    expect(proxy).toMatchObject({ prefix: "npm/registry", kind: "proxy", registry: "zot", policy: null });
+    expect(proxy.upstream).toEqual({ name: "npmjs", metadataTTL: "1h", negativeTTL: "2m", offline: false, allow: ["@types/*", "react*"], deny: [] });
+    expect(proxy.stats).toMatchObject({ packages: 0, versions: 0 });
+
+    const group = await createRepo({ format: "npm", name: "web", kind: "group", group: { members: ["registry", "internal", "npmjs"], merge: ["lodash"] } });
+    expect(group).toMatchObject({ prefix: "npm/web", kind: "group" });
+    expect(group.registry).toBeUndefined();
+    expect(group.policy).toBeUndefined();
+    expect((await get("npm", "web")).group).toEqual({ members: ["registry", "internal", "npmjs"], merge: ["lodash"] });
+    // Without merge, a group's resource says it has none.
+    expect((await createRepo({ format: "npm", name: "pair", kind: "group", group: { members: ["npmjs"] } })).group).toEqual({ members: ["npmjs"], merge: [] });
+  });
+
+  it("refuses an npm proxy and an npm group where the server does, at the field it names", async () => {
+    signIn("admin");
+    const proxy = { format: "npm", name: "p", registry: "zot", kind: "proxy" as const };
+    expect(await refusal({ ...proxy, upstream: { name: "dockerhub" } })).toMatchObject({ field: "upstream.name", message: 'upstream.name: "dockerhub" is not an upstream of format npm (npmjs)' });
+    expect(await refusal({ ...proxy, upstream: { name: "npmjs", negativeTTL: "25h" } })).toMatchObject({ field: "upstream.negativeTTL" });
+    expect(await refusal({ ...proxy, upstream: { name: "npmjs", allow: ["@acme /*"] } })).toMatchObject({ field: "upstream.allow" });
+
+    await createRepo({ format: "npm", name: "staging", registry: "zot" });
+    const group = { format: "npm", name: "g", kind: "group" as const };
+    expect(await refusal({ ...group, group: { members: ["internal", "staging"] } })).toMatchObject({ field: "group.members", message: expect.stringContaining('"staging" is a second hosted repo') });
+    expect(await refusal({ ...group, group: { members: ["npmjs", "all"] } })).toMatchObject({ field: "group.members", message: expect.stringContaining('"all" is a group') });
+    expect(await refusal({ ...group, group: { members: ["internal", "hub"] } })).toMatchObject({ field: "group.members", message: expect.stringContaining("not a repo of format npm") });
+    expect(await refusal({ ...group, group: { members: ["npmjs", "npmjs"] } })).toMatchObject({ field: "group.members", message: expect.stringContaining("named twice") });
+    expect(await refusal({ ...group, group: { members: ["npmjs"], merge: ["has space"] } })).toMatchObject({ field: "group.merge" });
+    expect(await refusal({ ...group, group: { members: ["npmjs"], paths: { npmjs: ["*"] } } })).toMatchObject({ field: "group.paths", message: "group.paths: only a group of oci repos has paths" });
+    expect(await refusal({ ...group, registry: "zot", group: { members: ["npmjs"] } })).toMatchObject({ field: "registry" });
+  });
+
   it("needs the admin role", async () => {
     signIn("bob");
     await expect(createRepo({ format: "apt", name: "more", registry: "zot" })).rejects.toMatchObject({ status: 403 });
@@ -148,11 +182,37 @@ describe("change", () => {
     await expect(updateRepo("oci", "hub", { kind: "hosted", anonymousRead: true })).rejects.toMatchObject({ status: 400 });
   });
 
+  it("merges an npm proxy's upstream and an npm group's merged names for a maintainer; its members need the admin role (docs/api.md, Change)", async () => {
+    bindings.push({ id: 98, principal: "user:carol", role: "maintainer", repoMask: "npm/*", createdAt: new Date().toISOString() });
+    signIn("carol");
+    const npmjs = await updateRepo("npm", "npmjs", { upstream: { offline: true, deny: ["@acme/*", "@corp/*"] } });
+    expect(npmjs.upstream).toEqual({ name: "npmjs", metadataTTL: "10m", negativeTTL: "2m", offline: true, allow: [], deny: ["@acme/*", "@corp/*"] });
+    const all = await updateRepo("npm", "all", { group: { merge: ["lodash"] } });
+    expect(all.group).toEqual({ members: ["internal", "npmjs"], merge: ["lodash"] });
+    // The members sent back in their order need manage alone; in another, the admin role.
+    await updateRepo("npm", "all", { group: { members: ["internal", "npmjs"] } });
+    await expect(updateRepo("npm", "all", { group: { members: ["npmjs", "internal"] } })).rejects.toMatchObject({ status: 403, message: expect.stringMatching(/^group\.members/) });
+    await expect(updateRepo("npm", "all", { group: { paths: { npmjs: ["*"] } } })).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/^group\.paths/) });
+    await expect(updateRepo("npm", "all", { policy: { maxFileSize: 1 } })).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/^policy: a group/) });
+    bindings.pop();
+
+    signIn("admin");
+    expect((await updateRepo("npm", "all", { group: { members: ["npmjs", "internal"], merge: [] } })).group).toEqual({ members: ["npmjs", "internal"], merge: [] });
+    await expect(updateRepo("npm", "all", { group: { members: ["npmjs", "internal", "staging"] } })).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/^group\.members\[2\]/) });
+    await updateRepo("npm", "all", { group: { members: ["internal", "npmjs"] } });
+    await updateRepo("npm", "npmjs", { upstream: { offline: false, deny: ["@acme/*"] } });
+    // A server turns an npm proxy into a hosted repo; the demo says it does not.
+    await expect(updateRepo("npm", "npmjs", { kind: "hosted" })).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/^kind: the demo does not/) });
+  });
+
   it("refuses a prefetch of an offline proxy (409), and takes it again once online", async () => {
     signIn("admin");
     await updateRepo("oci", "ghcr", { upstream: { offline: true } });
     await expect(prefetch("oci", "ghcr", { images: ["oras-project/oras:v1"], platforms: ["linux/amd64"] })).rejects.toMatchObject({ status: 409 });
     await updateRepo("oci", "ghcr", { upstream: { offline: false } });
+    await updateRepo("npm", "npmjs", { upstream: { offline: true } });
+    await expect(prefetch("npm", "npmjs", { names: ["left-pad"] })).rejects.toMatchObject({ status: 409, message: expect.stringContaining("offline") });
+    await updateRepo("npm", "npmjs", { upstream: { offline: false } });
   });
 });
 
@@ -172,6 +232,25 @@ describe("delete", () => {
     await deleteRepo("pypi", "payments", true);
     const list = await apiGet<{ repos: Repo[] }>(apiPath("repos"));
     expect(list.repos.some((r) => r.format === "pypi" && r.name === "payments")).toBe(false);
+  });
+
+  it("keeps an npm proxy its groups have, and deletes it with what it fetched, by force; one made again under its name is empty", async () => {
+    signIn("admin");
+    await expect(deleteRepo("npm", "npmjs", true)).rejects.toMatchObject({ status: 409, message: expect.stringContaining("npm/all") });
+    await createRepo({ format: "npm", name: "mirror", registry: "zot", kind: "proxy", upstream: { name: "npmjs" } });
+    await createRepo({ format: "npm", name: "front", kind: "group", group: { members: ["internal", "mirror"] } });
+    await expect(deleteRepo("npm", "mirror", true)).rejects.toMatchObject({ status: 409, message: expect.stringContaining("npm/front") });
+    await deleteRepo("npm", "front", false);
+
+    await prefetch("npm", "mirror", { names: ["react"], allVersions: true });
+    expect((await get("npm", "mirror")).stats).toMatchObject({ packages: 1, versions: 4 });
+    await expect(deleteRepo("npm", "mirror", false)).rejects.toMatchObject({ status: 409, message: "repo npm/mirror has 4 versions; delete them or pass force=true" });
+    await deleteRepo("npm", "mirror", true);
+    await expect(get("npm", "mirror")).rejects.toMatchObject({ status: 404 });
+    await createRepo({ format: "npm", name: "mirror", registry: "zot", kind: "proxy", upstream: { name: "npmjs" } });
+    expect((await get("npm", "mirror")).stats).toMatchObject({ packages: 0, versions: 0 });
+    expect((await prefetch("npm", "mirror", { names: ["react"] })).results).toEqual([{ name: "react", version: "19.2.0", status: "fetched" }]);
+    expect((await get("npm", "internal")).kind).toBe("hosted");
   });
 });
 

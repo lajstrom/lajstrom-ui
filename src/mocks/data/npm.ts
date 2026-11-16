@@ -5,10 +5,10 @@ import type { ReferrerSpec, VersionSpec } from "./builders";
 import { ago } from "./time";
 
 /** The fields of package.json a version document keeps (manifest-profile.md §2, npm). */
-type PackageJson = {
+export type PackageJson = {
   description: string;
   license: string;
-  author: string | { name: string; email?: string };
+  author?: string | { name: string; email?: string };
   homepage?: string;
   repository?: string;
   keywords?: string[];
@@ -22,78 +22,88 @@ type PackageJson = {
   scripts?: Record<string, string>;
 };
 
-type NpmRelease = {
+export type NpmRelease = {
   version: string;
   /** Size of the tarball in bytes. */
   size: number;
   at: string;
-  by: string;
   referrers?: ReferrerSpec[];
   /** What this version's package.json says differently from the package's. */
   changes?: Partial<PackageJson>;
 };
 
-/** A digest of the given length in bytes, as base64: the mock has no tarball to hash. */
-function fakeDigest(seed: string, bytes: number): string {
+/** A digest of the given length in bytes, as hex: the mock has no tarball to hash. */
+function fakeHex(seed: string, bytes: number): string {
   let hex = "";
   for (let i = 0; hex.length < bytes * 2; i++) hex += sha256Hex(`${seed}#${i}`);
-  const bin = hex
-    .slice(0, bytes * 2)
-    .match(/../g)!
-    .map((h) => String.fromCharCode(parseInt(h, 16)))
-    .join("");
-  return btoa(bin);
+  return hex.slice(0, bytes * 2);
 }
 
-/** One manifest per version, its tarball the one file layer; npm has no variant. */
-function npmPackage(repo: string, name: string, pkg: PackageJson, releases: NpmRelease[]): VersionSpec[] {
+const base64 = (hex: string) =>
+  btoa(
+    hex
+      .match(/../g)!
+      .map((h) => String.fromCharCode(parseInt(h, 16)))
+      .join(""),
+  );
+
+/** The manifest of one version, its tarball the one file layer; npm has no variant. Published by
+ * a principal, or fetched by a proxy from the upstream at origin, its URL: then the digests are
+ * the upstream's, the same in every repo that fetches them, and the manifest has the origin of
+ * manifest-profile.md §3.1 instead of an uploader. */
+export function npmVersion(repo: string, name: string, pkg: PackageJson, rel: NpmRelease, from: { by: string } | { origin: string }): VersionSpec {
   const [, base] = npmScope(name);
-  return releases.map((rel): VersionSpec => {
-    // The file name npm serves the tarball under: the name without its scope (§2, npm).
-    const filename = `${base}-${rel.version}.tgz`;
-    const seed = `npm:${repo}/${name}@${rel.version}`;
-    const integrity = `sha512-${fakeDigest(seed, 64)}`;
-    const shasum = sha256Hex(`${seed}:sha1`).slice(0, 40);
-    const doc = { ...pkg, ...rel.changes };
-    const { repository, ...fields } = doc;
-    const scripts = doc.scripts ?? {};
-    return {
-      format: "npm",
-      repo,
+  // The file name npm serves the tarball under: the name without its scope (§2, npm).
+  const filename = `${base}-${rel.version}.tgz`;
+  const seed = "origin" in from ? `${from.origin}${name}@${rel.version}` : `npm:${repo}/${name}@${rel.version}`;
+  const sha512 = fakeHex(seed, 64);
+  const integrity = `sha512-${base64(sha512)}`;
+  const shasum = sha256Hex(`${seed}:sha1`).slice(0, 40);
+  const doc = { ...pkg, ...rel.changes };
+  const { repository, ...fields } = doc;
+  const scripts = doc.scripts ?? {};
+  return {
+    format: "npm",
+    repo,
+    name,
+    version: rel.version,
+    files: [
+      {
+        name: filename,
+        mediaType: "application/vnd.lajstrom.npm.tarball.v1.tar+gzip",
+        size: rel.size,
+        attrs: { "lajstrom.npm.integrity": integrity, "lajstrom.npm.shasum": shasum },
+      },
+    ],
+    metadata: {
       name,
       version: rel.version,
-      files: [
-        {
-          name: filename,
-          mediaType: "application/vnd.lajstrom.npm.tarball.v1.tar+gzip",
-          size: rel.size,
-          attrs: { "lajstrom.npm.integrity": integrity, "lajstrom.npm.shasum": shasum },
-        },
-      ],
-      metadata: {
+      // The version document without dist, readme and the keys that begin with _.
+      manifest: {
         name,
         version: rel.version,
-        // The version document without dist, readme and the keys that begin with _.
-        manifest: {
-          name,
-          version: rel.version,
-          ...fields,
-          ...(repository ? { repository: { type: "git", url: `git+${repository}.git` } } : {}),
-        },
-        readme: `# ${name}\n\n${doc.description}\n`,
-        filename,
-        size: rel.size,
-        integrity,
-        shasum,
-        sha256: sha256Hex(`${seed}:sha256`),
-        hasShrinkwrap: false,
-        hasInstallScript: ["preinstall", "install", "postinstall"].some((s) => s in scripts),
+        ...fields,
+        ...(repository ? { repository: { type: "git", url: `git+${repository}.git` } } : {}),
       },
-      createdAt: rel.at,
-      uploadedBy: rel.by,
-      referrers: rel.referrers,
-    };
-  });
+      readme: `# ${name}\n\n${doc.description}\n`,
+      filename,
+      size: rel.size,
+      integrity,
+      shasum,
+      sha256: sha256Hex(`${seed}:sha256`),
+      hasShrinkwrap: false,
+      hasInstallScript: ["preinstall", "install", "postinstall"].some((s) => s in scripts),
+    },
+    createdAt: rel.at,
+    referrers: rel.referrers,
+    // The URL a client of npmjs.org asks for: the scope's / as it is.
+    ...("origin" in from ? { origin: { url: `${from.origin}${name}/-/${filename}`, checksum: `sha512:${sha512}` } } : { uploadedBy: from.by }),
+  };
+}
+
+/** One manifest per version, each published by its principal. */
+function npmPackage(repo: string, name: string, pkg: PackageJson, releases: (NpmRelease & { by: string })[]): VersionSpec[] {
+  return releases.map(({ by, ...rel }) => npmVersion(repo, name, pkg, rel, { by }));
 }
 
 const REPO = "internal";

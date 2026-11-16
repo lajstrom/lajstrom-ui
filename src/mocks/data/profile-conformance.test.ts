@@ -10,11 +10,20 @@ import { aptVersions } from "./apt";
 import { buildVersion, EMPTY_CONFIG } from "./builders";
 import { mavenVersions } from "./maven";
 import { npmDistTags, npmVersions } from "./npm";
+import { fetchedVersion, packumentOf } from "./npmjs";
 import { pypiVersions } from "./pypi";
 import { rawVersions } from "./raw";
 import { rpmVersions } from "./rpm";
 
-const specs = [...rawVersions(), ...pypiVersions(), ...aptVersions(), ...mavenVersions(), ...npmVersions(), ...rpmVersions()];
+// What an npm proxy fetches from the demo's npmjs: every version of the names it knows, and of
+// names it makes up.
+const NPMJS = "https://registry.npmjs.org/";
+const fetched = ["left-pad", "lodash", "react", "clsx", "express", "typescript", "made-up", "@types/made-up"].flatMap((name) => {
+  const p = packumentOf(name)!;
+  return p.versions.map((v) => fetchedVersion("npmjs", NPMJS, p, v));
+});
+
+const specs = [...rawVersions(), ...pypiVersions(), ...aptVersions(), ...mavenVersions(), ...npmVersions(), ...rpmVersions(), ...fetched];
 const built = specs.map((s) => ({ spec: s, v: buildVersion(s, "art.example.com") }));
 
 const required = ["lajstrom.schema", "lajstrom.format", "lajstrom.repo", "lajstrom.name", "lajstrom.version", "org.opencontainers.image.created"];
@@ -107,6 +116,26 @@ describe("mock manifests follow the manifest profile", () => {
       const doc = md.manifest as Record<string, unknown>;
       expect(doc).toMatchObject({ name: spec.name, version: spec.version });
       expect(Object.keys(doc).filter((k) => k === "dist" || k === "readme" || k.startsWith("_"))).toEqual([]);
+    },
+  );
+
+  // §3.1: a version a proxy fetched has the URL its tarball was asked for and the checksum that
+  // was verified, the integrity's sha512, instead of lajstrom.uploaded-by; its time is the
+  // upstream's publish time, so two fetches of the same bytes build the same manifest.
+  it.each(built.filter(({ spec }) => spec.origin).map(({ spec, v }) => [`${spec.name}@${spec.version}`, spec, v] as const))(
+    "fetched %s",
+    (_label, spec, v) => {
+      const a = v.manifest.annotations;
+      const tarball = v.manifest.layers[0]!.annotations!;
+      expect(a["lajstrom.origin.url"]).toBe(`${NPMJS}${spec.name}/-/${tarball["org.opencontainers.image.title"]}`);
+      const sha512 = [...atob(tarball["lajstrom.npm.integrity"]!.slice("sha512-".length))].map((c) => c.charCodeAt(0).toString(16).padStart(2, "0")).join("");
+      expect(a["lajstrom.origin.checksum"]).toBe(`sha512:${sha512}`);
+      expect(a["lajstrom.uploaded-by"]).toBeUndefined();
+      expect(v.uploadedBy).toBeNull();
+      expect(a["org.opencontainers.image.created"]).toBe(packumentOf(spec.name)!.versions.find((x) => x.version === spec.version)!.at);
+      // The upstream's checksum is the same in every repo that fetches the version.
+      const again = fetchedVersion("other", NPMJS, packumentOf(spec.name)!, { version: spec.version, at: spec.createdAt, size: v.size });
+      expect(again.origin?.checksum).toBe(a["lajstrom.origin.checksum"]);
     },
   );
 
