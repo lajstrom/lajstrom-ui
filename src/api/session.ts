@@ -61,6 +61,12 @@ export function initSession(storageKey: string): void {
   current = read();
 }
 
+/** The localStorage key of the session: the demo's or the real one. The DPoP key of the session
+ * is kept under the same name (src/api/dpop-key.ts). */
+export function sessionStorageKey(): string {
+  return key;
+}
+
 /** The session, or null when signed out or once the token has expired. Pure, so that React can
  * read it while rendering (src/app/session.ts). */
 export function getSession(): Session | null {
