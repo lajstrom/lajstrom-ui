@@ -4,11 +4,15 @@
 // login in GET /api/v1/info), POST/GET/DELETE /api/v1/users/{name}/tokens with the password;
 // GET /api/v1/whoami and POST /api/v1/bootstrap.
 
+import { basePath } from "@/app/base";
+import { config } from "@/app/config";
+import { safeRedirect } from "@/lib/redirect";
 import { sha256Hex } from "@/lib/sha256";
 
 import { ApiError, apiGetAs, apiPath, apiSend, basicAuth } from "./client";
-import { dpopSupported } from "./dpop";
+import { dpopSupported, jwkThumbprint, publicJwk } from "./dpop";
 import { forgetKey, signInKey } from "./dpop-key";
+import { oidcLoginUrl, pkceChallenge, pkceVerifier, rememberVerifier } from "./oidc";
 import { getSession, setSession } from "./session";
 import type { BootstrapRequest, CreatedToken, LoginRequest, LoginToken, ServerInfo, Token, User, WhoAmI } from "./types";
 
@@ -22,6 +26,22 @@ export class SignInError extends Error {
     super(message);
     this.name = "SignInError";
   }
+}
+
+/** How a person may sign in, as the sign-in page offers it: info.authModes, the modes this UI
+ * knows; a server that does not say keeps the password and the token. OIDC needs info.login too:
+ * only then does the server's login hand a web UI a code. */
+export function signInModes(info: Pick<ServerInfo, "authModes" | "login"> | undefined): { password: boolean; token: boolean; oidc: boolean } {
+  const modes: unknown = info?.authModes;
+  if (!Array.isArray(modes)) return { password: true, token: true, oidc: false };
+  return { password: modes.includes("password"), token: modes.includes("token"), oidc: modes.includes("oidc") && info?.login !== undefined };
+}
+
+/** A lifetime in seconds as the form says it: "12 hours", "90 minutes". */
+export function lifetimeText(seconds: number): string {
+  const unit = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+  if (seconds % 3600 === 0) return unit(seconds / 3600, "hour");
+  return unit(Math.max(1, Math.round(seconds / 60)), "minute");
 }
 
 /** A token name unique among the user's live tokens (the server refuses a taken one with 409). */
@@ -95,6 +115,38 @@ export async function signInWithPassword(user: string, password: string): Promis
     throw err;
   }
   setSession({ token: token.secret, user: name, tokenId: token.id, expiresAt: token.expiresAt, tokenType: "Bearer" });
+}
+
+/**
+ * Where to send the person to sign in through the server's OIDC login, after this tab has kept
+ * the PKCE verifier: the server's /-/oidc/login with the challenge, the thumbprint of this
+ * browser's key, and return_to, this UI's sign-in page, where the code comes back
+ * (redeemOidcCode). redirect is where to go once signed in.
+ */
+export async function oidcSignInUrl(redirect: string | undefined): Promise<string> {
+  if (!dpopSupported()) throw new SignInError("Single sign-on needs WebCrypto, which a browser has on https or on localhost only.");
+  const key = await signInKey();
+  const verifier = pkceVerifier();
+  try {
+    rememberVerifier(verifier);
+  } catch {
+    throw new SignInError("Single sign-on needs this tab's session storage, which the browser does not allow.");
+  }
+  const returnTo = new URL(`${basePath()}sign-in`, window.location.origin);
+  const to = safeRedirect(redirect);
+  if (to !== "/") returnTo.searchParams.set("redirect", to);
+  return oidcLoginUrl(config().apiBaseUrl || window.location.origin, {
+    returnTo: returnTo.href,
+    challenge: await pkceChallenge(verifier),
+    jkt: await jwkThumbprint(await publicJwk(key.publicKey)),
+  });
+}
+
+/** Redeems the code an OIDC login handed back (src/api/oidc.ts, takeOidcCallback) with the
+ * verifier this tab kept and a proof of the key whose thumbprint the login named. */
+export async function redeemOidcCode(code: string, verifier: string | null): Promise<void> {
+  if (!verifier) throw new SignInError("This single sign-on was not started in this tab. Sign in again.");
+  await login({ code, codeVerifier: verifier });
 }
 
 /** Signs in with a personal access token the user already has; it is never revoked by sign-out.
