@@ -24,7 +24,7 @@ git clone https://github.com/lajstrom/lajstrom ../lajstrom   # at the commit of 
 LAJSTROM_E2E_REGISTRY=127.0.0.1:5055 e2e/server.sh ../lajstrom /tmp/lajstrom-e2e
 
 docker build -t lajstrom-ui:e2e .
-docker run -d --name e2e-ui -p 127.0.0.1:8080:8080 -e LAJSTROM_UI_MOCK=false -e LAJSTROM_UI_DEMO=false \
+docker run -d --name e2e-ui -p 127.0.0.1:8080:8080 -e LAJSTROM_UI_PROFILE=test \
   -e LAJSTROM_API_UPSTREAM=http://host.docker.internal:18080 lajstrom-ui:e2e
 
 set -a; . /tmp/lajstrom-e2e/env; set +a

@@ -1,10 +1,14 @@
 # syntax=docker/dockerfile:1
 #
 # The Lajstrom web UI: static files served by an unprivileged nginx, configured at start from
-# environment variables (docker/40-lajstrom-ui.sh). Build from the repository root:
+# environment variables (docker/40-lajstrom-ui.sh). One image for every environment: dev, test
+# and prod are profiles of it, LAJSTROM_UI_PROFILE, chosen at start
+# (docs/adr/0004-one-image-profile-at-start.md). Build from the repository root:
 #
 #   docker build -t ghcr.io/lajstrom/lajstrom-ui:dev .
 #   docker run --rm -p 8081:8080 -e LAJSTROM_UI_MOCK=true ghcr.io/lajstrom/lajstrom-ui:dev
+#   docker run --rm -p 8081:8080 -e LAJSTROM_UI_PROFILE=dev \
+#     -e LAJSTROM_API_UPSTREAM=http://host.docker.internal:8080 ghcr.io/lajstrom/lajstrom-ui:dev
 #
 # A release builds the image from its tar.gz instead, so that the image serves the very files of
 # the bundle (.github/workflows/release.yml): the unpacked bundle replaces the stage `bundle`,
@@ -36,9 +40,11 @@ LABEL org.opencontainers.image.title="lajstrom-ui" \
       org.opencontainers.image.source="https://github.com/lajstrom/lajstrom-ui" \
       org.opencontainers.image.licenses="Apache-2.0"
 
-# Runtime configuration, see README.md. Mock data is off unless asked for.
-ENV LAJSTROM_UI_API_URL="" \
-    LAJSTROM_UI_MOCK="false" \
+# Runtime configuration, see README.md. The profile is prod unless another is chosen: no demo, no
+# mock, no source maps. LAJSTROM_UI_DEMO and LAJSTROM_UI_MOCK are not set here, so that their
+# defaults are the profile's; one that is set wins over it.
+ENV LAJSTROM_UI_PROFILE="prod" \
+    LAJSTROM_UI_API_URL="" \
     LAJSTROM_UI_TITLE="Lajstrom" \
     LAJSTROM_API_UPSTREAM=""
 
