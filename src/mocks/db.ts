@@ -1288,13 +1288,14 @@ const invalid = (message: string): Refusal => ({ status: 400, code: "INVALID", m
 
 /** Repo names: lowercase letters and digits separated by single '.', '_' or '-' (manifest-profile.md §4.1). */
 const REPO_NAME = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
-const FORMATS = ["raw", "pypi", "apt", "maven", "oci"] as const;
+/** The formats of the server: its plugins' (GET /api/v1/info) and oci, which needs none. */
+const FORMATS: string[] = [...serverInfo.formats.map((f) => f.name), "oci"];
 
 /** Why a repo mask is not one (rbac.md §3: <format>/<repo>, * for a whole segment); null when it is. */
 export function maskRefusal(mask: unknown): Refusal | null {
   const [format, repo, ...rest] = typeof mask === "string" ? mask.split("/") : [];
   if (format === undefined || repo === undefined || rest.length) return invalid("repoMask: <format>/<repo>, * for a whole segment, such as oci/* or */talos");
-  if (format !== "*" && !(FORMATS as readonly string[]).includes(format)) return invalid(`repoMask: ${format} is not a format of this server (${FORMATS.join(", ")})`);
+  if (format !== "*" && !FORMATS.includes(format)) return invalid(`repoMask: ${format} is not a format of this server (${FORMATS.join(", ")})`);
   if (repo !== "*" && !REPO_NAME.test(repo)) return invalid(`repoMask: ${repo} is not a repo name`);
   return null;
 }
@@ -1359,8 +1360,9 @@ const forbidden = (message: string): Refusal => ({ status: 403, code: "FORBIDDEN
 /** Names a registry's storage or routes keep for themselves (docs/api.md, Repos; ADR 0017). */
 const reservedName = (name: string) => /(blobs|\.uploads|\.sync)$/.test(name) || ["index.json", "oci-layout", "manifests", "referrers", "tags"].includes(name);
 
-/** The formats whose repos may be proxies and groups: oci, which needs no plugin; npm, the one
- * plugin that has them, is not a format of the mock (proxy-and-group.md §1). */
+/** The formats whose repos may be proxies and groups in the demo: oci, which needs no plugin. npm,
+ * the one plugin that has them (proxy-and-group.md §1), has hosted repos only here: the mock
+ * prefetches images, not names. */
 const KINDED_FORMATS = ["oci"];
 
 /** POST /api/v1/repos: the admin creates a repo (docs/api.md, Repos): hosted, a proxy of an
@@ -1371,7 +1373,7 @@ export function createRepo(body: unknown, by: string): MockRepo | Refusal {
   const known = ["format", "name", "registry", "kind", "anonymousRead", "policy", "upstream", "group"];
   const unknown = Object.keys(b).find((k) => !known.includes(k));
   if (unknown) return invalid(`${unknown}: not a field of a repo`);
-  if (!FORMATS.includes(b.format as (typeof FORMATS)[number])) return invalid(`format: one of ${FORMATS.join(", ")}`);
+  if (typeof b.format !== "string" || !FORMATS.includes(b.format)) return invalid(`format: one of ${FORMATS.join(", ")}`);
   const format = b.format as RepoSeed["format"];
   if (typeof b.name !== "string" || b.name.length > 64 || !REPO_NAME.test(b.name)) {
     return invalid(`name: "${String(b.name ?? "")}" must be lowercase letters and digits separated by single '.', '_' or '-', at most 64 characters`);

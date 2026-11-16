@@ -72,6 +72,10 @@ describe("deploy tokens over a mask", () => {
     for (const repoMask of ["payments", "npmx/*", "*/Bad_Name", "a/b/c"]) {
       await expect(createMaskToken({ repoMask, name: "x", scopes: ["read"] }, "admin", "admin")).rejects.toMatchObject({ status: 400 });
     }
+    // Every format of the server, npm and rpm too, and oci, which needs no plugin.
+    for (const repoMask of ["npm/*", "rpm/el9", "oci/*"]) {
+      await expect(createMaskToken({ repoMask, name: `over ${repoMask}`, scopes: ["read"] }, "admin", "admin")).resolves.toMatchObject({ repoMask });
+    }
     await createMaskToken({ repoMask: "raw/*", name: "twice", scopes: ["write"] }, "admin", "admin");
     await expect(createMaskToken({ repoMask: "raw/*", name: "twice", scopes: ["write"] }, "admin", "admin")).rejects.toMatchObject({ status: 409 });
   });

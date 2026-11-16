@@ -60,6 +60,7 @@ describe("create", () => {
     signIn("admin");
     const hosted = await createRepo({ format: "raw", name: "made-here", registry: "zot", anonymousRead: true });
     expect(hosted).toMatchObject({ prefix: "raw/made-here", kind: "hosted", registry: "zot", anonymousRead: true, policy: null });
+    expect(await createRepo({ format: "rpm", name: "el10", registry: "zot", anonymousRead: false })).toMatchObject({ prefix: "rpm/el10", kind: "hosted" });
 
     const proxy = await createRepo({ format: "oci", name: "quay", registry: "zot", kind: "proxy", upstream: { name: "quay", deny: ["private/*"] } });
     expect(proxy.upstream).toEqual({ name: "quay", metadataTTL: "10m", negativeTTL: "2m", offline: false, allow: [], deny: ["private/*"] });
