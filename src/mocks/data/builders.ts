@@ -54,13 +54,17 @@ export type VersionSpec = {
   /** Format annotations without the "lajstrom." prefix: deb.suite, maven.groupId, … */
   attrs?: Record<string, string>;
   createdAt: string;
-  uploadedBy: string;
   referrers?: ReferrerSpec[];
   /** CI provenance passed through from the client. */
   source?: { url: string; revision: string };
   /** Annotations missing or the metadata layer unreadable: reindex flags the row (§2). */
   degraded?: boolean;
-};
+} & (
+  | { uploadedBy: string; origin?: never }
+  /** A version a proxy fetched (§3.1): the URL of its file and the upstream's checksum that was
+   * verified, `<algorithm>:<hex>`, and no uploader. */
+  | { origin: { url: string; checksum: string }; uploadedBy?: never }
+);
 
 const MEDIA_MANIFEST = "application/vnd.oci.image.manifest.v1+json";
 
@@ -167,7 +171,9 @@ export function buildVersion(spec: VersionSpec, host: string): BuiltVersion {
     "lajstrom.version": spec.version,
     ...(variant ? { "lajstrom.variant": variant } : {}),
     ...Object.fromEntries(Object.entries(spec.attrs ?? {}).map(([k, v]) => [`lajstrom.${k}`, v])),
-    "lajstrom.uploaded-by": spec.uploadedBy,
+    ...(spec.origin
+      ? { "lajstrom.origin.url": spec.origin.url, "lajstrom.origin.checksum": spec.origin.checksum }
+      : { "lajstrom.uploaded-by": spec.uploadedBy }),
     "org.opencontainers.image.created": spec.createdAt,
     ...(spec.source
       ? {
@@ -215,7 +221,7 @@ export function buildVersion(spec: VersionSpec, host: string): BuiltVersion {
     indexedAt,
     size: spec.files.reduce((n, f) => n + f.size, 0),
     fileCount: spec.files.length,
-    uploadedBy: spec.degraded ? null : spec.uploadedBy,
+    uploadedBy: spec.degraded ? null : (spec.uploadedBy ?? null),
     referrers: { signatures: count("signature"), sboms: count("sbom"), attestations: count("attestation") },
     files,
     metadata: spec.metadata,

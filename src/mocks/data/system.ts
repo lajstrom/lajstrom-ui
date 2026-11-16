@@ -237,15 +237,39 @@ export const repoSeeds: RepoSeed[] = [
     createdAt: ago(57),
     reindex: "idle",
   },
+  // §2.4's: a proxy of npmjs.org that never fetches Acme's scope, and one address for it and the
+  // hosted npm/internal, whose names hide the proxy's.
+  {
+    format: "npm",
+    name: "npmjs",
+    kind: "proxy",
+    registry: "zot",
+    anonymousRead: false,
+    policy: null,
+    upstream: { name: "npmjs", metadataTTL: "10m", negativeTTL: "2m", offline: false, allow: [], deny: ["@acme/*"] },
+    createdAt: ago(56),
+    reindex: "idle",
+  },
+  {
+    format: "npm",
+    name: "all",
+    kind: "group",
+    anonymousRead: false,
+    policy: null,
+    group: { members: ["internal", "npmjs"], merge: [] },
+    createdAt: ago(56),
+    reindex: "idle",
+  },
 ];
 
 /** upstreams[] of the configuration (proxy-and-group.md §2.1): the API names them, never their
- * URL or credentials. dockerHub: a path of one component is library/<path> (§11.7). */
-export const upstreams: { name: string; format: string; dockerHub?: boolean }[] = [
-  { name: "dockerhub", format: "oci", dockerHub: true },
-  { name: "ghcr", format: "oci" },
-  { name: "quay", format: "oci" },
-  { name: "npmjs", format: "npm" },
+ * URL or credentials; the URL is the origin of what a proxy fetches (manifest-profile.md §3.1).
+ * dockerHub: a path of one component is library/<path> (§11.7). */
+export const upstreams: { name: string; format: string; url: string; dockerHub?: boolean }[] = [
+  { name: "dockerhub", format: "oci", url: "https://registry-1.docker.io", dockerHub: true },
+  { name: "ghcr", format: "oci", url: "https://ghcr.io" },
+  { name: "quay", format: "oci", url: "https://quay.io" },
+  { name: "npmjs", format: "npm", url: "https://registry.npmjs.org/" },
 ];
 
 /** A user's uid in the mock, stable across reloads: the server's are UUIDv7, these only look so. */

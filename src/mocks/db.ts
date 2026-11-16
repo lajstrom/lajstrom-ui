@@ -33,9 +33,10 @@ import { packagePath } from "@/lib/profile";
 import { sha256Hex } from "@/lib/sha256";
 
 import { aptVersions } from "./data/apt";
-import { buildVersion, type BuiltVersion } from "./data/builders";
+import { buildVersion, type BuiltVersion, type VersionSpec } from "./data/builders";
 import { mavenVersions } from "./data/maven";
 import { npmDistTags, npmVersions } from "./data/npm";
+import { fetchedVersion, packumentOf } from "./data/npmjs";
 import { pypiVersions } from "./data/pypi";
 import { rawVersions } from "./data/raw";
 import { reindexFindings } from "./data/reindex";
@@ -44,7 +45,7 @@ import { bindings, registries, repoSeeds, roleActions, serverInfo, tokens, uidOf
 import { passwords } from "./data/system";
 import { ago, ahead, before, HOST } from "./data/time";
 import { getPersona, type Persona } from "./persona";
-import { durationSeconds, groupRefusal, isPackageName, mergeGroup, mergeUpstream, prefetchImages, upstreamRefusal } from "./proxy";
+import { durationSeconds, groupRefusal, isPackageName, mergeGroup, mergeUpstream, prefetchImages, prefetchNames, upstreamRefusal } from "./proxy";
 import { keep, persist } from "./state";
 import { upstreams } from "./data/system";
 import type { PrefetchResult, RepoGroup, Upstream } from "@/api/types";
@@ -1066,6 +1067,8 @@ type MockEvent = {
 function auditLog(): (MockEvent & { id: number })[] {
   const events: MockEvent[] = [];
   for (const v of allVersions) {
+    // What a proxy fetched has its row proxy.fetch, by the caller of the request that fetched it.
+    if (v.annotations["lajstrom.origin.url"]) continue;
     const format = v.format;
     const principal = v.uploadedBy ?? "user:admin";
     events.push({
@@ -1210,6 +1213,7 @@ function removeRows(match: (v: Row) => boolean): number {
 
 function dropRepoData(repoKey: string): number {
   byRepo.delete(repoKey);
+  forgetFetched((f) => f.repo === repoKey);
   return removeRows((v) => v.repoKey === repoKey);
 }
 
@@ -1227,6 +1231,7 @@ function yankOf(repo: Repo, name: string, version: string): { yanked?: Yank } {
 const deletedManifests = new Set<string>();
 
 function dropManifest(digest: string): void {
+  forgetFetched((f) => f.digest === digest);
   removeRows((v) => v.digest === digest);
   for (const pkgs of byRepo.values()) {
     for (const [name, list] of pkgs) {
@@ -1360,10 +1365,10 @@ const forbidden = (message: string): Refusal => ({ status: 403, code: "FORBIDDEN
 /** Names a registry's storage or routes keep for themselves (docs/api.md, Repos; ADR 0017). */
 const reservedName = (name: string) => /(blobs|\.uploads|\.sync)$/.test(name) || ["index.json", "oci-layout", "manifests", "referrers", "tags"].includes(name);
 
-/** The formats whose repos may be proxies and groups in the demo: oci, which needs no plugin. npm,
- * the one plugin that has them (proxy-and-group.md §1), has hosted repos only here: the mock
- * prefetches images, not names. */
-const KINDED_FORMATS = ["oci"];
+/** The formats whose repos may be proxies and groups in the demo: oci, which needs no plugin, and
+ * npm, whose plugin has them (proxy-and-group.md §1), its proxies of the demo's npmjs
+ * (data/npmjs.ts). */
+const KINDED_FORMATS = ["oci", "npm"];
 
 /** POST /api/v1/repos: the admin creates a repo (docs/api.md, Repos): hosted, a proxy of an
  * upstream of the configuration, or a group of repos of its format (proxy-and-group.md §2). */
@@ -1431,7 +1436,8 @@ const pathsKey = (paths: RepoGroup["paths"]) => JSON.stringify(Object.entries(pa
 /** PATCH /api/v1/repos/{format}/{repo}: anonymousRead and policy; a proxy's upstream and a
  * group's settings, merged and checked whole; the admin role for another upstream.name, other
  * members or other paths (docs/api.md, Change). {"kind": "hosted"} alone turns a proxy of a
- * format that can adopt its documents into a hosted repo: none of the mock's can. */
+ * format that can adopt its documents into a hosted repo: npm's can on the server, which keeps
+ * the packuments it read; the mock keeps none, so it turns none. */
 export function updateRepo(repo: MockRepo, body: unknown, by: string): MockRepo | Refusal {
   if (!isObject(body)) return invalid("the body must be a JSON object");
   const b = body;
@@ -1448,6 +1454,9 @@ export function updateRepo(repo: MockRepo, body: unknown, by: string): MockRepo 
     if (b.kind !== "hosted") return invalid("kind: only hosted, which a proxy becomes once");
     if (!admin) return forbidden(`kind: turning ${repo.prefix} into a hosted repo needs the admin role`);
     if (kind === "group") return invalid("kind: a group cannot become a hosted repo");
+    if (kind === "proxy" && seed.format === "npm") {
+      return invalid(`kind: the demo does not turn ${repo.prefix} into a hosted repo; a server does, with the dist-tags of the packuments it kept`);
+    }
     if (kind === "proxy") return invalid(`kind: format ${seed.format} cannot turn a proxy into a hosted repo`);
     return repoOf(seed, me);
   }
@@ -1637,16 +1646,44 @@ export function deleteVersions(repo: MockRepo, body: unknown, by: string): Batch
 
 // --- Proxy repos ----------------------------------------------------------------------------
 // The purge of a proxy's cache and a prefetch (docs/api.md). The mock keeps no documents of an
-// upstream, so a purge only writes its audit row; a prefetch of an oci proxy holds what it
-// fetched, kept in the demo, so that a second run finds it held.
+// upstream, so a purge only writes its audit row. A prefetch of an oci proxy holds what it
+// fetched, which the index never lists; one of an npm proxy ingests each version it fetched as an
+// upload would be, and the repo lists it. Both are kept in the demo, so that a second run finds
+// them held.
 
-/** What the backend holds of the proxies' fetches, `<repo>@<digest>`. */
+/** What the backend holds of the oci proxies' fetches, `<repo>@<digest>`. */
 const held = new Set<string>();
 
+/** The versions npm proxies fetched in the demo, with the upstream's URL and the time of the
+ * fetch: built again from the upstream when the demo reloads, as the seed's are. */
+type Fetched = { repo: string; name: string; version: string; url: string; at: string; digest: string };
+const fetched: Fetched[] = [];
+
+function forgetFetched(match: (f: Fetched) => boolean): void {
+  for (let i = fetched.length - 1; i >= 0; i--) if (match(fetched[i]!)) fetched.splice(i, 1);
+}
+
+/** Indexes a version a proxy fetched, as the seed's are, at the time of the fetch. */
+function addFetched(spec: VersionSpec, url: string, at: string): Row {
+  const row: Row = { ...buildVersion(spec, HOST), indexedAt: at, repoKey: `${spec.format}/${spec.repo}`, format: spec.format };
+  allVersions.push(row);
+  const pkgs = byRepo.get(row.repoKey) ?? new Map<string, Row[]>();
+  pkgs.set(row.packageName, [row, ...(pkgs.get(row.packageName) ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+  byRepo.set(row.repoKey, pkgs);
+  fetched.push({ repo: row.repoKey, name: row.packageName, version: row.version, url, at, digest: row.digest });
+  return row;
+}
+
 keep("proxy", {
-  save: () => ({ held: [...held] }),
+  save: () => ({ held: [...held], fetched }),
   load: (data) => {
-    for (const k of (data as { held?: string[] }).held ?? []) held.add(k);
+    const d = data as { held?: string[]; fetched?: Fetched[] };
+    for (const k of d.held ?? []) held.add(k);
+    for (const f of d.fetched ?? []) {
+      const doc = packumentOf(f.name);
+      const v = doc?.versions.find((x) => x.version === f.version);
+      if (doc && v) addFetched(fetchedVersion(f.repo.slice(f.repo.indexOf("/") + 1), f.url, doc, v), f.url, f.at);
+    }
   },
 });
 
@@ -1658,15 +1695,43 @@ export function purgeUpstreamCache(repo: MockRepo, name: string | null, by: stri
   return null;
 }
 
-/** POST …/prefetch: images of an oci proxy; an offline one asks its upstream nothing (409). A
- * format proxy would take names, but the mock has none: only oci repos have the kind here. */
+/** npm's largest file when the policy sets none (Policy in the server's openapi.yaml). */
+const NPM_MAX_FILE_SIZE = 512 * 1024 ** 2;
+
+/** POST …/prefetch: names of an npm proxy, images of an oci proxy; an offline one asks its
+ * upstream nothing (409). */
 export function prefetch(repo: MockRepo, body: unknown, by: string): PrefetchResult | Refusal {
   if (repo.kind !== "proxy" || !repo.upstream) return invalid(`repo ${repo.prefix} is not a proxy`);
-  if (repo.format !== "oci") return invalid(`format ${repo.format} has no prefetch`);
+  if (repo.format !== "oci" && repo.format !== "npm") return invalid(`format ${repo.format} has no prefetch`);
   const upstream = repo.upstream;
   const config = upstreams.find((u) => u.name === upstream.name && u.format === repo.format);
   if (upstream.offline || !config) {
     return { status: 409, code: "CONFLICT", message: `repo ${repo.prefix} is offline${config ? "" : `: upstream ${upstream.name} is not configured`}; it asks its upstream nothing` };
+  }
+  if (repo.format === "npm") {
+    const at = new Date().toISOString();
+    const result = prefetchNames(
+      {
+        repo: repo.prefix,
+        upstream,
+        url: config.url,
+        maxFileSize: repo.policy?.maxFileSize ?? NPM_MAX_FILE_SIZE,
+        holds: (name, version) => manifestsOf(repo, name)?.some((v) => v.version === version) ?? false,
+        // Each ingest is an audit row of the caller's, proxy.fetch instead of push; a version
+        // deleted before and fetched again is the index's again.
+        ingest: (spec) => {
+          const row = addFetched(spec, config.url, at);
+          deletedManifests.delete(row.digest);
+          demoEvents.push({ at, principal: by, action: "proxy.fetch", repo: repo.prefix, subject: `${row.packageName}@${row.version}`, digest: row.digest, ip: DEMO_IP, details: { upstream: upstream.name, tag: row.tag } });
+        },
+        reject: (name, version, why) => {
+          demoEvents.push({ at, principal: by, action: "proxy.reject", repo: repo.prefix, subject: `${name}@${version}`, digest: null, ip: DEMO_IP, details: { upstream: upstream.name, reason: why } });
+        },
+      },
+      body,
+    );
+    if (!("status" in result)) changed();
+    return result;
   }
   const result = prefetchImages({ repo: repo.prefix, upstream, dockerHub: config.dockerHub ?? false, held }, body);
   if ("status" in result) return result;

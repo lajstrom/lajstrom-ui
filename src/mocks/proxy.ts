@@ -1,10 +1,14 @@
 // The proxy and group repos of the mock (docs/spec/proxy-and-group.md): which names a proxy
-// mirrors (§3), what a prefetch of an oci proxy fetches (§11.10), and the checks of a proxy's
-// upstream and a group's members (§2.5). db.ts keeps the state and the audit rows.
+// mirrors (§3), what a prefetch of an npm proxy (§5.1) and of an oci proxy (§11.10) fetches, and
+// the checks of a proxy's upstream and a group's members (§2.5). db.ts keeps the state and the
+// audit rows.
 
 import type { PrefetchItemResult, PrefetchResult, RepoGroup, Upstream } from "@/api/types";
 import { sha256Hex } from "@/lib/sha256";
 
+import type { VersionSpec } from "./data/builders";
+import type { NpmRelease } from "./data/npm";
+import { fetchedVersion, packumentOf, type Packument } from "./data/npmjs";
 import type { RepoSeed } from "./data/system";
 import type { Refusal } from "./db";
 
@@ -31,10 +35,32 @@ export function refusedBy(upstream: Upstream, name: string, oci: boolean): strin
   return allow.length && !allow.some((p) => matches(p, name, oci)) ? "allow" : null;
 }
 
-/** Whether a ?name= of a purge is a name of the format: an image path of oci, any other a name
- * without spaces. */
+/** Whether a ?name= of a purge is a name of the format: an image path of oci, a name npm takes,
+ * any other a name without spaces. */
 export function isPackageName(name: string, format: string): boolean {
-  return format === "oci" ? OCI_PATH.test(name) : /^[^\s]{1,256}$/.test(name);
+  if (format === "oci") return OCI_PATH.test(name);
+  return format === "npm" ? npmNameRefusal(name) === null : /^[^\s]{1,256}$/.test(name);
+}
+
+/** Why npm takes no package of this name, as the server's CheckName says it, or null: the names
+ * of npmjs.org's oldest packages are taken, upper-case letters included (JSONStream). */
+export function npmNameRefusal(name: string): string | null {
+  const scoped = name.startsWith("@");
+  const parts = scoped ? name.slice(1).split("/") : [name];
+  if (!scoped && name.includes("/")) return `"${name}": a name with a / is a scoped name, @scope/name`;
+  if (scoped && (parts.length !== 2 || parts.some((p) => !p))) return `"${name}" is not a scoped name, @scope/name`;
+  if (!name) return "the package name is empty";
+  const bytes = new TextEncoder().encode(name).length;
+  if (bytes > 214) return `"${name}" is ${bytes} bytes, at most 214`;
+  if (name[0] === "." || name[0] === "_") return `"${name}" begins with "${name[0]}"`;
+  if (["node_modules", "favicon.ico"].includes(name.toLowerCase())) return `"${name}" is not a package name`;
+  for (const part of parts) {
+    if (part === "." || part === "..") return `"${name}" has the part "${part}"`;
+    // What encodeURIComponent leaves as it is.
+    const escaped = [...part].find((c) => !/[A-Za-z0-9\-_.!~*'()]/.test(c));
+    if (escaped) return `"${name}" has "${escaped}", which a URL escapes`;
+  }
+  return null;
 }
 
 type ImageRef = { path: string; tag: string | null; digest: string | null };
@@ -170,6 +196,85 @@ export function prefetchImages({ repo, upstream, dockerHub, held }: Fetch, body:
         continue;
       }
       manifest(ref, digestOf(`manifest:${index}:${platform}`), platform);
+    }
+  }
+  return { results };
+}
+
+type NameFetch = {
+  /** The repo, <format>/<name>. */
+  repo: string;
+  upstream: Upstream;
+  /** upstreams[].url of the configuration, which the files are asked below. */
+  url: string;
+  /** The largest tarball the repo takes: its policy's maxFileSize, else npm's default. */
+  maxFileSize: number;
+  /** Whether the index has the version. */
+  holds: (name: string, version: string) => boolean;
+  /** Ingests a fetched version, as a client's upload would be, with the audit row proxy.fetch. */
+  ingest: (spec: VersionSpec) => void;
+  /** The audit row proxy.reject of a fetch the repo refused. */
+  reject: (name: string, version: string, why: string) => void;
+};
+
+/** The versions a prefetch takes of a packument (§5.1, step 3): every one, or those its
+ * dist-tags name; when they name none of them, the newest by publish time. */
+function prefetched(p: Packument, all: boolean): NpmRelease[] {
+  if (all) return p.versions;
+  const pointed = new Set(Object.values(p.distTags));
+  const out = p.versions.filter((v) => pointed.has(v.version));
+  return out.length ? out : [p.versions.reduce((a, b) => (b.at >= a.at ? b : a))];
+}
+
+/** POST …/prefetch of an npm proxy (§5.1): for each name, the lists, the upstream's packument and
+ * the versions it takes; a version the index has is held, any other is fetched as a miss would
+ * be. A result per version, and one per name that failed before its versions, in the order of
+ * the names. A second run finds held what the first fetched. */
+export function prefetchNames(f: NameFetch, body: unknown): PrefetchResult | Refusal {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return invalid("the body must be a JSON object");
+  const b = body as Record<string, unknown>;
+  if ("images" in b || "platforms" in b) return invalid(`images and platforms are an oci proxy repo's; ${f.repo} takes names`);
+  const unknown = Object.keys(b).find((k) => k !== "names" && k !== "allVersions");
+  if (unknown) return invalid(`${unknown}: not a field of a prefetch`);
+  const names = b.names;
+  if (!Array.isArray(names) || names.some((n) => typeof n !== "string")) return invalid("names: a list of package names");
+  if (names.length < 1 || names.length > 100) return invalid(`names: ${names.length} of them; a prefetch takes 1 to 100`);
+  if (names.includes("")) return invalid(`names[${names.indexOf("")}]: empty`);
+  if (b.allVersions !== undefined && typeof b.allVersions !== "boolean") return invalid("allVersions: true or false");
+
+  const results: PrefetchItemResult[] = [];
+  const failed = (name: string, httpStatus: number, message: string, version?: string) =>
+    results.push({ name, ...(version ? { version } : {}), status: "failed", httpStatus, message });
+  for (const name of names as string[]) {
+    const bad = npmNameRefusal(name);
+    if (bad) {
+      failed(name, 400, bad);
+      continue;
+    }
+    const refused = refusedBy(f.upstream, name, false);
+    if (refused) {
+      failed(name, 403, `${f.repo} does not mirror "${name}": ${refused}`);
+      continue;
+    }
+    const doc = packumentOf(name);
+    if (!doc) {
+      failed(name, 404, `${f.repo}: upstream ${f.upstream.name} does not have "${name}"`);
+      continue;
+    }
+    for (const v of prefetched(doc, b.allVersions === true)) {
+      if (f.holds(name, v.version)) {
+        results.push({ name, version: v.version, status: "held" });
+        continue;
+      }
+      // A tarball above the repo's bound stops the fetch: nothing of it is stored (§5, step 7).
+      if (v.size > f.maxFileSize) {
+        const why = `${name} ${v.version}: the tarball is ${v.size} bytes, above the repo's maxFileSize of ${f.maxFileSize}`;
+        f.reject(name, v.version, why);
+        failed(name, 403, why, v.version);
+        continue;
+      }
+      f.ingest(fetchedVersion(f.repo.slice(f.repo.indexOf("/") + 1), f.url, doc, v));
+      results.push({ name, version: v.version, status: "fetched" });
     }
   }
   return { results };
