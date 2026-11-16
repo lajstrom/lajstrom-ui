@@ -114,7 +114,7 @@ function DeleteVersionDialog({ repo, name, detail, last, onClose }: DeleteVersio
           <p>
             {detail.variants.length > 1 ? `Its ${pluralize(detail.variants.length, "manifest")}` : "Its manifest"}, with the signatures, SBOMs and
             attestations that refer to {detail.variants.length > 1 ? "them" : "it"}, {pluralize(files.length, "file")} and {formatBytes(size)}, go from the
-            registry and the index. This cannot be undone.
+            index and, where the registry still has them, from the registry. This cannot be undone.
           </p>
           {detail.variants.length > 1 ? (
             <p className="flex flex-wrap gap-1">
@@ -214,9 +214,9 @@ export function DeleteVersionsDialog({ repo, name, groups, total, onClose, onDel
           <div className="space-y-3 text-sm">
             <p>
               {pluralize(manifests, "manifest")}
-              {size === null ? "" : `, ${formatBytes(size)}`}, with the signatures, SBOMs and attestations that refer to them, go from the registry and the
-              index. The server checks each version on its own: one published again or named by a dist-tag since this list was read is kept. This cannot be
-              undone.
+              {size === null ? "" : `, ${formatBytes(size)}`}, with the signatures, SBOMs and attestations that refer to them, go from the index and, where
+              the registry still has them, from the registry. The server checks each version on its own: one published again or named by a dist-tag since
+              this list was read is kept. This cannot be undone.
             </p>
             <p className="flex max-h-32 flex-wrap gap-1 overflow-y-auto">
               {groups.map((g) => (
