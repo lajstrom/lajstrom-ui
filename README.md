@@ -6,8 +6,11 @@
 # Lajstrom UI
 
 The web UI of [Lajstrom](https://github.com/lajstrom/lajstrom), an artifact registry on top of
-any OCI registry. A static single-page app in its own repository and its own container images;
+any OCI registry. A static single-page app in its own repository and its own container image;
 it talks to the server only through `/api/v1`.
+
+**Try it: [lajstrom.github.io/lajstrom-ui](https://lajstrom.github.io/lajstrom-ui/)**, the
+[demo](#demo) of `main` on generated data, in your browser. Sign in as `admin` / `admin`.
 
 **Status: prototype.** Against a server it shows what the server serves today (repositories,
 who you are, personal and deploy tokens) and says plainly where the server has no endpoint yet.
@@ -75,7 +78,8 @@ server's specs. The read endpoints the UI needs are proposed in
 
 ## Demo
 
-The demo is the whole UI on generated data: a mock of `/api/v1` answers in the browser (a
+**[Open the demo](https://lajstrom.github.io/lajstrom-ui/)**: GitHub Pages publishes `main` there
+on every push. The demo is the whole UI on generated data: a mock of `/api/v1` answers in the browser (a
 service worker, MSW), and what you change there, such as tokens, is kept in this browser's
 `localStorage`. Nothing reaches a server. It opens at the sign-in page, like the tool behind
 its login will: the accounts are `admin` / `admin`, `alice` / `alice`, `bob` / `bob` and
@@ -141,7 +145,8 @@ The demo is a static site: no server, nothing to run. `npm run build:pages` buil
 the same files; over HTTPS the service worker runs, so the requests show in the Network panel.
 
 [.github/workflows/pages.yml](.github/workflows/pages.yml) publishes it on every push to `main`
-(or by hand); the repository needs Settings → Pages → Source: GitHub Actions, once.
+(or by hand) at <https://lajstrom.github.io/lajstrom-ui/>; the repository needs Settings → Pages →
+Source: GitHub Actions, once.
 
 ## Container image
 
