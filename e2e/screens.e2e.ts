@@ -6,7 +6,11 @@
 import type { Page } from "@playwright/test";
 
 import type { Schemas } from "../src/api/openapi.gen";
-import { api, expect, test, user } from "./test";
+import { api, expect, signIn, test, user } from "./test";
+
+test.beforeEach(async ({ page }) => {
+  await signIn(page);
+});
 
 /** The page has its title and has stopped loading: no skeleton is left. */
 async function shown(page: Page, title?: string | RegExp) {

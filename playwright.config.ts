@@ -21,6 +21,6 @@ export default defineConfig({
   },
   projects: [
     { name: "sign-in", testMatch: "sign-in.e2e.ts" },
-    { name: "screens", testMatch: "screens.e2e.ts", dependencies: ["sign-in"], use: { storageState: "e2e-results/session.json" } },
+    { name: "screens", testMatch: "screens.e2e.ts", dependencies: ["sign-in"] },
   ],
 });
