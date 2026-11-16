@@ -81,11 +81,13 @@ jobs:
           LAJSTROM_E2E_REGISTRY: localhost:5000
         run: e2e/server.sh server "$RUNNER_TEMP/e2e"
       - name: UI image, proxying the API to the server
+        # The profile test: no demo and no mock, as in prod, and the source maps served, so that a
+        # failure's trace names the sources (docs/adr/0004-one-image-profile-at-start.md).
         run: |
           set -euo pipefail
           docker build -t lajstrom-ui:e2e .
           docker run -d --name ui --network host --read-only --tmpfs /tmp --cap-drop ALL \
-            -e LAJSTROM_UI_MOCK=false -e LAJSTROM_UI_DEMO=false \
+            -e LAJSTROM_UI_PROFILE=test \
             -e LAJSTROM_API_UPSTREAM=http://127.0.0.1:18080 lajstrom-ui:e2e
           for _ in $(seq 1 30); do curl -sf -o /dev/null http://localhost:8080/healthz && break; sleep 1; done
           curl -sf http://localhost:8080/api/v1/info | jq -c '{version, commit}'

@@ -5,16 +5,29 @@
 #   config.json       read by the browser, "schema": 1 (README.md, Configuration): written from
 #                     the variables below, or a link to a mounted file
 #   headers           security headers, included in every location
+#   source-maps.conf  answers 404 for /ui/assets/*.map with the profile prod, or nothing
 #   api-proxy.conf    forwards /api/ and /-/ to LAJSTROM_API_UPSTREAM, or nothing
+#
+# The profile, LAJSTROM_UI_PROFILE, sets the defaults of LAJSTROM_UI_DEMO and LAJSTROM_UI_MOCK
+# and whether nginx serves the source maps (docs/adr/0004-one-image-profile-at-start.md); a
+# variable that is set wins over its profile's default. The Content-Security-Policy is the same in
+# every profile.
+#
+#                   prod (default)   test     dev
+#   demo default    false            false    true
+#   mock default    false            false    false
+#   source maps     404              served   served
 #
 # A file at LAJSTROM_UI_CONFIG (default /etc/lajstrom-ui/config.json), such as a ConfigMap, is
 # served as it is, and a change of it shows on the next page load; the LAJSTROM_UI_* variables of
-# config.json are then not read. The browser checks the file and names what is wrong in it.
+# config.json are then not read, and the profile decides only what nginx serves. The browser
+# checks the file and names what is wrong in it.
 #
 # Variables:
+#   LAJSTROM_UI_PROFILE        prod, test or dev (default prod)
 #   LAJSTROM_UI_API_URL        base URL of the Lajstrom API as the browser sees it; empty = same origin
 #   LAJSTROM_UI_MOCK           true: the demo only, on generated data from a service worker, no API needed
-#   LAJSTROM_UI_DEMO           false: do not offer the demo next to the API (default true)
+#   LAJSTROM_UI_DEMO           true: offer the demo next to the API (default: the profile's)
 #   LAJSTROM_UI_TITLE          instance name in the header and the page title
 #   LAJSTROM_UI_LOGO           the header's logo: a path relative to /ui/, an http(s) URL or a data:image URL
 #   LAJSTROM_UI_COLOR          the primary colour, #rgb or #rrggbb
@@ -34,6 +47,15 @@ fail() {
 
 mounted="${LAJSTROM_UI_CONFIG:-/etc/lajstrom-ui/config.json}"
 upstream="${LAJSTROM_API_UPSTREAM:-}"
+profile="${LAJSTROM_UI_PROFILE:-prod}"
+
+case "$profile" in
+  prod) demo_default=false mock_default=false source_maps=404 ;;
+  test) demo_default=false mock_default=false source_maps=served ;;
+  dev) demo_default=true mock_default=false source_maps=served ;;
+  *) fail "LAJSTROM_UI_PROFILE must be prod, test or dev, not '$profile'" ;;
+esac
+echo "40-lajstrom-ui.sh: profile $profile: source maps $source_maps"
 
 case "$upstream" in
   "" | http://* | https://*) ;;
@@ -59,8 +81,8 @@ if [ -f "$mounted" ]; then
   echo "40-lajstrom-ui.sh: config.json: $mounted, as it is"
 else
   api_url="${LAJSTROM_UI_API_URL:-}"
-  mock="${LAJSTROM_UI_MOCK:-false}"
-  demo="${LAJSTROM_UI_DEMO:-true}"
+  mock="${LAJSTROM_UI_MOCK:-$mock_default}"
+  demo="${LAJSTROM_UI_DEMO:-$demo_default}"
   title="${LAJSTROM_UI_TITLE:-Lajstrom}"
   logo="${LAJSTROM_UI_LOGO:-}"
   color="${LAJSTROM_UI_COLOR:-}"
@@ -113,6 +135,20 @@ add_header X-Frame-Options "DENY" always;
 add_header Referrer-Policy "same-origin" always;
 add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src $img_src; connect-src $connect_src; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
 EOF
+
+# prod: no source maps. A regular expression location wins over the prefix /ui/assets/, so the
+# files stay in the image, the same in every profile, and nginx does not serve them. A stack
+# trace from prod is read with the maps of the release's tar.gz.
+if [ "$source_maps" = 404 ]; then
+  cat >"$out/source-maps.conf" <<'EOF'
+location ~ ^/ui/assets/.+\.map$ {
+  include /tmp/lajstrom-ui/headers;
+  return 404;
+}
+EOF
+else
+  : >"$out/source-maps.conf"
+fi
 
 if [ -n "$upstream" ]; then
   upstream="${upstream%/}"

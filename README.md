@@ -23,9 +23,8 @@ server's specs. The read endpoints the UI needs are proposed in
 
 - No server-side rendering: a fully static build; all data comes from API calls in the browser.
 - Without a backend the UI still works: in the demo, on data generated in the browser.
-- One image for dev, test and prod: the environment is a profile chosen at start
-  ([ADR 0004](docs/adr/0004-one-image-profile-at-start.md); not built yet, see
-  [Not done yet](#not-done-yet)).
+- One image for dev, test and prod: the environment is a [profile](#the-images-profile) chosen
+  at start ([ADR 0004](docs/adr/0004-one-image-profile-at-start.md)).
 
 ## What is in it
 
@@ -111,7 +110,8 @@ once, as a new server would, for a first admin next to the accounts above, then 
   `ssh -L 8081:localhost:8081 <machine>`), or add the origin to Chrome's
   `chrome://flags/#unsafely-treat-insecure-origin-as-secure`.
 - `"mock": true` in `config.json` (`LAJSTROM_UI_MOCK=true`) makes the demo the only mode, for a
-  deployment without a server; `"demo": false` (`LAJSTROM_UI_DEMO=false`) stops offering it.
+  deployment without a server; `"demo": false` stops offering it. The image offers it next to a
+  server with the [profile](#the-images-profile) `dev` or `LAJSTROM_UI_DEMO=true`.
 
 ## Run it
 
@@ -162,8 +162,9 @@ runtime configuration, [config.json](#configuration), from these variables:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `LAJSTROM_UI_MOCK` | `false` | `true`: the demo only, on generated data; no server needed |
-| `LAJSTROM_UI_DEMO` | `true` | `false`: do not offer the demo next to the server |
+| `LAJSTROM_UI_PROFILE` | `prod` | `prod`, `test` or `dev`: the defaults of the two below and whether the source maps are served ([The image's profile](#the-images-profile)) |
+| `LAJSTROM_UI_MOCK` | the profile's: `false` | `true`: the demo only, on generated data; no server needed |
+| `LAJSTROM_UI_DEMO` | the profile's: `false`, `true` with `dev` | `true`: offer the demo next to the server; `false`: do not |
 | `LAJSTROM_UI_API_URL` | empty | Base URL of the API as the browser sees it; empty = same origin |
 | `LAJSTROM_UI_TITLE` | `Lajstrom` | Instance name in the header and the title |
 | `LAJSTROM_UI_LOGO` | empty | The header's logo: a path relative to `/ui/`, an http(s) URL or a `data:image` URL; empty = Lajstrom's mark |
@@ -254,6 +255,34 @@ The start-up never leaves the page blank:
 - If the UI's own scripts do not load, such as below a path that `<base href>` does not name,
   `index.html` says so after a few seconds.
 
+### The image's profile
+
+One image serves every environment: `LAJSTROM_UI_PROFILE`, read at start, is `prod` (the
+default), `test` or `dev` ([ADR 0004](docs/adr/0004-one-image-profile-at-start.md)). The profile
+sets the defaults of the variables and what nginx serves; the bundle is the same in all three.
+
+| | `prod` (default) | `test` | `dev` |
+| --- | --- | --- | --- |
+| `LAJSTROM_UI_DEMO` default | `false` | `false` | `true` |
+| `LAJSTROM_UI_MOCK` default | `false` | `false` | `false` |
+| source maps (`/ui/assets/*.map`) | `404` | served | served |
+| Content-Security-Policy | the same | the same | the same |
+
+- A variable that is set wins over its profile's default: a prod instance that offers the demo
+  sets `LAJSTROM_UI_DEMO=true`, and a demo-only instance on any profile sets
+  `LAJSTROM_UI_MOCK=true`.
+- With a mounted `config.json`, the file says everything the browser reads, and the profile
+  decides only what nginx serves.
+- Any other value stops the start, as a wrong value of the other variables does. The start log
+  names the profile: `40-lajstrom-ui.sh: profile prod: source maps 404`.
+- A stack trace from prod is read with the source maps of the release's tar.gz, which has the
+  same files as the image. The e2e job runs the image with `test`.
+
+**The image no longer offers the demo by default.** Before the profile
+([#57](https://github.com/lajstrom/lajstrom-ui/issues/57)) `LAJSTROM_UI_DEMO` defaulted to
+`true`; with `prod`, the default profile, it is `false`. `LAJSTROM_UI_DEMO=true` or
+`LAJSTROM_UI_PROFILE=dev` bring the demo back.
+
 ## Kubernetes
 
 [deploy/k8s/lajstrom-ui.yaml](deploy/k8s/lajstrom-ui.yaml): a Deployment (2 replicas,
@@ -314,7 +343,8 @@ A failed run: rerun it. A published release keeps its tag; fix forward with the 
 
 Every pull request and push to `main` runs the same workflow as a dry run. It builds the bundle,
 tries the tar.gz at the root of a static origin and below `/ui/` of the image made of it, in
-Chromium (`scripts/try-bundle.ts`), builds the image for both platforms, and keeps the bundle as
+Chromium (`scripts/try-bundle.ts`), checks that the image's default profile answers `404` for a
+source map and `test` serves it, builds the image for both platforms, and keeps the bundle as
 the run's artifact `release`. It pushes, signs and releases nothing. Locally:
 
 ```sh
@@ -435,10 +465,6 @@ the snippet scan has nothing to match.
 
 ## Not done yet
 
-- **The image's profile**: dev, test and prod are profiles of the one image, chosen at start
-  with `LAJSTROM_UI_PROFILE` ([ADR 0004](docs/adr/0004-one-image-profile-at-start.md)). Until
-  [#57](https://github.com/lajstrom/lajstrom-ui/issues/57) brings it, the image has today's
-  defaults: the demo offered, the source maps served.
 - Code splitting per page (the main chunk is about 190 KiB gzipped).
 
 ## Contributing and license

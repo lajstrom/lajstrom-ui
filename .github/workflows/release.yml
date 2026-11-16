@@ -11,8 +11,10 @@
 # way, and the image built for both platforms; nothing is pushed, signed or released. The bundle
 # is kept as the run's artifact release for 14 days.
 #
-# One image for every environment, configured at start: dev, test and prod are profiles of it
-# (docs/adr/0004-one-image-profile-at-start.md), never another image or another bundle.
+# One image for every environment, configured at start: dev, test and prod are profiles of it,
+# LAJSTROM_UI_PROFILE, prod by default (docs/adr/0004-one-image-profile-at-start.md), never another
+# image or another bundle. The try of the image checks that prod answers 404 for a source map and
+# that test serves it.
 name: Release
 
 on:
@@ -114,8 +116,22 @@ jobs:
           docker buildx build --build-context "bundle=$bundle" --load -t lajstrom-ui:release .
           docker run -d --name ui --read-only --tmpfs /tmp --cap-drop ALL -p 8080:8080 \
             -e LAJSTROM_UI_MOCK=true lajstrom-ui:release
-          for _ in $(seq 1 30); do curl -sf -o /dev/null http://localhost:8080/healthz && break; sleep 1; done
+          # The profile test, which serves the source maps; the image's default is prod.
+          docker run -d --name ui-test --read-only --tmpfs /tmp --cap-drop ALL -p 8082:8080 \
+            -e LAJSTROM_UI_PROFILE=test lajstrom-ui:release
+          for port in 8080 8082; do
+            for _ in $(seq 1 30); do curl -sf -o /dev/null "http://localhost:$port/healthz" && break; sleep 1; done
+          done
           curl -sf http://localhost:8080/ui/build.json | jq -c .
+          map="$(cd "$bundle" && find assets -name '*.map' | sort | head -n 1)"
+          [ -n "$map" ] || { echo "::error::the bundle has no source map"; exit 1; }
+          status() { curl -s -o /dev/null -w '%{http_code}' "$1"; }
+          [ "$(status "http://localhost:8080/ui/$map")" = 404 ] || { echo "::error::prod serves /ui/$map"; exit 1; }
+          [ "$(status "http://localhost:8082/ui/$map")" = 200 ] || { echo "::error::test does not serve /ui/$map"; exit 1; }
+          [ "$(status "http://localhost:8080/ui/${map%.map}")" = 200 ] || { echo "::error::prod does not serve /ui/${map%.map}"; exit 1; }
+          curl -sf http://localhost:8080/ui/config.json | jq -e '.demo == false' >/dev/null || { echo "::error::prod offers the demo"; exit 1; }
+          echo "source maps: prod 404, test 200 (/ui/$map)"
+          docker rm -f ui-test >/dev/null
       - name: Playwright's Chromium
         run: npx playwright install --with-deps chromium
       - name: Try both
@@ -125,6 +141,7 @@ jobs:
         run: |
           docker logs origin 2>&1 | tail -n 50 || true
           docker logs ui 2>&1 | tail -n 50 || true
+          docker logs ui-test 2>&1 | tail -n 50 || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release
