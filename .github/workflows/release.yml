@@ -11,8 +11,8 @@
 # way, and the image built for both platforms; nothing is pushed, signed or released. The bundle
 # is kept as the run's artifact release for 14 days.
 #
-# One image, configured at start. Images per environment (#16) are not decided; they would be
-# more builds from the same unpacked tar.gz in the job publish, never another bundle.
+# One image for every environment, configured at start: dev, test and prod are profiles of it
+# (docs/adr/0004-one-image-profile-at-start.md), never another image or another bundle.
 name: Release
 
 on:

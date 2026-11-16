@@ -19,8 +19,8 @@ TanStack Router and Query; MSW mocks the API.
   on the server side of the UI.
 - All data comes from `/api/v1` calls in the browser. No backend-for-frontend, no other service.
 - Without a backend the UI still renders: on mock data, for now. Keep the mock working.
-- Separate images for dev, test and prod are required; today there is one image configured at
-  start. Do not design anything that needs a rebuild per environment until that is settled.
+- One image for every environment: dev, test and prod are profiles chosen at start
+  (`docs/adr/0004-one-image-profile-at-start.md`). Nothing may need a rebuild per environment.
 - Every screen state lives in the URL query (filters, tabs, cursors), so links are shareable.
 
 ## Contracts
