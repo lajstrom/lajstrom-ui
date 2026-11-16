@@ -1,14 +1,19 @@
 // Sign-in and sign-out (src/api/session.ts has the why), and the first admin of a new server.
-// Only endpoints the server has: POST/GET/DELETE /api/v1/users/{name}/tokens, GET
-// /api/v1/whoami and POST /api/v1/bootstrap (docs/api.md).
+// Only endpoints the server has (docs/api.md): POST /api/v1/login, a token bound to this
+// browser's DPoP key for a password or the code of an OIDC login; on a server without it (no
+// login in GET /api/v1/info), POST/GET/DELETE /api/v1/users/{name}/tokens with the password;
+// GET /api/v1/whoami and POST /api/v1/bootstrap.
 
 import { sha256Hex } from "@/lib/sha256";
 
 import { ApiError, apiGetAs, apiPath, apiSend, basicAuth } from "./client";
+import { dpopSupported } from "./dpop";
+import { forgetKey, signInKey } from "./dpop-key";
 import { getSession, setSession } from "./session";
-import type { BootstrapRequest, CreatedToken, Token, User, WhoAmI } from "./types";
+import type { BootstrapRequest, CreatedToken, LoginRequest, LoginToken, ServerInfo, Token, User, WhoAmI } from "./types";
 
-/** How long the token created at sign-in lives; the server allows up to 365 days. */
+/** How long the token created at sign-in lives on a server without POST /api/v1/login, which
+ * sets the lifetime itself; the server allows up to 365 days. */
 export const SESSION_LIFETIME = "12h";
 
 /** A sign-in that failed for a reason the form shows as is. */
@@ -26,11 +31,58 @@ export function sessionTokenName(now: Date, random: Uint8Array): string {
   return `web UI ${stamp} UTC ${suffix}`;
 }
 
-/** Creates a token for this browser with the user's password; the password is sent once. */
+/** What the server says before anyone signs in; asked without the session's credentials. */
+function serverInfo(): Promise<ServerInfo> {
+  return apiGetAs<ServerInfo>(apiPath("info"), "");
+}
+
+/** Why the server refused the sign-in's proof (400, "DPoP: <why>"), in the form's words. */
+function proofRefusal(message: string): string {
+  const why = message.replace(/^DPoP:\s*/, "");
+  if (/\biat\b/.test(why)) return "The clock of this computer is more than 5 minutes off the server's. Set it right, then sign in again.";
+  if (/\bhtu\b/.test(why)) {
+    return `The server refused this browser's proof of its key: ${why}. The UI's apiBaseUrl (config.json) must be the server's server.externalURL.`;
+  }
+  return `The server refused this browser's proof of its key: ${why}.`;
+}
+
+/**
+ * Signs in at POST /api/v1/login with a proof of this browser's key: the server answers a token
+ * bound to that key (tokenType DPoP), which the requests then send with a proof of their own.
+ */
+async function login(req: LoginRequest): Promise<void> {
+  const key = await signInKey();
+  let token: LoginToken;
+  try {
+    token = await apiSend<LoginToken>("POST", apiPath("login"), { body: req, authorization: "", dpopKey: key });
+  } catch (err) {
+    if (!(err instanceof ApiError)) throw err;
+    if (err.status === 401) {
+      throw new SignInError("code" in req ? `The server refused the sign-in: ${err.message}.` : "Wrong user name or password, or the user is disabled.");
+    }
+    if (err.status === 429) {
+      const wait = err.retryAfter === null ? "a minute" : `${err.retryAfter} second${err.retryAfter === 1 ? "" : "s"}`;
+      throw new SignInError(`Too many failed sign-ins: try again in ${wait}.`);
+    }
+    if (err.status === 400 && /^DPoP:/.test(err.message)) throw new SignInError(proofRefusal(err.message));
+    if (err.status === 400 && "code" in req) throw new SignInError("The single sign-on has expired or was used already. Sign in again.");
+    throw err;
+  }
+  if (!token.user) throw new SignInError("The server's answer to the sign-in names no user.");
+  setSession({ token: token.secret, user: token.user, tokenId: token.id, expiresAt: token.expiresAt, tokenType: "DPoP" });
+}
+
+/**
+ * Signs in with the user's password, which is sent once. A server with POST /api/v1/login answers
+ * a token bound to this browser's key; without it, or in a browser without WebCrypto (plain http
+ * to another host), the UI creates a token for this browser with the password over Basic.
+ */
 export async function signInWithPassword(user: string, password: string): Promise<void> {
   // User names are lowercase on the server (docs/auth.md), so "Alice" can only mean alice.
   const name = user.trim().toLowerCase();
   if (!name || !password) throw new SignInError("Enter your user name and password.");
+  const info = await serverInfo();
+  if (info.login !== undefined && dpopSupported()) return login({ username: name, password });
   let token: CreatedToken;
   try {
     token = await apiSend<CreatedToken>("POST", apiPath("users", name, "tokens"), {
@@ -42,10 +94,11 @@ export async function signInWithPassword(user: string, password: string): Promis
     if (err instanceof ApiError && err.status === 403) throw new SignInError(`The server refused to create a token: ${err.message}.`);
     throw err;
   }
-  setSession({ token: token.secret, user: name, tokenId: token.id, expiresAt: token.expiresAt });
+  setSession({ token: token.secret, user: name, tokenId: token.id, expiresAt: token.expiresAt, tokenType: "Bearer" });
 }
 
-/** Signs in with a personal access token the user already has; it is never revoked by sign-out. */
+/** Signs in with a personal access token the user already has; it is never revoked by sign-out.
+ * It is a bearer: only the token of a sign-in is bound to a key. */
 export async function signInWithToken(secret: string): Promise<void> {
   const token = secret.trim();
   if (token.startsWith("ljs_dep_")) {
@@ -60,7 +113,7 @@ export async function signInWithToken(secret: string): Promise<void> {
     throw err;
   }
   if (who.kind !== "user") throw new SignInError(`This token signs in as ${who.principal}, not as a user.`);
-  setSession({ token, user: who.name, tokenId: null, expiresAt: await expiryOf(who.name, token) });
+  setSession({ token, user: who.name, tokenId: null, expiresAt: await expiryOf(who.name, token), tokenType: "Bearer" });
 }
 
 /** The expiry of a pasted token, found by its hash prefix; null when the token may not list
@@ -75,7 +128,8 @@ async function expiryOf(user: string, token: string): Promise<string | null> {
   }
 }
 
-/** Ends the session; the token created at sign-in is revoked, a pasted one is only forgotten. */
+/** Ends the session; the token created at sign-in is revoked, a pasted one is only forgotten.
+ * The key of the sign-in goes too, so that a token whose revocation failed is of no use. */
 export async function signOut(): Promise<void> {
   const s = getSession();
   if (s?.tokenId != null) {
@@ -85,6 +139,7 @@ export async function signOut(): Promise<void> {
       // Already revoked or expired, or the server is gone: the token ends with its expiry.
     }
   }
+  await forgetKey();
   setSession(null);
 }
 
