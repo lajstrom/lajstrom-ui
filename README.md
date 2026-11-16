@@ -120,8 +120,14 @@ Node 22.12 or newer.
 ```sh
 npm ci
 npm run dev            # http://localhost:5173/ui/, the demo (public/config.json)
-npm run check          # typecheck, lint, tests, production build
+npm run check          # typecheck, lint, tests, production build and the size of its main chunk
 ```
+
+Each page of the build is a chunk of its own, loaded when it is opened or a link to it is pointed
+at; the demo's mock is loaded in the demo only, and Swagger UI on the API page only. The main
+chunk, the JavaScript every visit loads before its first page, may be 195 KiB gzipped at most:
+`npm run check` fails above that ([scripts/bundle-size.ts](scripts/bundle-size.ts)), and so does
+CI on every pull request.
 
 Against a running Lajstrom:
 
@@ -427,7 +433,7 @@ src/
 openapi/        server.yaml: the server's OpenAPI description, vendored at a commit;
                 proposed.yaml: what the UI adds to it (docs/api-proposal.md)
 scripts/        vendoring it, generating public/openapi.yaml and src/api/openapi.gen.ts; the
-                Pages build; the release bundle and its try in a browser
+                Pages build; the release bundle and its try in a browser; the main chunk's limit
 e2e/            the end-to-end test against a real server: the server and its packages
                 (server.sh, fixtures.py), the screens in Playwright (*.e2e.ts)
 docker/         nginx.conf and the start script of the image

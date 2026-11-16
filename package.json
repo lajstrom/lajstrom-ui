@@ -19,7 +19,7 @@
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "test": "vitest run",
-    "check": "npm run typecheck && npm run lint && npm run test && vite build",
+    "check": "npm run typecheck && npm run lint && npm run test && vite build && node scripts/bundle-size.ts",
     "e2e": "playwright test"
   },
   "msw": {
