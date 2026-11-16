@@ -33,8 +33,11 @@ function hereDocuments(lines: string[]): Set<number> {
 export function CodeBlock({ code, caption, className, shell = false }: CodeBlockProps) {
   const lines = code.split("\n");
   const hereDocs = shell ? hereDocuments(lines) : new Set<number>();
+  // One grid column of minmax(0, 1fr): the block asks its parents for no width of its own, so a
+  // long line or caption scrolls or is cut inside it instead of widening the page; where a parent
+  // fits its content, the block is still as wide as its code.
   return (
-    <div className={cn("group relative overflow-hidden rounded-md border border-border bg-code", className)}>
+    <div className={cn("group relative grid grid-cols-1 overflow-hidden rounded-md border border-border bg-code", className)}>
       {caption ? (
         <div className="flex items-center justify-between border-b border-border px-3 py-1.5 text-xs text-muted-foreground">
           <span className="truncate font-mono">{caption}</span>
