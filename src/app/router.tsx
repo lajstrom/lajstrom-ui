@@ -1,26 +1,31 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { createRootRouteWithContext, createRoute, createRouter } from "@tanstack/react-router";
+import { createRootRouteWithContext, createRoute, createRouter, lazyRouteComponent } from "@tanstack/react-router";
 
-import { AccessPage } from "@/pages/access";
-import { ApiDocsPage } from "@/pages/api-docs";
-import { AuditPage } from "@/pages/audit";
-import { FirstAdminPage } from "@/pages/first-admin";
 import { NotFound } from "@/pages/not-found";
-import { PackageRoute } from "@/pages/package";
-import { RegistriesPage } from "@/pages/registries";
-import { RepoPage } from "@/pages/repo";
-import { ReposPage } from "@/pages/repos";
-import { SearchPage } from "@/pages/search";
 import { SignInPage } from "@/pages/sign-in";
-import { TokensPage } from "@/pages/tokens";
-import { UserPage } from "@/pages/user";
-import { WebhooksPage } from "@/pages/webhooks";
 
 import { basePath } from "./base";
+import { PagePending } from "./page-pending";
 import { AppShell } from "./shell";
 
 type Ctx = { queryClient: QueryClient };
 
+// Every page is a chunk of its own, loaded when its route is entered or a link to it is pointed
+// at (defaultPreload); src/main.tsx loads the first one with the start-up. The shell, the router
+// and the sign-in page stay in the main chunk: a signed-out demo sends every address to sign-in
+// at once (src/app/shell.tsx), and a chunk to wait for there would show the page it leaves.
+const ReposPage = lazyRouteComponent(() => import("@/pages/repos"), "ReposPage");
+const SearchPage = lazyRouteComponent(() => import("@/pages/search"), "SearchPage");
+const RegistriesPage = lazyRouteComponent(() => import("@/pages/registries"), "RegistriesPage");
+const AuditPage = lazyRouteComponent(() => import("@/pages/audit"), "AuditPage");
+const AccessPage = lazyRouteComponent(() => import("@/pages/access"), "AccessPage");
+const UserPage = lazyRouteComponent(() => import("@/pages/user"), "UserPage");
+const WebhooksPage = lazyRouteComponent(() => import("@/pages/webhooks"), "WebhooksPage");
+const FirstAdminPage = lazyRouteComponent(() => import("@/pages/first-admin"), "FirstAdminPage");
+const TokensPage = lazyRouteComponent(() => import("@/pages/tokens"), "TokensPage");
+const ApiDocsPage = lazyRouteComponent(() => import("@/pages/api-docs"), "ApiDocsPage");
+const RepoPage = lazyRouteComponent(() => import("@/pages/repo"), "RepoPage");
+const PackageRoute = lazyRouteComponent(() => import("@/pages/package"), "PackageRoute");
 
 /** Keeps only string values: every UI state lives in plain, shareable query parameters. */
 const strings = (s: Record<string, unknown>) =>
@@ -56,6 +61,11 @@ export function makeRouter(queryClient: QueryClient) {
     basepath: basePath().replace(/\/$/, ""),
     context: { queryClient },
     defaultPreload: "intent",
+    // Going to another page keeps the one shown until the next one's chunk is there; only a load
+    // longer than a second shows PagePending, and then for half a second at least, not a flash.
+    defaultPendingComponent: PagePending,
+    defaultPendingMs: 1000,
+    defaultPendingMinMs: 500,
     scrollRestoration: true,
     // Plain query strings (?q=nginx&suite=jammy) instead of JSON-encoded values.
     parseSearch: (s) => Object.fromEntries(new URLSearchParams(s)),
