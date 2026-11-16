@@ -6,7 +6,7 @@ import { delay, http, HttpResponse, type PathParams } from "msw";
 import type { ApiErrorBody } from "@/api/types";
 import type { User } from "@/api/types";
 
-import { authenticate, byPassword, createToken, revokeToken, type Refusal } from "./auth";
+import { authenticate, byPassword, createToken, login, revokeToken, type DpopRefusal, type Refusal } from "./auth";
 import { bootstrapOpen, exchangeBootstrapToken } from "./bootstrap";
 import * as db from "./db";
 import { getPersona, setPersona } from "./persona";
@@ -23,6 +23,17 @@ function unauthorized(message: string, api = true) {
   return api
     ? HttpResponse.json<ApiErrorBody>({ error: { code: "UNAUTHENTICATED", message } }, { status: 401, headers: challenge })
     : text(401, message, challenge);
+}
+
+/** 401 with the DPoP challenge of RFC 9449 §7.1, as the server answers a refused proof or a
+ * refused token of a sign-in on /api/ (docs/spec/http-routing.md §4). Date is the server's clock,
+ * by which a UI whose clock is off signs its proofs again. */
+function dpopRefused(r: DpopRefusal) {
+  const challenge = `DPoP error="${r.error}"${r.why ? `, error_description="${r.why}"` : ""}, algs="ES256"`;
+  return HttpResponse.json<ApiErrorBody>(
+    { error: { code: "UNAUTHENTICATED", message: r.why ?? "credentials are needed: the ones sent were refused" } },
+    { status: 401, headers: { "WWW-Authenticate": challenge, Date: new Date().toUTCString() } },
+  );
 }
 
 /** An error of a protocol frontend: plain text, like the server's. */
@@ -49,8 +60,9 @@ type Resolver = Parameters<typeof http.get>[1];
 function answered(resolver: Resolver): Resolver {
   return async (info) => {
     await latency();
-    const authn = authenticate(info.request);
+    const authn = await authenticate(info.request);
     if ("refused" in authn) {
+      if (authn.dpop) return dpopRefused(authn.dpop);
       return unauthorized("credentials are needed: the ones sent were refused", new URL(info.request.url).pathname.startsWith("/api/"));
     }
     setPersona(authn.principal);
@@ -209,6 +221,19 @@ const num = (v: string | null, fallback: number) => {
 export const handlers = [
   get("*/api/v1/info", async () => {
     return HttpResponse.json({ ...db.serverInfo, caller: db.caller() });
+  }),
+
+  // The sign-in of a web UI, with a DPoP proof (docs/api.md, Sign in): its Authorization is
+  // ignored (src/mocks/auth.ts). A refusal has the server's Date, for a proof refused for its iat.
+  post("*/api/v1/login", async ({ request }) => {
+    const made = await login(request, await body(request));
+    if ("status" in made) {
+      return HttpResponse.json<ApiErrorBody>(
+        { error: { code: made.code, message: made.message } },
+        { status: made.status, headers: { Date: new Date().toUTCString() } },
+      );
+    }
+    return HttpResponse.json(made, { status: 201, headers: { Location: `/api/v1/users/${made.user}/tokens/${made.id}` } });
   }),
 
   get("*/api/v1/whoami", async () => {

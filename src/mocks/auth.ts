@@ -1,16 +1,23 @@
 // Authentication and tokens of the mock, after the server's docs/auth.md and docs/api.md:
-// Basic with a password or a personal access token, Bearer with a personal access token,
-// refused credentials answered 401. In the demo a user's password is the user's name: admin /
-// admin, alice / alice; a disabled user is refused whatever the password.
+// Basic with a password or a personal access token, Bearer with a personal access token, and on
+// /api/ DPoP with the token of a sign-in (POST /api/v1/login) and a proof of its key
+// (src/mocks/dpop.ts); refused credentials answered 401. In the demo a user's password is the
+// user's name: admin / admin, alice / alice; a disabled user is refused whatever the password.
 
-import type { CreatedToken, Token, TokenRequest, TokenScope } from "@/api/types";
+import type { CreatedToken, LoginToken, Token, TokenRequest, TokenScope } from "@/api/types";
 import { sha256Hex } from "@/lib/sha256";
 
-import { passwords, tokens, users } from "./data/system";
+import { passwords, serverInfo, tokens, users } from "./data/system";
+import { spendProof, verifyProof } from "./dpop";
 import { keep, persist } from "./state";
 
-/** The principal of a request: a user name or "anonymous"; or the reason it is refused. */
-export type Authn = { principal: string } | { refused: true };
+/** Why a request's DPoP credentials are refused: the challenge of RFC 9449 §7.1, with the reason
+ * of a refused proof. */
+export type DpopRefusal = { error: "invalid_dpop_proof" | "invalid_token"; why?: string };
+
+/** The principal of a request: a user name or "anonymous"; or the reason it is refused, with the
+ * DPoP challenge on /api/ when the token is a sign-in's or came as DPoP. */
+export type Authn = { principal: string } | { refused: true; dpop?: DpopRefusal };
 
 /** Secrets of the tokens created in this page, by token id; the seeded tokens have none. */
 const secrets = new Map<string, number>();
@@ -53,7 +60,7 @@ function tokenOf(secret: string): Token | null {
   return t && live(t) ? t : null;
 }
 
-function used(t: Token): void {
+function touch(t: Token): void {
   const now = new Date();
   now.setSeconds(0, 0); // the server keeps lastUsedAt to the minute
   const minute = now.toISOString();
@@ -73,20 +80,42 @@ function decodeBasic(value: string): { user: string; secret: string } | null {
   }
 }
 
-export function authenticate(request: Request): Authn {
+/** The token of a sign-in as DPoP on /api/: the proof first, then the token and its key, which
+ * must be the proof's, then the proof's jti, used once (docs/spec/http-routing.md §4). */
+async function authenticateDpop(request: Request, secret: string): Promise<Authn> {
+  if (!new URL(request.url).pathname.startsWith("/api/")) return { refused: true };
+  const proof = await verifyProof(request, secret);
+  if ("why" in proof) return { refused: true, dpop: { error: "invalid_dpop_proof", why: proof.why } };
+  const t = tokenOf(secret);
+  if (!t?.user || !t.dpopJkt || t.dpopJkt !== proof.jkt || !enabledUser(t.user)) return { refused: true, dpop: { error: "invalid_token" } };
+  const used = spendProof(proof);
+  if (used) return { refused: true, dpop: { error: "invalid_dpop_proof", why: used } };
+  touch(t);
+  return { principal: t.user };
+}
+
+export async function authenticate(request: Request): Promise<Authn> {
+  const path = new URL(request.url).pathname;
+  // The sign-in takes no credential: a UI whose stored token was revoked signs in all the same.
+  if (request.method === "POST" && path === "/api/v1/login") return { principal: "anonymous" };
   const header = request.headers.get("Authorization");
   if (!header) return { principal: "anonymous" };
   const space = header.indexOf(" ");
   const scheme = (space < 0 ? header : header.slice(0, space)).toLowerCase();
   const value = space < 0 ? "" : header.slice(space + 1).trim();
+  // A token bound to a key works as DPoP only: as a bearer or in Basic it is refused, on /api/
+  // with the DPoP challenge (RFC 9449 §7.2).
+  const bound: Authn = path.startsWith("/api/") ? { refused: true, dpop: { error: "invalid_token" } } : { refused: true };
 
+  if (scheme === "dpop") return authenticateDpop(request, value);
   if (scheme === "bearer") {
     // Any other bearer goes on as anonymous with the header untouched (docs/auth.md).
     if (value.startsWith("ljs_dep_")) return { refused: true };
     if (!value.startsWith("ljs_pat_")) return { principal: "anonymous" };
     const t = tokenOf(value);
     if (!t?.user || !enabledUser(t.user)) return { refused: true };
-    used(t);
+    if (t.dpopJkt) return bound;
+    touch(t);
     return { principal: t.user };
   }
   if (scheme === "basic") {
@@ -95,7 +124,8 @@ export function authenticate(request: Request): Authn {
     if (creds.secret.startsWith("ljs_pat_")) {
       const t = tokenOf(creds.secret);
       if (!t || t.user !== creds.user) return { refused: true };
-      used(t);
+      if (t.dpopJkt) return bound;
+      touch(t);
       return { principal: creds.user };
     }
     if (!passwordMatches(creds.user, creds.secret)) return { refused: true };
@@ -214,4 +244,51 @@ export function revokeToken(owner: Exclude<Owner, { repoMask: string }> | "mask"
     persist();
   }
   return true;
+}
+
+/**
+ * POST /api/v1/login (docs/api.md, Sign in), in the server's order: the body's form, then the
+ * proof (400 saying why, before the credential is checked), then the password (401 whatever the
+ * reason). The answer is a personal access token of the user without scopes, bound to the
+ * proof's key (dpopJkt), expiring after info.login.tokenLifetime, named login <time> <4 hex>. The
+ * demo has no OIDC login, so it knows no code.
+ */
+export async function login(request: Request, body: unknown): Promise<LoginToken | Refusal> {
+  const invalid = (message: string): Refusal => ({ status: 400, code: "INVALID", message });
+  const b = typeof body === "object" && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+  const fields = Object.keys(b).sort().join(" ");
+  const strings = (...keys: string[]) => keys.every((k) => typeof b[k] === "string");
+  const byPassword = fields === "password username" && strings("username", "password");
+  const byCode = fields === "code codeVerifier" && strings("code", "codeVerifier");
+  if (!byPassword && !byCode) return invalid('body: must be {"username", "password"} or {"code", "codeVerifier"}');
+
+  const proof = await verifyProof(request, null);
+  const refused = "why" in proof ? proof.why : spendProof(proof);
+  if (refused || "why" in proof) return invalid(`DPoP: ${refused}`);
+  if (byCode) return invalid("code: unknown, used, expired, or of another verifier or key: sign in again");
+
+  const user = b.username as string;
+  if (!enabledUser(user) || !passwordMatches(user, b.password as string)) {
+    return { status: 401, code: "UNAUTHENTICATED", message: "the user name or the password is wrong" };
+  }
+  const now = Date.now();
+  const stamp = new Date(now - (now % 1000)).toISOString().replace(".000Z", "Z");
+  const secret = randomSecret("ljs_pat_");
+  const token: Token = {
+    id: nextId++,
+    kind: "pat",
+    name: `login ${stamp} ${randomSecret("").slice(0, 4)}`,
+    user,
+    scopes: [],
+    expiresAt: new Date(now + serverInfo.login.tokenLifetime * 1000).toISOString(),
+    lastUsedAt: null,
+    createdAt: new Date(now).toISOString(),
+    revokedAt: null,
+    hashPrefix: sha256Hex(secret).slice(0, 8),
+    dpopJkt: proof.jkt,
+  };
+  tokens.push(token);
+  secrets.set(secret, token.id);
+  persist();
+  return { ...token, secret, tokenType: "DPoP" };
 }
