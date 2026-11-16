@@ -61,9 +61,12 @@ separate repository:
   and users and bindings: create, disable, rename and delete users and set their passwords, bind
   users and OIDC groups to roles on repo masks; a user's page has its bindings and its tokens,
   which the admin may revoke.
-- **Sign-in** with a password, which creates a personal access token for the browser (12 hours,
-  revoked on sign-out), or with a token you already have. Requests carry it as
-  `Authorization: Bearer`; there are no cookies.
+- **Sign-in** as the server's `authModes` allow: with a password, through the server's OIDC login
+  ("Sign in with single sign-on"), or with a token you already have. The first two get a
+  personal access token for the browser (12 hours by default, revoked on sign-out) bound to a key
+  that the browser keeps non-extractable in IndexedDB: requests carry it as
+  `Authorization: DPoP` with a new proof of the key (RFC 9449). A server without
+  `POST /api/v1/login`, and a token you paste, get `Authorization: Bearer`. There are no cookies.
 - **The first admin** of a new server: "Set up the first admin", linked from the sign-in page,
   exchanges the server's one-time bootstrap token for the first admin with a name and a password,
   then signs in as it.
@@ -236,7 +239,7 @@ its variables or serves a mounted one (above); next to the tar.gz you write it y
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `schema` | | `1`, the version of this file; required |
-| `apiBaseUrl` | `""` | Base URL of the API, `https://…`; empty = the UI's own origin |
+| `apiBaseUrl` | `""` | Base URL of the API, `https://…`; empty = the UI's own origin. The server's `server.externalURL`: a sign-in's DPoP proofs name it |
 | `mock` | `false` | `true`: the demo only, on generated data; no server needed |
 | `demo` | `true` | `false`: do not offer the demo next to the server |
 | `branding.title` | `Lajstrom` | Instance name in the header, the sign-in page and the page title |

@@ -62,12 +62,26 @@ None: the mock answers the server's shapes, on generated data.
 
 ## 5. Browser session
 
-Settled: the UI talks to `/api/v1` with bearer tokens, never cookies, and needs no endpoint of its
-own. Signing in with a password creates a personal access token for the browser
-(`POST /api/v1/users/{user}/tokens` with Basic credentials, 12 hours), which the UI sends as
-`Authorization: Bearer` from then on; signing out revokes it (`DELETE …/tokens/{id}`). A user can
-also sign in with a personal access token they already have; signing out then forgets it without
-revoking it. The token is kept in `localStorage`, shared by the UI's tabs; the image's
+Settled: the UI talks to `/api/v1` with tokens in a header, never cookies, and needs no endpoint
+of its own (the server's ADR 0022). Signing in with a password, or through the server's OIDC
+login, is `POST /api/v1/login` with a DPoP proof (RFC 9449) of a P-256 key that the browser makes
+with WebCrypto, non-extractable, and keeps in IndexedDB. The server answers a personal access
+token bound to that key (`tokenType: "DPoP"`, `dpopJkt`), living `info.login.tokenLifetime`
+(12 hours by default), without refresh. The UI sends it as `Authorization: DPoP` with a new proof
+in `DPoP` on every request: `htm`, `htu` (the URL without query, so `apiBaseUrl` must be the
+server's `server.externalURL`), `iat`, `ath` and a new `jti`. The server sends no nonce: a proof
+refused for its `iat` is signed again by the server's clock, from the `Date` of the refusal.
+OIDC hands the UI a code:
+`/-/oidc/login?return_to=&code_challenge=&code_challenge_method=S256&dpop_jkt=` returns to the
+sign-in page with `#code=…`, which the UI redeems at `POST /api/v1/login` with its PKCE
+verifier, kept in `sessionStorage`. Signing out revokes the token (`DELETE …/tokens/{id}`) and
+forgets the key.
+
+A server without `login` in `GET /api/v1/info` gets the token created with the password
+(`POST /api/v1/users/{user}/tokens` with Basic credentials, 12 hours) and sent as
+`Authorization: Bearer`. A user can also sign in with a personal access token they already have,
+a bearer too; signing out then forgets it without revoking it. The sign-in page offers the modes
+of `info.authModes`. The token is kept in `localStorage`, shared by the UI's tabs; the image's
 Content-Security-Policy allows no inline or foreign scripts. Requests go out with
 `credentials: "omit"`, so a `401` with the Basic challenge never opens the browser's own login
-dialog. OIDC login later replaces the password form, not the token.
+dialog.
