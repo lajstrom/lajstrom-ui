@@ -86,8 +86,8 @@ export default defineConfig(({ command }) => ({
     outDir: "dist/ui",
     emptyOutDir: true,
     sourcemap: true,
-    // The largest chunk is Swagger UI (about 1.5 MB minified), loaded by the demo's API page only;
-    // the main chunk stays far below this.
+    // The largest chunk is Swagger UI (about 1.5 MB minified), loaded by the API page only. The
+    // main chunk has a limit of its own, gzipped: scripts/bundle-size.ts, run by npm run check.
     chunkSizeWarningLimit: 1600,
   },
   test: {
