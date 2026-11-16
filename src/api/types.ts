@@ -1,8 +1,8 @@
 // Types of the /api/v1 JSON the UI reads, named for the UI. They are those of
 // src/api/openapi.gen.ts, generated from public/openapi.yaml: the server's openapi.yaml as
 // vendored in openapi/server.yaml (npm run update:openapi), with what the UI proposes from
-// openapi/proposed.yaml. A proposed endpoint or field is not in the server yet;
-// docs/api-proposal.md describes them, and the UI shows them only when they are there.
+// openapi/proposed.yaml. A proposed field is not in the server yet; docs/api-proposal.md
+// describes them, and the UI shows them only when they are there.
 
 import type { Schemas } from "./openapi.gen";
 
@@ -35,46 +35,40 @@ export type WhoAmI = Schemas["Whoami"];
 /** repos.policy, with the keys the server reads; an absent key takes its default. */
 export type RepoPolicy = Schemas["Policy"];
 
-/** Reindex and reconcile state of a repo (proposed). */
-export type ReindexStatus = Schemas["ReindexStatus"];
-
 /** The repo's OpenPGP signing key for apt; retired keys are still served for a while. */
 export type SigningKey = Schemas["SigningKey"];
 
 export type RepoStats = Schemas["RepoStats"];
 
-/** A repo as GET /api/v1/repos answers it, with the proposed fields of lajstrom/lajstrom#957
- * (stats, permissions, reindex, signingKeys), plus `prefix`, which the UI derives. A group has
- * no registry and no policy; a proxy has its upstream, a group its members. Without
- * `permissions` the UI offers the actions and the server decides (src/lib/access.ts). */
+/** A repo as GET /api/v1/repos answers it, plus `prefix`, which the UI derives. A group has no
+ * registry and no policy; a proxy has its upstream, a group its members. The state of a reindex
+ * is not part of it: GET …/reindex has it (ReindexRun). Without `permissions`, from a server
+ * before them, the UI offers the actions and the server decides (src/lib/access.ts). */
 export type Repo = Schemas["Repo"] & {
   /** <format>/<name>: the repo's path on every protocol and its OCI path below the instance
    * prefix. Not in the answer: src/api/queries.ts derives it. */
   prefix: string;
 };
 
-/** A directory of a raw repo, for browsing paths like a file tree. */
-export type RawDirectory = Schemas["RawDirectory"];
-
 /** One value of a filter facet with its count: suite "jammy" (12). */
 export type FacetValue = Schemas["FacetValue"];
 
-/** A row of GET …/packages: the server's name and createdAt, and the proposed facts of
- * lajstrom/lajstrom#955 when the answer has them. */
+/** A row of GET …/packages. latestVersion is what the format's client installs by default,
+ * lastPublished the newest by publish time. */
 export type PackageSummary = Schemas["Package"];
 
-/** GET …/packages: a page ordered by name, with the server's cursor. `facets` and `directories`
- * are proposed; an answer with facets takes the proposed filters too. */
+/** GET …/packages: a page, with the server's cursor; `facets` only for the keys asked with
+ * facet=, over the whole repo. */
 export type PackageList = Schemas["PackageList"];
 
-/** GET …/packages/{name} (proposed, lajstrom/lajstrom#958); the package page derives it from the
- * versions when the server does not have it (src/pages/package-model.ts). */
+/** GET …/packages/{name}; the package page derives it from the versions from a server before it
+ * (src/pages/package-model.ts). */
 export type PackageDetail = Schemas["PackageDetail"];
 
-export type ReferrerCounts = Schemas["ReferrerCounts"];
+/** The attachments of a variant by kind, each as many as …/attachments?kind= lists. */
+export type AttachmentCounts = Schemas["AttachmentCounts"];
 
-/** A variant of the version list: its tag, digest and publish time, and the proposed facts
- * when the answer has them. */
+/** A variant of the version list: its tag, digest, publish time, facts and attachment counts. */
 export type VariantSummary = Schemas["Variant"];
 
 /** A version of GET …/packages/{name}/versions, newest first, with its variants. */
@@ -82,12 +76,19 @@ export type VersionSummary = Schemas["Version"];
 
 export type FileEntry = Schemas["File"];
 
-export type OciDescriptor = Schemas["OciDescriptor"];
+/** GET …/versions/{version}/manifest: each variant's manifest, read from the registry and
+ * checked against the index's digest. Its annotations are manifest.annotations. */
+export type ManifestEntry = Schemas["Manifest"];
 
-export type OciManifest = Schemas["OciManifest"];
+export type ManifestList = Schemas["ManifestList"];
 
-/** One variant of GET …/versions/{version}; the manifest and its annotations are proposed
- * (lajstrom/lajstrom#951): the server reads them from the registry on /v2. */
+/** GET …/versions/{version}/referrers: the manifests whose subject is a variant's, as the
+ * registry lists them now. */
+export type Referrer = Schemas["Referrer"];
+
+export type ReferrerList = Schemas["ReferrerList"];
+
+/** One variant of GET …/versions/{version}: its row of the index, its facts and its files. */
 export type VariantDetail = Schemas["VariantDetail"];
 
 /** GET …/packages/{name}/versions/{version}: one version with every variant in detail. */
@@ -112,16 +113,20 @@ export type Attachment = Schemas["Attachment"];
 
 export type AttachmentList = Schemas["AttachmentList"];
 
-export type SearchHit = Schemas["SearchHit"];
+export type SearchHit = Schemas["PackageHit"] | Schemas["VersionHit"];
 
-/** GET /api/v1/search?q= (proposed). A sha256 digest finds manifests and files. */
+/** GET /api/v1/search?q=: a page of hits, rank after rank, without a total. A sha256 digest
+ * finds manifests and files. */
 export type SearchResult = Schemas["SearchResult"];
 
-/** GET /api/v1/registries (proposed; system resource, admin only). */
+/** GET /api/v1/registries (system resource, admin only); its status is the answering replica's. */
 export type Registry = Schemas["Registry"];
 
 /** provider.Capabilities (internal/provider/provider.go). */
-export type Capabilities = Registry["capabilities"];
+export type Capabilities = Schemas["Capabilities"];
+
+/** The support tier of a registry's vendor in the server's release. */
+export type SupportTier = NonNullable<Registry["support"]>;
 
 export type AuditEvent = Schemas["AuditEntry"];
 
@@ -166,9 +171,8 @@ export type Binding = Schemas["Binding"];
  * role and the mask. */
 export type BindingRequest = Schemas["BindingRequest"];
 
-/** An open publication session (proposed): maven deploys file by file until
- * maven-metadata.xml. */
-export type PublishSession = Schemas["PublishSession"];
+/** An open publication session: maven deploys file by file until maven-metadata.xml. */
+export type PublishSession = Schemas["Session"];
 
 /** GET …/repos/{format}/{repo}/reindex: the latest run that covered the repo. */
 export type ReindexRun = Schemas["ReindexRun"];

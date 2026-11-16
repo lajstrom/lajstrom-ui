@@ -47,8 +47,9 @@ export function SearchPage() {
             options={[{ value: "all", label: "All formats" }, ...formatOrder.map((f) => ({ value: f, label: formats[f].label }))]}
           />
           {results.data && q ? (
+            // A page of hits, rank after rank: the server counts no total.
             <span className="ml-auto text-xs text-muted-foreground">
-              {results.data.total} result{results.data.total === 1 ? "" : "s"}
+              {results.data.next ? `the first ${results.data.hits.length} results` : `${results.data.hits.length} result${results.data.hits.length === 1 ? "" : "s"}`}
             </span>
           ) : null}
         </div>
@@ -95,7 +96,7 @@ export function SearchPage() {
                   </Link>
                 </li>
               ) : (
-                <li key={`${h.digest}:${h.matched}`}>
+                <li key={`${h.digest}:${h.file?.name ?? ""}`}>
                   <Link
                     to="/$format/$repo/$"
                     params={{ format: h.format, repo: h.repo, _splat: `${h.name}/-/${h.version}` }}
@@ -109,7 +110,7 @@ export function SearchPage() {
                         {h.variant ? <span className="text-sm text-muted-foreground"> ({h.variant})</span> : null}
                       </div>
                       <div className="truncate font-mono text-xs text-muted-foreground">
-                        {h.matched === "manifest" ? "manifest" : `file ${h.matched}`} · {shortDigest(h.digest, 20)}
+                        {h.file ? `file ${h.file.name}` : "manifest"} · {shortDigest(h.digest, 20)}
                       </div>
                     </div>
                     <span className="shrink-0 font-mono text-xs text-muted-foreground">

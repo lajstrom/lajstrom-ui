@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { Check, Minus, Server } from "lucide-react";
 
 import { registriesQuery } from "@/api/queries";
-import type { Capabilities, Registry } from "@/api/types";
+import type { Capabilities, Registry, SupportTier } from "@/api/types";
 import { ErrorState, PageHeader, RelativeTime } from "@/components/common";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -13,9 +13,12 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
 import { formatBytes } from "@/lib/format";
 
+/** The capabilities that are a yes or a no. */
+type Switch = { [K in keyof Capabilities]: Capabilities[K] extends boolean ? K : never }[keyof Capabilities];
+
 // What each capability means for Lajstrom, and the fallback when it is missing
 // (docs/architecture.md §5, internal/provider/provider.go).
-const capabilityInfo: { key: keyof Omit<Capabilities, "maxBlobSize">; label: string; yes: string; no: string; fallback: string }[] = [
+const capabilityInfo: { key: Switch; label: string; yes: string; no: string; fallback: string }[] = [
   {
     key: "createOnPush",
     label: "Create on push",
@@ -60,11 +63,19 @@ const capabilityInfo: { key: keyof Omit<Capabilities, "maxBlobSize">; label: str
   },
 ];
 
-const supportLabel: Record<Registry["support"], { label: string; tone: "success" | "primary" | "neutral" }> = {
+// The vendor's tier in the server's release (docs/registries/README.md, Support tiers).
+const supportLabel: Record<SupportTier, { label: string; tone: "success" | "primary" | "neutral" }> = {
   ci: { label: "tested in CI", tone: "success" },
   manual: { label: "tested manually", tone: "primary" },
+  hosted: { label: "hosted service", tone: "primary" },
   untested: { label: "untested", tone: "neutral" },
 };
+
+/** strong, or eventual with the time it takes to settle when the server knows it. */
+function consistencyOf(c: Capabilities): string {
+  if (!c.consistency) return "unknown";
+  return c.consistency === "eventual" && c.consistencyBound !== "0s" ? `eventual, within ${c.consistencyBound}` : c.consistency;
+}
 
 function StatusDot({ state }: { state: Registry["status"]["state"] }) {
   return (
@@ -76,6 +87,25 @@ function StatusDot({ state }: { state: Registry["status"]["state"] }) {
         state === "down" && "bg-danger",
       )}
     />
+  );
+}
+
+function CapabilityList({ capabilities }: { capabilities: Capabilities }) {
+  return (
+    <ul className="space-y-1.5 border-t border-border pt-3">
+      {capabilityInfo.map((c) => {
+        const on = capabilities[c.key];
+        return (
+          <li key={c.key} className="flex items-start gap-2 text-sm">
+            {on ? <Check className="mt-0.5 size-4 shrink-0 text-success" /> : <Minus className="mt-0.5 size-4 shrink-0 text-muted-foreground" />}
+            <Tooltip content={on ? c.yes : c.no}>
+              <span className={cn("cursor-help", !on && "text-muted-foreground")}>{c.label}</span>
+            </Tooltip>
+            {!on ? <span className="ml-auto shrink-0 text-xs text-muted-foreground">{c.fallback}</span> : null}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -103,8 +133,8 @@ export function RegistriesPage() {
               <CardHeader
                 icon={<Server />}
                 title={<span className="font-mono">{r.name}</span>}
-                description={r.product}
-                actions={<Badge tone={supportLabel[r.support].tone}>{supportLabel[r.support].label}</Badge>}
+                description={r.vendor ?? "Not probed yet"}
+                actions={r.support ? <Badge tone={supportLabel[r.support].tone}>{supportLabel[r.support].label}</Badge> : null}
               />
               <CardBody className="space-y-4">
                 <div className="flex items-start gap-2 rounded-md bg-surface px-3 py-2 text-sm">
@@ -117,7 +147,21 @@ export function RegistriesPage() {
                       {r.status.latencyMs !== null ? <span className="text-muted-foreground"> · /v2/ in {r.status.latencyMs} ms</span> : null}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {r.status.message ? `${r.status.message} · ` : null}checked <RelativeTime iso={r.status.checkedAt} />; /-/readyz needs an answer within 60 s
+                      {r.status.message ? `${r.status.message} · ` : null}
+                      {r.status.checkedAt ? (
+                        <>
+                          checked <RelativeTime iso={r.status.checkedAt} />
+                        </>
+                      ) : (
+                        "not pinged"
+                      )}
+                      {r.status.answeredAt && r.status.answeredAt !== r.status.checkedAt ? (
+                        <>
+                          , last answered <RelativeTime iso={r.status.answeredAt} />
+                        </>
+                      ) : null}
+                      {r.status.breaker !== "closed" ? `; circuit breaker ${r.status.breaker}` : null}
+                      ; /-/readyz needs an answer within 60 s
                     </div>
                   </div>
                 </div>
@@ -129,7 +173,8 @@ export function RegistriesPage() {
                   <Property label="Prefix">
                     <span className="font-mono text-[12.5px]">{r.prefix || "—"}</span>
                   </Property>
-                  <Property label="Max blob">{r.capabilities.maxBlobSize ? formatBytes(r.capabilities.maxBlobSize) : "unknown"}</Property>
+                  <Property label="Max blob">{r.capabilities?.maxBlobSize ? formatBytes(r.capabilities.maxBlobSize) : "unknown"}</Property>
+                  {r.capabilities ? <Property label="Consistency">{consistencyOf(r.capabilities)}</Property> : null}
                   <Property label="Repos">
                     {r.repos.length ? (
                       <span className="flex flex-wrap gap-x-2">
@@ -147,27 +192,21 @@ export function RegistriesPage() {
                     )}
                   </Property>
                 </Properties>
-                <ul className="space-y-1.5 border-t border-border pt-3">
-                  {capabilityInfo.map((c) => {
-                    const on = r.capabilities[c.key];
-                    return (
-                      <li key={c.key} className="flex items-start gap-2 text-sm">
-                        {on ? <Check className="mt-0.5 size-4 shrink-0 text-success" /> : <Minus className="mt-0.5 size-4 shrink-0 text-muted-foreground" />}
-                        <Tooltip content={on ? c.yes : c.no}>
-                          <span className={cn("cursor-help", !on && "text-muted-foreground")}>{c.label}</span>
-                        </Tooltip>
-                        {!on ? <span className="ml-auto shrink-0 text-xs text-muted-foreground">{c.fallback}</span> : null}
-                      </li>
-                    );
-                  })}
-                </ul>
+                {r.capabilities ? (
+                  <CapabilityList capabilities={r.capabilities} />
+                ) : (
+                  <p className="border-t border-border pt-3 text-sm text-muted-foreground">
+                    No probe of this replica got an answer yet: what the registry can do is not known.
+                  </p>
+                )}
               </CardBody>
             </Card>
           ))}
         </div>
       )}
       <p className="mt-4 text-xs text-muted-foreground">
-        Capabilities come from the registry comparison in the server's docs/registries/; registries are configured in lajstrom.yaml, not through the API.
+        Each replica probes and pings the registries itself: this is what the replica that answered sees. Registries are configured in lajstrom.yaml, not
+        through the API.
       </p>
     </>
   );

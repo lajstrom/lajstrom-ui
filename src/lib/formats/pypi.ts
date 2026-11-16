@@ -13,7 +13,7 @@ export const pypi: FormatSpec = {
   variantLabel: "Wheel tag",
   artifactType: "application/vnd.lajstrom.pypi.v1",
   facets: [],
-  columns: [{ key: "requiresPython", label: "Python" }],
+  columns: [],
   connect(ctx) {
     const index = `${ctx.baseUrl}/pypi/${ctx.repo.name}/simple/`;
     const authIndex = ctx.readNeedsAuth

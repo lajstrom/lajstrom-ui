@@ -19,37 +19,43 @@ export const serverInfo: Omit<ServerInfo, "caller"> = {
     { name: "rpm", artifactType: "application/vnd.lajstrom.rpm.v1" },
   ],
   authModes: ["password", "token"],
+  // auth.login.tokenLifetime, 12 h: POST /api/v1/login answers a DPoP-bound token.
+  login: { tokenLifetime: 43_200 },
 };
 
-// Capabilities follow the matrix of docs/architecture.md §5; cells marked "verify" there are
-// filled with the answer the registry spikes are expected to give.
+// Capabilities follow the matrix of docs/architecture.md §5, vendors and tiers the table of
+// docs/registries/README.md (Support tiers); the status is the answering replica's.
+const capabilities = {
+  referrersAlwaysTag: false,
+  maxBlobSize: 0,
+  consistency: "strong",
+  consistencyBound: "0s",
+  maxNameDepth: 0,
+  maxNameLength: 0,
+  tagsFoldCase: false,
+  buildRoutes: true,
+} as const;
+
 export const registries: Omit<Registry, "repos">[] = [
   {
     name: "zot",
     type: "generic",
-    product: "Zot 2.1",
+    vendor: "zot",
     url: "http://zot.lajstrom.svc:5000",
     prefix: "art/",
     support: "ci",
-    capabilities: {
-      createOnPush: true,
-      referrers: true,
-      catalog: true,
-      deleteManifest: true,
-      immutableTags: false,
-      blobRedirect: false,
-      maxBlobSize: 0,
-    },
-    status: { state: "ok", checkedAt: before(0, 0, 0.4), latencyMs: 4, message: null },
+    capabilities: { ...capabilities, createOnPush: true, referrers: true, catalog: true, deleteManifest: true, immutableTags: false, blobRedirect: false },
+    status: { state: "ok", checkedAt: before(0, 0, 0.4), answeredAt: before(0, 0, 0.4), latencyMs: 4, message: null, breaker: "closed" },
   },
   {
     name: "ecr-prod",
     type: "ecr",
-    product: "Amazon ECR",
+    vendor: "ecr",
     url: "https://123456789012.dkr.ecr.eu-central-1.amazonaws.com",
     prefix: "art/",
-    support: "manual",
+    support: "hosted",
     capabilities: {
+      ...capabilities,
       createOnPush: false,
       referrers: true,
       catalog: false,
@@ -57,30 +63,36 @@ export const registries: Omit<Registry, "repos">[] = [
       immutableTags: true,
       blobRedirect: true,
       maxBlobSize: 52_000 * 1024 * 1024,
+      consistency: "eventual",
+      consistencyBound: "2m10s",
+      maxNameLength: 256,
     },
-    status: { state: "ok", checkedAt: before(0, 0, 0.6), latencyMs: 38, message: null },
+    status: { state: "ok", checkedAt: before(0, 0, 0.6), answeredAt: before(0, 0, 0.6), latencyMs: 38, message: null, breaker: "closed" },
   },
   {
     name: "ci-distribution",
     type: "generic",
-    product: "distribution 3.0",
+    vendor: "distribution",
     url: "http://registry.ci.svc:5000",
     prefix: "",
     support: "ci",
     capabilities: {
+      ...capabilities,
       createOnPush: true,
       referrers: false,
       catalog: true,
       deleteManifest: false,
       immutableTags: false,
       blobRedirect: false,
-      maxBlobSize: 0,
+      referrersAlwaysTag: true,
     },
     status: {
       state: "degraded",
       checkedAt: before(0, 0, 0.8),
+      answeredAt: before(0, 0, 1.3),
       latencyMs: 1240,
       message: "/v2/ answered in 1.24 s (threshold 1 s)",
+      breaker: "half-open",
     },
   },
 ];
@@ -335,6 +347,8 @@ export const bindings: MockBinding[] = [
 
 export const roleActions: Record<Binding["role"], ("read" | "write" | "delete" | "manage")[]> = {
   reader: ["read"],
+  // attach is not among a repo's permissions: it is a /v2 action, the PUT of a referrer.
+  attacher: ["read"],
   writer: ["read", "write"],
   maintainer: ["read", "write", "delete", "manage"],
   admin: ["read", "write", "delete", "manage"],

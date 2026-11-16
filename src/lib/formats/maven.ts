@@ -16,8 +16,8 @@ export const maven: FormatSpec = {
   noun: { one: "artifact", many: "artifacts" },
   variantLabel: null,
   artifactType: "application/vnd.lajstrom.maven.v1",
-  facets: [{ key: "maven.packaging", label: "Packaging" }],
-  columns: [{ key: "maven.packaging", label: "Packaging" }],
+  facets: [{ key: "lajstrom.maven.packaging", label: "Packaging" }],
+  columns: [{ key: "lajstrom.maven.packaging", label: "Packaging" }],
   connect(ctx) {
     const url = `${ctx.baseUrl}/maven/${ctx.repo.name}`;
     const id = `lajstrom-${ctx.repo.name}`;
@@ -124,7 +124,7 @@ export const maven: FormatSpec = {
   install(_ctx, pkg, version) {
     const { groupId, artifactId } = coords(pkg.name);
     const v = version?.version ?? pkg.latestVersion ?? "<version>";
-    const packaging = version?.attrs?.["lajstrom.maven.packaging"] ?? pkg.attrs?.["maven.packaging"];
+    const packaging = version?.attrs?.["lajstrom.maven.packaging"] ?? pkg.attrs?.["lajstrom.maven.packaging"];
     const typeLine = packaging && packaging !== "jar" ? [`  <type>${packaging}</type>`] : [];
     return [
       {

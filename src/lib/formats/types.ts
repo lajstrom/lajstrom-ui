@@ -66,9 +66,10 @@ export type FormatSpec = {
   /** Name of the variant dimension, or null for formats without variants. */
   variantLabel: string | null;
   artifactType: string;
-  /** Attribute keys offered as filters on the repo page, with labels. */
+  /** Attribute keys offered as filters on the repo page, with labels; the annotation's full key,
+   * as the server's attr, facet and attrs have it: lajstrom.deb.suite. */
   facets: { key: string; label: string }[];
-  /** Extra columns of the package table: attribute key → header. */
+  /** Extra columns of the package table: attribute key, the full one → header. */
   columns: { key: string; label: string }[];
   /** How to configure a client for the whole repo. */
   connect(ctx: SnippetContext): SnippetGroup[];

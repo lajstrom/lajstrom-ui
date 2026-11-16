@@ -141,7 +141,7 @@ function CreateRepoDialog({ format, onClose }: { format?: string; onClose: () =>
                 <Select id={ids.registry} value={registry} onChange={(e) => set({ registry: e.target.value })} className="font-mono">
                   {registries.data!.map((r) => (
                     <option key={r.name} value={r.name}>
-                      {r.name} ({r.product})
+                      {r.vendor ? `${r.name} (${r.vendor})` : r.name}
                     </option>
                   ))}
                 </Select>

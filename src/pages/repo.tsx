@@ -20,6 +20,8 @@ import { formatBytes, formatNumber, pluralize, shortDigest } from "@/lib/format"
 import { connectFor, formatSpec, snippetContext, type FormatSpec } from "@/lib/formats";
 import { facetParam, variantShort } from "@/lib/variants";
 
+import { rawLevel } from "./raw-tree";
+
 import { KindBadge, KindEmpty, KindSummary, MembersCard } from "./repo-kinds";
 import { RepoSettings } from "./repo-settings";
 import { RepoActivity, RepoDetails, RepoMaintenance } from "./repo-tabs";
@@ -110,7 +112,7 @@ export function RepoPage() {
               {r.stats && r.kind !== "group" ? (
                 <>
                   {" "}
-                  · last publish <RelativeTime iso={r.stats.lastPushAt} />
+                  · last publish <RelativeTime iso={r.stats.lastPublishedAt} />
                 </>
               ) : null}
             </span>
@@ -281,13 +283,16 @@ function PackagesTab({ repo, spec, search, setSearch }: PackagesTabProps) {
     .map((f) => [f.key, facetValues[facetParam(f.key)]] as const)
     .filter(([, v]) => v)
     .map(([k, v]) => `${k}:${v}`);
+  // Browsing a raw repo lists the subtree of its directory, a page as large as the server allows,
+  // and shows it one level at a time (raw-tree.ts).
   const params = {
-    prefix: search.prefix,
+    prefix: browsing ? search.dir || undefined : search.prefix,
     attr,
     sort: search.sort,
     order: search.order,
+    facet: spec.facets.length ? spec.facets.map((f) => f.key) : undefined,
     cursor: search.cursor,
-    dir: browsing ? (search.dir ?? "") : undefined,
+    limit: browsing ? 1000 : undefined,
   };
   const pkgs = useQuery(packagesQuery(repo.format, repo.name, params));
   const data = pkgs.data;
@@ -299,12 +304,9 @@ function PackagesTab({ repo, spec, search, setSearch }: PackagesTabProps) {
       order: sort === col ? (order === "asc" ? "desc" : "asc") : col === "name" ? undefined : "desc",
     });
   const filtered = Boolean(search.prefix || attr.length);
-  // Facets in the answer: the server takes the proposed filters, sort and directories
-  // (lajstrom/lajstrom#955); without them the list is by name, filtered by prefix.
-  const proposed = data?.facets !== undefined;
-  const facts = data?.packages.some((p) => p.versions !== undefined) ?? false;
-  const inDirs = browsing && data?.directories !== undefined;
-  const sorting = proposed ? { sort, order, sortBy } : null;
+  const level = browsing && data ? rawLevel(search.dir ?? "", data.packages) : null;
+  const rows = level ? level.files : (data?.packages ?? []);
+  const sorting = { sort, order, sortBy };
 
   return (
     <>
@@ -350,12 +352,12 @@ function PackagesTab({ repo, spec, search, setSearch }: PackagesTabProps) {
           ) : null}
           <span className={cn("ml-auto text-xs text-muted-foreground tabular", pkgs.isFetching && "animate-skeleton")}>
             {data
-              ? `${pluralize(data.packages.length + (data.directories?.length ?? 0), inDirs ? "item" : spec.noun.one, inDirs ? "items" : spec.noun.many)}${data.next ? " on this page" : ""}`
+              ? `${pluralize(rows.length + (level?.directories.length ?? 0), level ? "item" : spec.noun.one, level ? "items" : spec.noun.many)}${data.next ? " on this page" : ""}`
               : null}
           </span>
         </div>
 
-        {inDirs ? <RawPath dir={search.dir ?? ""} onDir={(dir) => setSearch({ dir: dir || undefined })} /> : null}
+        {browsing ? <RawPath dir={search.dir ?? ""} onDir={(dir) => setSearch({ dir: dir || undefined })} /> : null}
 
         {pkgs.isError ? (
           <ErrorState error={pkgs.error} onRetry={() => void pkgs.refetch()} />
@@ -365,7 +367,7 @@ function PackagesTab({ repo, spec, search, setSearch }: PackagesTabProps) {
               <Skeleton key={i} className="h-10" />
             ))}
           </div>
-        ) : data.packages.length === 0 && !(data.directories?.length ?? 0) ? (
+        ) : rows.length === 0 && !level?.directories.length ? (
           filtered ? (
             <EmptyState icon={<SearchIcon />} title={`No ${spec.noun.many} match`}>
               Nothing matches the search or the filters. Clear them to see everything.
@@ -382,29 +384,23 @@ function PackagesTab({ repo, spec, search, setSearch }: PackagesTabProps) {
                 <Sortable col="name" sorting={sorting}>
                   {isRaw ? "Path" : "Name"}
                 </Sortable>
-                {facts ? (
-                  <>
-                    <TH>{isRaw ? "Current version" : "Latest version"}</TH>
-                    {spec.columns.map((c) => (
-                      <TH key={c.key}>{c.label}</TH>
-                    ))}
-                    <Sortable col="versions" sorting={sorting} className="text-right">
-                      Versions
-                    </Sortable>
-                    <Sortable col="size" sorting={sorting} className="text-right">
-                      Size
-                    </Sortable>
-                    <Sortable col="updated" sorting={sorting}>
-                      Updated
-                    </Sortable>
-                  </>
-                ) : (
-                  <TH>First published</TH>
-                )}
+                <TH>{isRaw ? "Current version" : "Latest version"}</TH>
+                {spec.columns.map((c) => (
+                  <TH key={c.key}>{c.label}</TH>
+                ))}
+                <Sortable col="versions" sorting={sorting} className="text-right">
+                  Versions
+                </Sortable>
+                <Sortable col="size" sorting={sorting} className="text-right">
+                  Size
+                </Sortable>
+                <Sortable col="updated" sorting={sorting}>
+                  Updated
+                </Sortable>
               </TR>
             </THead>
             <TBody>
-              {data.directories?.map((d) => (
+              {level?.directories.map((d) => (
                 <TR key={d.path} className="cursor-pointer hover:bg-surface" onClick={() => setSearch({ dir: d.path })}>
                   <TD colSpan={2 + spec.columns.length}>
                     <span className="flex items-center gap-2 font-medium">
@@ -419,8 +415,8 @@ function PackagesTab({ repo, spec, search, setSearch }: PackagesTabProps) {
                   </TD>
                 </TR>
               ))}
-              {data.packages.map((p) => (
-                <PackageRow key={p.name} repo={repo} spec={spec} pkg={p} dir={inDirs ? (search.dir ?? "") : ""} facts={facts} />
+              {rows.map((p) => (
+                <PackageRow key={p.name} repo={repo} spec={spec} pkg={p} dir={level ? (search.dir ?? "") : ""} />
               ))}
             </TBody>
           </Table>
@@ -464,11 +460,10 @@ function RawPath({ dir, onDir }: { dir: string; onDir: (dir: string) => void }) 
 }
 
 type SortCol = NonNullable<RepoSearch["sort"]>;
-type Sorting = { sort: SortCol; order: "asc" | "desc"; sortBy: (col: SortCol) => void } | null;
+type Sorting = { sort: SortCol; order: "asc" | "desc"; sortBy: (col: SortCol) => void };
 
-/** A column header that sorts when the server takes the proposed sort, else a plain one. */
+/** A column header that sorts the list. */
 function Sortable({ col, sorting, className, children }: { col: SortCol; sorting: Sorting; className?: string; children: ReactNode }) {
-  if (!sorting) return <TH className={className}>{children}</TH>;
   return (
     <SortableTH active={sorting.sort === col} direction={sorting.order} onSort={() => sorting.sortBy(col)} className={className}>
       {children}
@@ -476,7 +471,7 @@ function Sortable({ col, sorting, className, children }: { col: SortCol; sorting
   );
 }
 
-function PackageRow({ repo, spec, pkg, dir, facts }: { repo: Repo; spec: FormatSpec; pkg: PackageSummary; dir: string; facts: boolean }) {
+function PackageRow({ repo, spec, pkg, dir }: { repo: Repo; spec: FormatSpec; pkg: PackageSummary; dir: string }) {
   const navigate = useNavigate();
   const isRaw = repo.format === "raw";
   const label: ReactNode = isRaw ? pkg.name.slice(dir.length) : pkg.name;
@@ -505,47 +500,39 @@ function PackageRow({ repo, spec, pkg, dir, facts }: { repo: Repo; spec: FormatS
           </div>
         </div>
       </TD>
-      {facts ? (
-        <>
-          <TD>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Tooltip content={isRaw ? "Version of a raw file: the first 16 hex digits of its sha256" : null}>
-                <span className="font-mono text-[13px]">{isRaw ? shortDigest(pkg.latestVersion ?? "", 8) : pkg.latestVersion}</span>
-              </Tooltip>
-              {latestVariants.length > 0 ? (
-                <Tooltip content={`${spec.variantLabel}: ${latestVariants.join(", ")}`}>
-                  <span className="flex gap-1">
-                    {latestVariants.slice(0, 3).map((v) => (
-                      <Badge key={v} tone="outline" shape="square" className="px-1.5 font-mono text-[11px]">
-                        {variantShort(v)}
-                      </Badge>
-                    ))}
-                    {latestVariants.length > 3 ? (
-                      <Badge tone="outline" shape="square" className="px-1.5 text-[11px]">
-                        +{latestVariants.length - 3}
-                      </Badge>
-                    ) : null}
-                  </span>
-                </Tooltip>
-              ) : null}
-            </div>
-          </TD>
-          {spec.columns.map((c) => (
-            <TD key={c.key} className="font-mono text-xs text-muted-foreground">
-              {pkg.attrs?.[c.key] ?? "—"}
-            </TD>
-          ))}
-          <TD className="text-right tabular">{pkg.versions === undefined ? "—" : formatNumber(pkg.versions)}</TD>
-          <TD className="text-right tabular whitespace-nowrap">{pkg.size === undefined ? "—" : formatBytes(pkg.size)}</TD>
-          <TD className="text-muted-foreground">
-            <RelativeTime iso={pkg.updatedAt ?? null} />
-          </TD>
-        </>
-      ) : (
-        <TD className="text-muted-foreground">
-          <RelativeTime iso={pkg.createdAt} />
+      <TD>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Tooltip content={isRaw ? "Version of a raw file: the first 16 hex digits of its sha256" : null}>
+            <span className="font-mono text-[13px]">{isRaw ? shortDigest(pkg.latestVersion ?? "", 8) : pkg.latestVersion}</span>
+          </Tooltip>
+          {latestVariants.length > 0 ? (
+            <Tooltip content={`${spec.variantLabel}: ${latestVariants.join(", ")}`}>
+              <span className="flex gap-1">
+                {latestVariants.slice(0, 3).map((v) => (
+                  <Badge key={v} tone="outline" shape="square" className="px-1.5 font-mono text-[11px]">
+                    {variantShort(v)}
+                  </Badge>
+                ))}
+                {latestVariants.length > 3 ? (
+                  <Badge tone="outline" shape="square" className="px-1.5 text-[11px]">
+                    +{latestVariants.length - 3}
+                  </Badge>
+                ) : null}
+              </span>
+            </Tooltip>
+          ) : null}
+        </div>
+      </TD>
+      {spec.columns.map((c) => (
+        <TD key={c.key} className="font-mono text-xs text-muted-foreground">
+          {pkg.attrs[c.key] ?? "—"}
         </TD>
-      )}
+      ))}
+      <TD className="text-right tabular">{formatNumber(pkg.versions)}</TD>
+      <TD className="text-right tabular whitespace-nowrap">{formatBytes(pkg.size)}</TD>
+      <TD className="text-muted-foreground">
+        <RelativeTime iso={pkg.updatedAt} />
+      </TD>
     </TR>
   );
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
+import proposedText from "../../openapi/proposed.yaml?raw";
 import specText from "../../public/openapi.yaml?raw";
 import handlersSource from "./handlers.ts?raw";
 
@@ -27,6 +28,17 @@ const mockOps = new Set(
  * answers to a path it does not know. The UI does none of them yet. */
 const notMocked = new Set([
   "get /api/v1/openapi.yaml",
+  // Policy rules, verdicts and the denylist (lajstrom/lajstrom#101): no screen yet.
+  "get /api/v1/policy/rules",
+  "post /api/v1/policy/rules",
+  "delete /api/v1/policy/rules/{id}",
+  "get /api/v1/policy/verdicts",
+  "get /api/v1/policy/key",
+  "get /api/v1/policy/denylist",
+  "post /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/deny",
+  "delete /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/deny",
+  // The DPoP-bound sign-in of a web UI: the UI signs in with a token of its user still.
+  "post /api/v1/login",
 ]);
 
 describe("public/openapi.yaml against the mock", () => {
@@ -45,8 +57,9 @@ describe("public/openapi.yaml against the mock", () => {
         .filter(([m, op]) => METHODS.includes(m) && op["x-lajstrom-status"] === "proposed")
         .map(([m]) => `${m} ${path}`),
     );
-    expect(proposed.length).toBeGreaterThan(4);
     expect(proposed.filter((op) => !mockOps.has(op))).toEqual([]);
+    // The merge marks what the proposal adds, an operation or a field.
+    expect(specText).toContain("x-lajstrom-status: proposed");
   });
 
   it("resolves every $ref", () => {
@@ -65,7 +78,9 @@ describe("public/openapi.yaml against the mock", () => {
     expect(empty).toEqual([]);
   });
 
-  it("names no ticket numbers", () => {
-    expect(specText).not.toMatch(/(^|[^&\w])#\d+\b|\b[MP]\d?-\d{2}\b/m);
+  // The proposal's text names lajstrom/lajstrom#…, never a bare number; the server's own text is
+  // the server's.
+  it("names no bare ticket numbers in the proposal", () => {
+    expect(proposedText).not.toMatch(/(^|[^&\w/])#\d+\b|\b[MP]\d?-\d{2}\b/m);
   });
 });

@@ -12,11 +12,12 @@ it talks to the server only through `/api/v1`.
 **Try it: [lajstrom.github.io/lajstrom-ui](https://lajstrom.github.io/lajstrom-ui/)**, the
 [demo](#demo) of `main` on generated data, in your browser. Sign in as `admin` / `admin`.
 
-**Status: prototype.** Against a server it shows what the server serves today (repositories,
-who you are, personal and deploy tokens) and says plainly where the server has no endpoint yet.
-Everything else runs in the [demo](#demo), on a mock of `/api/v1` in the browser built from the
-server's specs. The read endpoints the UI needs are proposed in
-[docs/api-proposal.md](docs/api-proposal.md). Why this is a separate repository:
+**Status: prototype.** It follows the `/api/v1` of the server's main branch, whose
+`openapi.yaml` is vendored in [openapi/server.yaml](openapi/server.yaml), and says plainly where
+an older server has no endpoint yet. Everything also runs in the [demo](#demo), on a mock of
+`/api/v1` in the browser built from the server's specs. What the UI asked of the server, and
+where the server has it, is in [docs/api-proposal.md](docs/api-proposal.md). Why this is a
+separate repository:
 [ADR 0001](docs/adr/0001-web-ui-in-its-own-repository.md).
 
 ## Requirements
@@ -398,10 +399,10 @@ into the app open; serve `config.json` and `index.html` with `Cache-Control: no-
   `sed -i 's|<base href="/">|<base href="/ui/">|' index.html`.
 - **At the root of a static origin**, such as object storage behind a CDN: upload the files as
   they are, with `config.json`, and let the CDN answer a path without a file with `/index.html`
-  and status 200. The base `/` is right there. An API on another origin needs CORS, which the
-  server does not answer yet ([lajstrom/lajstrom#949](https://github.com/lajstrom/lajstrom/issues/949)):
-  until then such a UI runs the demo (`"mock": true`), or the CDN also routes `/api/` and `/-/`
-  to Lajstrom.
+  and status 200. The base `/` is right there. An API on another origin needs CORS: list the
+  UI's origin in the server's `server.corsOrigins`
+  ([lajstrom/lajstrom#949](https://github.com/lajstrom/lajstrom/issues/949)), or let the CDN also
+  route `/api/` and `/-/` to Lajstrom.
 
 ### Compatibility
 

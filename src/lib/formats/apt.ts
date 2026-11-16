@@ -12,21 +12,21 @@ export const apt: FormatSpec = {
   variantLabel: "Architecture",
   artifactType: "application/vnd.lajstrom.deb.v1",
   facets: [
-    { key: "deb.suite", label: "Suite" },
-    { key: "deb.component", label: "Component" },
-    { key: "deb.arch", label: "Architecture" },
+    { key: "lajstrom.deb.suite", label: "Suite" },
+    { key: "lajstrom.deb.component", label: "Component" },
+    { key: "lajstrom.deb.arch", label: "Architecture" },
   ],
   columns: [
-    { key: "deb.suite", label: "Suite" },
-    { key: "deb.component", label: "Component" },
+    { key: "lajstrom.deb.suite", label: "Suite" },
+    { key: "lajstrom.deb.component", label: "Component" },
   ],
   connect(ctx) {
     const repo = ctx.repo.name;
     const base = `${ctx.baseUrl}/apt/${repo}`;
     const host = new URL(ctx.baseUrl).host;
-    const suites = ctx.facets?.["deb.suite"]?.map((f) => f.value) ?? [];
+    const suites = ctx.facets?.["lajstrom.deb.suite"]?.map((f) => f.value) ?? [];
     const suite = suites[0] ?? "jammy";
-    const components = ctx.facets?.["deb.component"]?.map((f) => f.value).join(" ") || "main";
+    const components = ctx.facets?.["lajstrom.deb.component"]?.map((f) => f.value).join(" ") || "main";
     return [
       {
         title: "Add the repository",

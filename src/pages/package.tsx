@@ -190,7 +190,6 @@ function VersionsTable({
 }) {
   const navigate = useNavigate();
   const isRaw = format === "raw";
-  const sized = groups.some((g) => g.size !== null);
   const byKnown = groups.some((g) => g.uploadedBy !== null);
   // npm's dist-tag latest says which version is the latest; without one, the newest is.
   const tagged = latestByPointer(groups) !== undefined;
@@ -218,7 +217,7 @@ function VersionsTable({
           <TH>Version</TH>
           {spec.variantLabel ? <TH>{spec.variantLabel}</TH> : null}
           {format === "apt" ? <TH>Suite</TH> : null}
-          {sized ? <TH className="text-right">Size</TH> : null}
+          <TH className="text-right">Size</TH>
           <TH>Published</TH>
           {byKnown ? <TH>By</TH> : null}
         </TR>
@@ -260,7 +259,7 @@ function VersionsTable({
                     <Badge tone="warning">yanked</Badge>
                   </Tooltip>
                 ) : null}
-                <SignedBadge count={g.signatures ?? 0} compact />
+                <SignedBadge count={g.signatures} compact />
                 {g.degraded ? (
                   <Tooltip content="Metadata layer missing or unreadable: indexed from annotations only">
                     <Badge tone="warning">degraded</Badge>
@@ -290,7 +289,7 @@ function VersionsTable({
                 {g.variants[0]?.attrs ? `${g.variants[0].attrs["lajstrom.deb.suite"] ?? ""}/${g.variants[0].attrs["lajstrom.deb.component"] ?? ""}` : "—"}
               </TD>
             ) : null}
-            {sized ? <TD className="text-right tabular whitespace-nowrap">{g.size === null ? "—" : formatBytes(g.size)}</TD> : null}
+            <TD className="text-right tabular whitespace-nowrap">{formatBytes(g.size)}</TD>
             <TD className="text-muted-foreground">
               <RelativeTime iso={g.publishedAt} />
             </TD>
@@ -378,7 +377,7 @@ function PackageFacts({ pkg, format, repoName, spec }: { pkg: PackageInfo; forma
               ) : null}
             </Property>
           ) : null}
-          {pkg.size !== undefined ? <Property label="Total size">{formatBytes(pkg.size)}</Property> : null}
+          <Property label="Total size">{formatBytes(pkg.size)}</Property>
           <Property label="First published">
             <RelativeTime iso={pkg.createdAt} />
           </Property>

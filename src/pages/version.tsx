@@ -13,8 +13,8 @@ import {
 } from "lucide-react";
 
 import { ApiError, isUnavailable } from "@/api/client";
-import { attachmentsQuery, infoQuery, packageQuery, repoQuery, versionQuery, versionsQuery } from "@/api/queries";
-import type { Attachment, Repo, VariantDetail, VersionDetail } from "@/api/types";
+import { attachmentsQuery, infoQuery, manifestQuery, packageQuery, repoQuery, versionQuery, versionsQuery } from "@/api/queries";
+import type { Attachment, ManifestEntry, Repo, VariantDetail, VersionDetail } from "@/api/types";
 import { ErrorState, FormatMark, PageHeader, Principal, RelativeTime } from "@/components/common";
 import { PointerBadges } from "@/components/pointers";
 import { SnippetTabs } from "@/components/snippets";
@@ -43,7 +43,6 @@ type Props = { format: string; repoName: string; name: string; version: string }
  * version and the format add. */
 type View = VariantDetail & {
   version: string;
-  ociRepository: string;
   size: number;
   /** lajstrom.uploaded-by, absent on a degraded row. */
   uploadedBy: string | null;
@@ -53,7 +52,6 @@ function viewOf(d: VersionDetail, v: VariantDetail): View {
   return {
     ...v,
     version: d.version,
-    ociRepository: d.ociRepository,
     size: v.files.reduce((n, f) => n + f.size, 0),
     uploadedBy: v.attrs["lajstrom.uploaded-by"] ?? null,
   };
@@ -71,6 +69,8 @@ export function VersionPage({ format, repoName, name, version }: Props) {
   const d = detail.data;
   const variant = d?.variants.find((v) => v.variant === search.variant) ?? d?.variants[0];
   const view = d && variant ? viewOf(d, variant) : undefined;
+  // The manifest and its annotations, read from the registry: the index has neither.
+  const manifest = useQuery({ ...manifestQuery(format, repoName, name, version, variant?.variant ?? ""), enabled: view !== undefined });
   const latest = pkg.data?.latestVersion ?? (versions.data ? (latestByPointer(versions.data) ?? versions.data[0]?.version) : undefined);
   // npm's dist-tag latest is a badge of its own among the pointers.
   const isLatest = latest === version && !d?.pointers.some((p) => p.name === "latest");
@@ -180,10 +180,10 @@ export function VersionPage({ format, repoName, name, version }: Props) {
             <UseCard repo={repo.data} view={view} spec={spec} pkgName={name} />
             <AttachmentsCard format={format} repoName={repoName} pkgName={name} view={view} />
             <MetadataCard view={view} spec={spec} />
-            <ManifestCard view={view} />
+            <ManifestCard view={view} manifest={manifest.isError ? null : manifest.data} />
           </div>
           <aside className="min-w-0 space-y-4">
-            <DetailsCard view={view} />
+            <DetailsCard view={view} annotations={annotationsOf(manifest.data)} />
             <AttributesCard view={view} format={format} />
           </aside>
         </div>
@@ -393,11 +393,20 @@ function MetadataCard({ view, spec }: { view: View; spec: FormatSpec }) {
   );
 }
 
-function ManifestCard({ view }: { view: View }) {
+/** The manifest's annotations; a manifest without them has none. */
+function annotationsOf(m: ManifestEntry | null | undefined): Record<string, string> | undefined {
+  if (!m) return undefined;
+  const a = m.manifest.annotations;
+  if (typeof a !== "object" || a === null) return {};
+  return Object.fromEntries(Object.entries(a).filter((e): e is [string, string] => typeof e[1] === "string"));
+}
+
+function ManifestCard({ view, manifest }: { view: View; manifest: ManifestEntry | null | undefined }) {
   const info = useQuery(infoQuery);
   const host = info.data?.externalURL ? new URL(info.data.externalURL).host : window.location.host;
-  if (!view.annotations || !view.manifest) {
-    // The server reads the manifest from the registry on /v2, not in /api/v1 (lajstrom/lajstrom#951).
+  if (manifest === undefined) return <Skeleton className="h-40" />;
+  if (manifest === null) {
+    // A server before GET …/manifest, or a registry that does not answer: /v2 has it.
     return (
       <Card>
         <CardHeader icon={<Tags />} title="Manifest" description="On /v2 under the version's OCI repository; the registry stays the source of truth" />
@@ -407,7 +416,7 @@ function ManifestCard({ view }: { view: View }) {
       </Card>
     );
   }
-  const entries = Object.entries(view.annotations);
+  const entries = Object.entries(annotationsOf(manifest) ?? {});
   return (
     <Card>
       <CardHeader
@@ -428,19 +437,19 @@ function ManifestCard({ view }: { view: View }) {
       <CardBody className="border-t border-border">
         <details>
           <summary className="cursor-pointer text-sm text-primary select-none hover:underline">Show the OCI manifest</summary>
-          <CodeBlock className="mt-2" caption={`${view.manifest.mediaType} · ${shortDigest(view.digest)}`} code={JSON.stringify(view.manifest, null, 2)} />
+          <CodeBlock className="mt-2" caption={`${manifest.mediaType} · ${shortDigest(manifest.digest)}`} code={JSON.stringify(manifest.manifest, null, 2)} />
         </details>
       </CardBody>
     </Card>
   );
 }
 
-function DetailsCard({ view }: { view: View }) {
+function DetailsCard({ view, annotations }: { view: View; annotations: Record<string, string> | undefined }) {
   const info = useQuery(infoQuery);
   const host = info.data?.externalURL ? new URL(info.data.externalURL).host : window.location.host;
   const reference = `${view.ociRepository}:${view.tag}`;
-  const source = view.annotations?.["org.opencontainers.image.source"];
-  const revision = view.annotations?.["org.opencontainers.image.revision"];
+  const source = annotations?.["org.opencontainers.image.source"];
+  const revision = annotations?.["org.opencontainers.image.revision"];
   return (
     <Card>
       <CardHeader icon={<Fingerprint />} title="Manifest" />

@@ -30,6 +30,7 @@ describe("src/api/openapi.gen.ts", () => {
         b: {type: [string, "null"], enum: [x, y, null]}
         c: {type: array, items: {anyOf: [{type: string}, {type: integer}]}}
         "d.e": {type: object, additionalProperties: {type: string}}
+        g: {type: object, required: [h], properties: {h: {type: integer}}, additionalProperties: {type: integer}}
     B:
       allOf:
         - $ref: "#/components/schemas/A"
@@ -40,6 +41,7 @@ describe("src/api/openapi.gen.ts", () => {
     expect(out).toContain('    b?: "x" | "y" | null;\n');
     expect(out).toContain("    c?: (string | number)[];\n");
     expect(out).toContain('    "d.e"?: Record<string, string>;\n');
+    expect(out).toContain("    g?: {\n      h: number;\n      [key: string]: number;\n    };\n");
     expect(out).toContain('  B: Schemas["A"] & {\n    f?: boolean;\n  };\n');
   });
 });

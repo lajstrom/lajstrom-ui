@@ -53,7 +53,7 @@ function StartReindexDialog({ repo, onClose }: { repo: Repo; onClose: () => void
   const ids = { prune: useId(), verify: useId() };
   const [prune, setPrune] = useState(false);
   const [verify, setVerify] = useState(false);
-  const noReferrersApi = regs.data?.find((r) => r.name === repo.registry)?.capabilities.referrers === false;
+  const noReferrersApi = regs.data?.find((r) => r.name === repo.registry)?.capabilities?.referrers === false;
   return (
     <Dialog open onOpenChange={(o) => !o && !start.isPending && onClose()}>
       <DialogContent

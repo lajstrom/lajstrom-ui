@@ -1,6 +1,9 @@
 # Proposal: what the web UI reads from `/api/v1` that the server does not answer yet
 
-- Status: each part is an issue labelled `contract` in lajstrom/lajstrom, named below.
+- Status: the server answers all of it but an OIDC user's groups (§2.8), since
+  lajstrom/lajstrom@6c5bf5c, in the shapes its `internal/api/openapi.yaml` gives, which are the
+  contract (lajstrom/lajstrom-ui#2). Each part was an issue labelled `contract` in lajstrom/lajstrom,
+  named below.
 - Shapes: [`openapi/proposed.yaml`](../openapi/proposed.yaml), additions to the server's OpenAPI
   description. `npm run gen:api` merges the two into [`public/openapi.yaml`](../public/openapi.yaml),
   where each addition is marked `x-lajstrom-status: proposed`: the API page of the demo shows it.
@@ -11,98 +14,33 @@
 
 ## 1. Why
 
-The server's `/api/v1` has the repos, their packages and versions, attachments, reindex runs,
+The server's `/api/v1` had the repos, their packages and versions, attachments, reindex runs,
 users, bindings, tokens and the audit log. A list that says what a package is, a search box and
-the admin's view of registries need more, and the protocol frontends serve it only in each
+the admin's view of registries needed more, and the protocol frontends serve it only in each
 format's own shape (apt `Packages`, pypi simple pages, `maven-metadata.xml`), which the UI should
 not parse.
 
-Everything below comes from the index database, except a version's manifest and annotations
-and a registry's status, which are read live (§2.5, §2.7).
-
-The UI shows a proposed field or screen only when the server answers it: against today's
-server, the package list has names and first publish times, the package page is built from the
-versions, and the screens of the proposed endpoints say the server does not have them yet and
-offer the demo.
-
 ## 2. Endpoints and fields
 
-| What | Issue | In `openapi/proposed.yaml` |
-| --- | --- | --- |
-| The repo's counts, the caller's permissions, reindex state, apt signing keys | lajstrom/lajstrom#957 | `Repo`: `stats`, `permissions`, `reindex`, `signingKeys` |
-| The facts of a package row, filters, facets, sorting, raw directories | lajstrom/lajstrom#955, #954 (summary) | `Package`, `PackageList`; `attr`, `sort`, `order`, `dir` on `listPackages` |
-| One package | lajstrom/lajstrom#958 | `GET …/packages/{name}`, `PackageDetail` |
-| The facts of a variant in the version list | lajstrom/lajstrom#1132 | `Variant`: `artifactType`, `attrs`, `size`, `fileCount`, `degraded`, `referrers` |
-| A version's manifest and annotations | lajstrom/lajstrom#951 | `VariantDetail`: `manifest`, `annotations` |
-| A maven repo's open deploys | lajstrom/lajstrom#960 | `GET …/sessions`, `PublishSession` |
-| Search | lajstrom/lajstrom#956 | `GET /api/v1/search`, `SearchResult` |
-| The registries, their capabilities and health | lajstrom/lajstrom#952, #953 | `GET /api/v1/registries`, `Registry` |
-| Every token, for the admin | lajstrom/lajstrom#959 | `GET /api/v1/tokens` |
-| An OIDC user's kind and groups | none yet; OIDC is lajstrom/lajstrom#69 | `User`: `kind` `oidc`, `groups` |
-
-### 2.1 The repo
-
-The header of a repo page and the rows of the repo list in one call: `stats` (aggregates over
-the derived tables), `permissions` (the caller's actions on the repo, from the RBAC evaluator,
-so the UI does not offer what the server would refuse), `reindex` (reindex and reconcile state)
-and, for apt, the signing keys (public fingerprints only).
-
-### 2.2 The package list
-
-- `attr` filters on `versions.attrs` (`lajstrom.<format>.*` without the prefix); a package
-  matches when any of its manifests does. Repeat it for several attributes.
-- `sort` and `order`: name, last update, size or number of versions.
-- `dir` (raw only) lists one directory: the files directly in it as `packages`, its
-  subdirectories as `directories` with file counts and sizes.
-- `facets`: for the filter keys of the format (apt: `deb.suite`, `deb.component`, `deb.arch`;
-  maven: `maven.packaging`), the values present in the whole repo with package counts. An answer
-  with `facets` tells the UI that the server takes the parameters above.
-- A row adds `nameOci`, `latestVersion`, `versions` (distinct), `manifests`, `latestVariants`,
-  `size`, `summary`, `attrs` (of the newest manifest) and `updatedAt`. `summary` is one line from
-  the metadata layer (pypi `summary`, deb `Description`, maven POM `name`, npm `description`, rpm
-  `summary`); it can be a derived column of `packages`, rebuilt by reindex. For npm,
-  `latestVersion` is the version the dist-tag `latest` names, when the package has one, as npm
-  installs it; the newest otherwise.
-
-### 2.3 One package
-
-The row's facts with the OCI repository and the newest manifest's metadata layer, for the header
-of the package page. Without it, the UI derives the package from its versions and fetches the
-newest version (`src/pages/package-model.ts`).
-
-### 2.4 The variants of the version list
-
-The version list names each variant's tag, digest and publish time. Its size, file count, format
-attributes, whether it is degraded (no readable metadata layer: manifest-profile.md §2) and the
-counts of its signatures, SBOMs and attestations let the version table show them without one
-request per version.
-
-### 2.5 A version's manifest
-
-`GET …/versions/{version}` has the index's row of each variant. The manifest itself and its
-annotations come from the registry through the provider; a manifest never changes, so the server
-can cache it by digest. Without them the version page shows the `oras manifest fetch` command
-that reads them.
-
-### 2.6 Search
-
-`GET /api/v1/search?q=&format=&limit=` over the repos the caller can read: package names (exact,
-then prefix, then substring, then summary). A `sha256:` digest, or 8 or more hex digits, matches
-manifest digests and file layer digests by prefix, which answers "which package is this blob
-from?" from a CI log or a scanner report.
-
-### 2.7 Registries
-
-Admin only. The configured backends with the capabilities the provider detected, the support
-tier of the product, the repos on each and a health check.
+| What | Issue | Where the server has it | How it differs from what was proposed |
+| --- | --- | --- | --- |
+| The repo's counts, the caller's permissions, apt signing keys | lajstrom/lajstrom#957 | `Repo`: `stats`, `permissions`, `signingKeys` | No reindex state on the repo: `GET …/reindex` has it, for whoever manages the repo; `stats.lastPublishedAt` |
+| The facts of a package row, filters, facets, sorting | lajstrom/lajstrom#955, lajstrom/lajstrom#954 | `Package`, `PackageList`; `attr`, `sort`, `order`, `facet` on `listPackages` | Attributes by their full key (`lajstrom.deb.suite`), in `attr` too; facets only for the keys asked with `facet`; no `dir`: `prefix=<dir>/` lists a raw directory's subtree, which the UI shows a level at a time; `latestVersion` is what the format's client installs, `lastPublished` the newest |
+| One package | lajstrom/lajstrom#958 | `GET …/packages/{name}`, `PackageDetail` | |
+| The facts of a variant in the version list | lajstrom/lajstrom#1132 | `Variant`: `artifactType`, `attrs`, `size`, `fileCount`, `degraded`, `attachments` | `attachments` counts six kinds, as `…/attachments?kind=` lists them, for `referrers` |
+| A version's manifest and annotations | lajstrom/lajstrom#951 | `GET …/versions/{version}/manifest` and `…/referrers` | Endpoints of their own, not fields of `VariantDetail`; the annotations are the manifest's |
+| A maven repo's open deploys | lajstrom/lajstrom#960 | `GET …/sessions`, `Session` | Needs `manage`; only open sessions, without a state |
+| Search | lajstrom/lajstrom#956 | `GET /api/v1/search`, `SearchResult` | No `total`: pages with `next`; a file hit is `matched: "file"` with `file` |
+| The registries, their capabilities and health | lajstrom/lajstrom#952, lajstrom/lajstrom#953 | `GET /api/v1/registries`, `Registry` | `vendor` for `product`; four support tiers with `hosted`; capabilities null before a probe; the status is the answering replica's, with its circuit breaker |
+| Every token, for the admin | lajstrom/lajstrom#959 | `GET /api/v1/tokens` | |
+| An OIDC user's kind and groups | none yet; OIDC is lajstrom/lajstrom#69 | `User.kind` `oidc` | `groups` is still proposed (§2.8) |
 
 ### 2.8 An OIDC user
 
-The server makes a user of `kind` `oidc` at the first OIDC login of an identity (rbac.md §8),
-while its description of the user resource names `local` only. Its groups, those of its latest
-login that count now, are in whoami for the caller and nowhere for the admin, who binds groups
-and should see which users a group's bindings reach: the user resource gets `groups`, absent for
-a local user, as whoami has it.
+The server makes a user of `kind` `oidc` at the first OIDC login of an identity (rbac.md §8).
+Its groups, those of its latest login that count now, are in whoami for the caller and nowhere
+for the admin, who binds groups and should see which users a group's bindings reach: the user
+resource gets `groups`, absent for a local user, as whoami has it.
 
 ## 3. Conventions
 
@@ -120,9 +58,7 @@ a local user, as whoami has it.
 
 ## 4. Mock-only parts
 
-The mock fills these with plausible values; the real shapes are open:
-
-- registry `status` and `support` (the support tiers: `ci`, `manual`, `untested`).
+None: the mock answers the server's shapes, on generated data.
 
 ## 5. Browser session
 
@@ -135,11 +71,3 @@ revoking it. The token is kept in `localStorage`, shared by the UI's tabs; the i
 Content-Security-Policy allows no inline or foreign scripts. Requests go out with
 `credentials: "omit"`, so a `401` with the Basic challenge never opens the browser's own login
 dialog. OIDC login later replaces the password form, not the token.
-
-## 6. Open questions
-
-1. Should `VersionDetail` embed the manifest (one registry call per detail view) or should it be
-   a separate `…/versions/{version}/manifest`? (lajstrom/lajstrom#951)
-2. Does `GET /api/v1/registries` belong in the API at all, given registries are configuration?
-   The UI shows capabilities and health; `/-/readyz` details could serve that instead.
-   (lajstrom/lajstrom#952)

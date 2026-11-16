@@ -93,12 +93,13 @@ function object(s: Schema, indent: string): string {
     if (extra === false) return "Record<string, never>";
     return extra === undefined || extra === true ? "Record<string, unknown>" : `Record<string, ${type(extra, indent)}>`;
   }
-  if (typeof extra === "object") throw new Error("unsupported: properties together with an additionalProperties schema");
   const inner = indent + "  ";
   const required = new Set(s.required ?? []);
   const lines = props.map(
     ([name, p]) => `${doc(p.description, inner)}${inner}${key(name)}${required.has(name) ? "" : "?"}: ${type(p, inner)};`,
   );
+  // Named keys and the rest: an index signature, which TypeScript checks against each named one.
+  if (typeof extra === "object") lines.push(`${inner}[key: string]: ${type(extra, inner)};`);
   return `{\n${lines.join("\n")}\n${indent}}`;
 }
 
