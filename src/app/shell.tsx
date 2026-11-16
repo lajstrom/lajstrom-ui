@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, Navigate, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { Boxes, Braces, Check, FlaskConical, History, KeyRound, LogIn, LogOut, Monitor, Moon, Search, Server, Sun, User, Users, Webhook } from "lucide-react";
+import { Boxes, Braces, Check, FlaskConical, History, KeyRound, LogIn, LogOut, MenuIcon, Monitor, Moon, Search, Server, Sun, User, Users, Webhook } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { signOut } from "@/api/auth";
@@ -25,9 +25,9 @@ import { setTheme, useTheme, type Theme } from "./theme";
 function Logo() {
   // A logo of the instance's branding (config.json) in place of Lajstrom's mark.
   const brand = logoSrc();
-  if (brand) return <img src={brand} alt="" className="h-6 w-auto max-w-40 object-contain" />;
+  if (brand) return <img src={brand} alt="" className="h-6 w-auto max-w-40 shrink-0 object-contain" />;
   return (
-    <svg viewBox="0 0 32 32" className="size-6 text-primary" aria-hidden>
+    <svg viewBox="0 0 32 32" className="size-6 shrink-0 text-primary" aria-hidden>
       <rect x="6" y="1" width="9" height="9" rx="2" fill="currentColor" />
       <rect x="7" y="13" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" strokeWidth="2" />
       <rect x="6" y="23" width="9" height="9" rx="2" fill="currentColor" />
@@ -41,20 +41,78 @@ function Logo() {
   );
 }
 
-function NavLink({ to, icon, children }: { to: string; icon: React.ReactNode; children: React.ReactNode }) {
+type Page = { to: string; icon: React.ReactNode; label: string };
+
+/** The pages of the header: everyone's, then the admin's. */
+function pagesFor(admin: boolean): Page[] {
+  const pages: Page[] = [
+    { to: "/", icon: <Boxes />, label: "Repositories" },
+    { to: "/api-docs", icon: <Braces />, label: "API" },
+  ];
+  if (!admin) return pages;
+  return [
+    ...pages,
+    { to: "/registries", icon: <Server />, label: "Registries" },
+    { to: "/audit", icon: <History />, label: "Audit" },
+    { to: "/access", icon: <Users />, label: "Access" },
+    { to: "/webhooks", icon: <Webhook />, label: "Webhooks" },
+  ];
+}
+
+function useActivePage(): (to: string) => boolean {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const active = to === "/" ? !["/registries", "/audit", "/access", "/webhooks", "/search"].some((p) => pathname.startsWith(p)) : pathname.startsWith(to);
+  return (to) =>
+    to === "/" ? !["/api-docs", "/registries", "/audit", "/access", "/webhooks", "/search"].some((p) => pathname.startsWith(p)) : pathname.startsWith(to);
+}
+
+function NavLink({ page, active }: { page: Page; active: boolean }) {
   return (
     <Link
-      to={to}
+      to={page.to}
       className={cn(
-        "flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground [&_svg]:size-4",
+        "flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors hover:bg-muted hover:text-foreground [&_svg]:size-4",
         active && "bg-muted text-foreground",
       )}
     >
-      {icon}
-      <span className="hidden md:inline">{children}</span>
+      {page.icon}
+      {page.label}
     </Link>
+  );
+}
+
+/** The pages in a menu, where their links do not fit in the header. */
+function PagesMenu({ pages, className }: { pages: Page[]; className?: string }) {
+  const active = useActivePage();
+  const navigate = useNavigate();
+  return (
+    <Menu>
+      <Tooltip content="Pages">
+        <MenuTrigger asChild>
+          <Button variant="ghost" size="icon" aria-label="Pages" className={className}>
+            <MenuIcon />
+          </Button>
+        </MenuTrigger>
+      </Tooltip>
+      <MenuContent align="start" className="min-w-44">
+        {pages.map((p) => (
+          <MenuItem key={p.to} icon={p.icon} onSelect={() => void navigate({ to: p.to })} hint={active(p.to) ? <Check className="size-3.5" /> : null}>
+            {p.label}
+          </MenuItem>
+        ))}
+      </MenuContent>
+    </Menu>
+  );
+}
+
+/** The pages as links next to each other, where they fit. */
+function PagesNav({ pages, className }: { pages: Page[]; className?: string }) {
+  const active = useActivePage();
+  return (
+    <nav aria-label="Pages" className={cn("ml-2 items-center gap-0.5", className)}>
+      {pages.map((p) => (
+        <NavLink key={p.to} page={p} active={active(p.to)} />
+      ))}
+    </nav>
   );
 }
 
@@ -173,6 +231,11 @@ export function AppShell() {
   // page leads there and back after signing in, but the page that sets up the first admin.
   const signedOutDemo = demo.active && !session;
   const walled = signedOutDemo && location.pathname !== "/sign-in" && location.pathname !== "/first-admin";
+  const admin = who.data?.admin === true;
+  const pages = pagesFor(admin);
+  // The links fit next to the search and the menus, with their labels, from md; the admin's six
+  // from xl. Below that they are in a menu.
+  const wide = admin ? { nav: "hidden xl:flex", menu: "xl:hidden" } : { nav: "hidden md:flex", menu: "md:hidden" };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -200,42 +263,21 @@ export function AppShell() {
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/75">
         <div className="mx-auto flex h-13 max-w-7xl items-center gap-2 px-4 sm:px-6">
-          <Link to="/" className="mr-2 flex items-center gap-2 rounded-md">
+          {signedOutDemo ? null : <PagesMenu pages={pages} className={wide.menu} />}
+          <Link to="/" className="mr-2 flex min-w-0 items-center gap-2 rounded-md">
             <Logo />
-            <span className="text-[15px] font-semibold tracking-tight">{config().branding.title}</span>
+            <span className="truncate text-[15px] font-semibold tracking-tight">{config().branding.title}</span>
           </Link>
+          {/* Below lg the demo bar under the header says it alone, and the links have the room. */}
           {demo.active ? (
             <Tooltip content="Demo: the API is answered in this browser on generated data; nothing reaches a server.">
-              <Badge tone="warning" shape="square" className="hidden sm:inline-flex">
+              <Badge tone="warning" shape="square" className="hidden lg:inline-flex">
                 <FlaskConical />
                 demo
               </Badge>
             </Tooltip>
           ) : null}
-          <nav className={cn("ml-2 flex items-center gap-0.5", signedOutDemo && "hidden")}>
-            <NavLink to="/" icon={<Boxes />}>
-              Repositories
-            </NavLink>
-            <NavLink to="/api-docs" icon={<Braces />}>
-              API
-            </NavLink>
-            {who.data?.admin ? (
-              <>
-                <NavLink to="/registries" icon={<Server />}>
-                  Registries
-                </NavLink>
-                <NavLink to="/audit" icon={<History />}>
-                  Audit
-                </NavLink>
-                <NavLink to="/access" icon={<Users />}>
-                  Access
-                </NavLink>
-                <NavLink to="/webhooks" icon={<Webhook />}>
-                  Webhooks
-                </NavLink>
-              </>
-            ) : null}
-          </nav>
+          {signedOutDemo ? null : <PagesNav pages={pages} className={wide.nav} />}
           <div className="ml-auto flex items-center gap-1.5">
             <button
               type="button"
