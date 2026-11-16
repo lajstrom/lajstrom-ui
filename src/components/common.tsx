@@ -125,6 +125,8 @@ type PageHeaderProps = {
   actions?: ReactNode;
 };
 
+/** A page's title, with its actions to the right where they fit and below it where they do not;
+ * there they wrap onto more rows rather than run off a narrow screen. */
 export function PageHeader({ crumbs, title, icon, badges, description, actions }: PageHeaderProps) {
   return (
     <header className="mb-5">
@@ -138,7 +140,7 @@ export function PageHeader({ crumbs, title, icon, badges, description, actions }
           </div>
           {description ? <div className="mt-1 text-sm text-muted-foreground">{description}</div> : null}
         </div>
-        {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+        {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
       </div>
     </header>
   );
