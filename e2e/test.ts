@@ -4,7 +4,7 @@
 
 import { readFileSync } from "node:fs";
 
-import { test as base, expect, type APIRequestContext } from "@playwright/test";
+import { test as base, expect, type APIRequestContext, type Page } from "@playwright/test";
 import { parse } from "yaml";
 
 export { expect };
@@ -12,8 +12,19 @@ export { expect };
 export const user = process.env.LAJSTROM_E2E_USER ?? "";
 export const password = process.env.LAJSTROM_E2E_PASSWORD ?? "";
 
-/** The browser's session after signing in, from e2e/sign-in.e2e.ts. */
-export const session = "e2e-results/session.json";
+/**
+ * Signs in through the form, as a person does. Each test signs in in its own browser context: the
+ * token of a sign-in is bound to a DPoP key that the page keeps in IndexedDB, as a CryptoKey,
+ * which a saved storageState cannot carry to another context.
+ */
+export async function signIn(page: Page): Promise<void> {
+  expect(user && password, "LAJSTROM_E2E_USER and LAJSTROM_E2E_PASSWORD (e2e/server.sh writes them)").toBeTruthy();
+  await page.goto("sign-in");
+  await page.getByLabel("User name").fill(user);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("button", { name: user })).toBeVisible();
+}
 
 type Spec = { paths: Record<string, Record<string, { "x-lajstrom-status"?: string }>> };
 

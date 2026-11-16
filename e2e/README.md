@@ -40,4 +40,6 @@ kill "$(cat /tmp/lajstrom-e2e/server.pid)"
   Linux container.
 - The admin's name and password end up in `/tmp/lajstrom-e2e/env`.
 - `LAJSTROM_E2E_UI` changes the UI's URL: it defaults to `http://localhost:8080/ui/`, and
-  `npm run dev` with `LAJSTROM_UI_MOCK=false` serves `http://localhost:5173/ui/`.
+  `npm run dev` with `LAJSTROM_UI_MOCK=false` serves `http://localhost:5173/ui/`. Give it to
+  `e2e/server.sh` too: its origin is the server's `server.externalURL`, which the DPoP proofs of
+  the UI's sign-in name.

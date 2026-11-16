@@ -10,6 +10,9 @@
 #   LAJSTROM_E2E_REGISTRY  host:port of an OCI registry that takes anonymous pushes
 #                          (default localhost:5000, the Zot of the server's make dev-up)
 #   LAJSTROM_E2E_PORT      the server's port on 127.0.0.1 (default 18080)
+#   LAJSTROM_E2E_UI        the UI's URL, as playwright.config.ts takes it (default
+#                          http://localhost:8080/ui/): its origin is server.externalURL, the
+#                          URL the browser reaches the API at, which the UI's DPoP proofs name
 #
 # WORKDIR gets the configuration, the index, server.log, server.pid and env: the server's URL
 # and the admin's name and password, for the test (LAJSTROM_E2E_SERVER, LAJSTROM_E2E_USER,
@@ -27,6 +30,8 @@ here="$(cd "$(dirname "$0")" && pwd)"
 registry="${LAJSTROM_E2E_REGISTRY:-localhost:5000}"
 port="${LAJSTROM_E2E_PORT:-18080}"
 base="http://127.0.0.1:$port"
+ui="${LAJSTROM_E2E_UI:-http://localhost:8080/ui/}"
+external="$(printf '%s' "$ui" | sed -E 's#^(https?://[^/]+).*#\1#')"
 
 step() { printf 'ok   %s\n' "$*"; }
 
@@ -38,7 +43,7 @@ cat >"$work/lajstrom.yaml" <<EOF
 # Written by e2e/server.sh of lajstrom-ui.
 server:
   listen: "127.0.0.1:$port"
-  externalURL: "$base"
+  externalURL: "$external"
   insecureHTTP: true
   shutdownTimeout: 5s
   shutdownDelay: 0s
