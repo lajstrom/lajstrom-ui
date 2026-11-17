@@ -7,7 +7,7 @@
 // the token in any tab (localStorage): it warns two minutes before its bound and signs out at it
 // (src/app/idle-guard.tsx), before the server refuses.
 
-import { getSession, onSessionChange, sessionStorageKey } from "./session";
+import { onSessionChange, sessionStorageKey } from "./session";
 
 /** The server keeps a token's last use to the minute, so it refuses the token between a minute
  * short of idleTimeout and idleTimeout after that use: the UI's bound is the earlier. */
@@ -51,8 +51,8 @@ let awayTimer: ReturnType<typeof setTimeout> | undefined;
 const usedKey = () => `${sessionStorageKey()}.used`;
 const touchedKey = () => `${sessionStorageKey()}.touched`;
 
-/** The last use of the session's token in this tab, by token id, and the last touch. */
-let used: { id: number | null; at: number } | null = null;
+/** The last use of the session's token in this tab, and the last touch. */
+let used: number | null = null;
 let touched = Date.now();
 const shared = { used: 0, touched: 0 };
 
@@ -73,14 +73,14 @@ function write(key: string, value: unknown): void {
   }
 }
 
-/** The last use of the session's token, in this tab or another one; null when none is known. */
+/** The last use of the session's token, in this tab or another one; null when none is known.
+ * A sign-in counts as a use (watchIdle), so what an earlier session left behind is older than it
+ * and never the later of the two. */
 export function lastTokenUse(): number | null {
-  const id = getSession()?.tokenId ?? null;
-  const stored = readJson(usedKey()) as { id?: unknown; at?: unknown } | null;
-  const there = stored?.id === id && typeof stored.at === "number" ? stored.at : null;
-  const here = used?.id === id ? used.at : null;
-  if (there === null) return here;
-  return here === null ? there : Math.max(here, there);
+  const stored = readJson(usedKey());
+  const there = typeof stored === "number" ? stored : null;
+  if (there === null) return used;
+  return used === null ? there : Math.max(used, there);
 }
 
 /** The last touch of the UI, a key or the pointer, in this tab or another one. */
@@ -96,11 +96,11 @@ export function noteTokenUse(now = Date.now()): void {
   if (bound) update();
 }
 
-function recordUse(now: number): void {
-  used = { id: getSession()?.tokenId ?? null, at: now };
-  if (now - shared.used >= SHARE_EVERY) {
+function recordUse(now: number, share = false): void {
+  used = now;
+  if (share || now - shared.used >= SHARE_EVERY) {
     shared.used = now;
-    write(usedKey(), used);
+    write(usedKey(), now);
   }
 }
 
@@ -189,7 +189,10 @@ export function watchIdle(): void {
   window.addEventListener("storage", (e) => {
     if (bound && (e.key === usedKey() || e.key === touchedKey())) update();
   });
-  onSessionChange(() => {
+  // A sign-in, here or in another tab, is a use of its new token: the server counts from its
+  // creation.
+  onSessionChange((session) => {
+    if (session) recordUse(Date.now(), true);
     if (bound) update();
   });
 }
