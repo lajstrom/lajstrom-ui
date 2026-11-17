@@ -87,7 +87,9 @@ separate repository:
   exchanges the server's one-time bootstrap token for the first admin with a name and a password,
   then signs in as it.
 - **Tokens**: your personal access tokens and a repository's deploy tokens: create one, copy the
-  secret the one time it is shown, revoke.
+  secret the one time it is shown, revoke. A deploy token that lives longer than the server's
+  bound now allows (`auth.deployTokens.maxTTL`, set or lowered after it was made) is marked, to
+  be replaced.
 - **Webhooks**: a repository's on its Webhooks tab, for whoever manages it, and those of every
   mask (`oci/*`, `*/*`) on an admin page: create one and copy its secret the one time it is
   shown, change its URL and events, turn it on or off, give it a new secret, send a ping, and

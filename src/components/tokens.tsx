@@ -21,8 +21,21 @@ import { Segmented } from "./ui/misc";
 import { TBody, TD, TH, THead, TR, Table } from "./ui/table";
 import { Tooltip } from "./ui/tooltip";
 
-/** The state of a token. A session's token lives hours, not months: it is never "expiring". */
+/** The state of a token, and whether it outlives the bound of its kind (beyondMaxTTL). A
+ * session's token lives hours, not months: it is never "expiring". */
 export function TokenStatus({ token, session = false }: { token: Token; session?: boolean }) {
+  if (!token.beyondMaxTTL) return <TokenState token={token} session={session} />;
+  return (
+    <span className="inline-flex flex-wrap gap-1">
+      <TokenState token={token} session={session} />
+      <Tooltip content="It lives longer than the server now allows a token of its kind (auth.deployTokens.maxTTL for a deploy token): it was made before the bound was set or lowered, and has no expiry or a later one. Make a new token, move its client to it, and revoke this one.">
+        <Badge tone="warning">beyond max TTL</Badge>
+      </Tooltip>
+    </span>
+  );
+}
+
+function TokenState({ token, session }: { token: Token; session: boolean }) {
   const state = tokenState(token);
   if (state === "revoked") return <Badge tone="danger">revoked</Badge>;
   if (state === "expired") return <Badge tone="danger">expired</Badge>;
@@ -203,12 +216,16 @@ export function CreateTokenDialog({ kind, create, login, list, mask = false }: C
           { value: "read-write", label: "Read and publish" },
         ];
   const expiryOptions = [
-    ...(kind === "deploy" ? [{ value: "never", label: "Never" }] : [{ value: "7d", label: "7 days" }]),
+    ...(kind === "deploy" ? [{ value: "never", label: "Default" }] : [{ value: "7d", label: "7 days" }]),
     { value: "30d", label: "30 days" },
     { value: "90d", label: "90 days" },
     { value: "365d", label: "1 year" },
   ];
   const created = mutation.data;
+  const error = errorText(mutation.error);
+  // A refused expiry names its field (expiresIn: …, the bound and the latest expiry it allows):
+  // it is shown at the field.
+  const expiryError = error && /^expires(In|At):/.test(error) ? error : null;
 
   return (
     <Dialog
@@ -267,15 +284,27 @@ export function CreateTokenDialog({ kind, create, login, list, mask = false }: C
             >
               <Segmented aria-label="Access" value={access} onChange={setAccess} options={accessOptions} />
             </Field>
-            <Field label="Expires" hint={kind === "pat" ? "Personal access tokens always expire, at most a year ahead." : undefined}>
+            <Field
+              label="Expires"
+              hint={
+                kind === "pat"
+                  ? "Personal access tokens always expire, at most a year ahead."
+                  : "Default: no expiry, or the server's bound for deploy tokens when it has one (auth.deployTokens.maxTTL), which refuses a later expiry too."
+              }
+            >
               <Segmented aria-label="Expires" value={expiry} onChange={setExpiry} options={expiryOptions} />
+              {expiryError ? (
+                <p role="alert" className="text-xs text-danger">
+                  {expiryError}
+                </p>
+              ) : null}
             </Field>
             {mask ? (
               <Field label="Your password" htmlFor={ids.password} hint="The server creates a token over a mask with the admin's password only, never with a token.">
                 <Input id={ids.password} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
               </Field>
             ) : null}
-            <FormError error={errorText(mutation.error)} />
+            <FormError error={expiryError ? null : error} />
             <DialogActions>
               <DialogClose asChild>
                 <Button type="button">Cancel</Button>
