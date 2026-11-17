@@ -1,11 +1,11 @@
 // The changes the UI makes, against the endpoints the server has (docs/api.md).
 
-import { apiPath, apiSend, basicAuth } from "./client";
+import { apiPath, apiSend, basicAuth, type ChangeRequest } from "./client";
 import { normalizeRepo, webhooksPath, type WebhookScope } from "./queries";
 import type { BatchDeleteRequest, BatchDeleteResult, CreatedToken, MaskTokenRequest, PrefetchRequest, PrefetchResult, TokenRequest } from "./types";
 import type { Binding, BindingRequest, User, UserPatch, UserRequest } from "./types";
 import type { CreateRepoRequest, ReindexRequest, ReindexRun, Repo, RepoPatch } from "./types";
-import type { CreatedWebhook, Delivery, Webhook, WebhookRequest, WebhookSecret } from "./types";
+import type { CIPolicy, CreatedWebhook, Delivery, Webhook, WebhookRequest, WebhookSecret } from "./types";
 
 export function createUserToken(user: string, req: TokenRequest): Promise<CreatedToken> {
   return apiSend<CreatedToken>("POST", apiPath("users", user, "tokens"), { body: req });
@@ -148,3 +148,35 @@ export function deleteRepo(format: string, repo: string, force: boolean): Promis
 export function startReindex(format: string, repo: string, req: ReindexRequest): Promise<ReindexRun> {
   return apiSend<ReindexRun>("POST", apiPath("repos", format, repo, "reindex"), { body: req });
 }
+
+// CI trust policies (docs/api.md, CI trust policies): each change as the request it sends, which a
+// step-up keeps across its sign-in and sends again (src/api/step-up.ts, sendChange); etag, the
+// revision the change was made on, goes as If-Match, so that it changes only what was read.
+
+/** The fields of a policy that a create and a change send. */
+export type CIPolicyBody = Pick<CIPolicy, "name" | "issuer" | "claims" | "grants" | "expiresAt">;
+
+const ifMatch = (etag: string | null) => (etag ? { ifMatch: etag } : {});
+
+export const ciPolicyChanges = {
+  /** A new policy: 201 with it and its ETag. */
+  create: (body: CIPolicyBody): ChangeRequest => ({ method: "POST", path: apiPath("ci", "policies"), body }),
+  /** Its issuer, claims, grants and expiry replaced; one that writes waits for an approval again. */
+  replace: (name: string, body: CIPolicyBody, etag: string | null): ChangeRequest => ({
+    method: "PUT",
+    path: apiPath("ci", "policies", name),
+    body,
+    ...ifMatch(etag),
+  }),
+  /** Deleted, one that writes too, without a step. */
+  remove: (name: string, etag: string | null): ChangeRequest => ({ method: "DELETE", path: apiPath("ci", "policies", name), ...ifMatch(etag) }),
+  /** A new expiry, expiresAt or 180 days ahead, of a policy that writes. */
+  renew: (name: string, expiresAt: string | undefined, etag: string | null): ChangeRequest => ({
+    method: "POST",
+    path: apiPath("ci", "policies", name, "renew"),
+    ...(expiresAt ? { body: { expiresAt } } : {}),
+    ...ifMatch(etag),
+  }),
+  /** What waits approved, exactly the revision read: the ETag is required. */
+  approve: (name: string, etag: string): ChangeRequest => ({ method: "POST", path: apiPath("ci", "policies", name, "approve"), ifMatch: etag }),
+};

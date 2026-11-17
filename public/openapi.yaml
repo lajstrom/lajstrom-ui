@@ -4074,6 +4074,15 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/CIPolicy"
+        issuers:
+          type: array
+          description: "Proposed: The issuers of the server's auth.ci.issuers, in its order: the names a
+            policy's issuer may take, and the platform of each, whose claims a policy may name
+            (docs/spec/rbac.md §11). The UI offers them in the form of a policy, and the claims of
+            the platform (lajstrom/lajstrom#937)."
+          items:
+            $ref: "#/components/schemas/CIIssuer"
+          x-lajstrom-status: proposed
     Binding:
       type: object
       required:
@@ -5770,3 +5779,21 @@ components:
         next:
           type: string
           description: The cursor of the next page; absent on the last.
+    CIIssuer:
+      type: object
+      description: "Proposed: An issuer of auth.ci.issuers, as a policy names it."
+      required:
+        - name
+        - platform
+      properties:
+        name:
+          type: string
+          description: "The issuer's name: a policy's issuer, and the <issuer> of the principal
+            ci:<issuer>/<project>."
+        platform:
+          type: string
+          enum:
+            - github
+            - gitlab
+          description: The CI platform of its tokens.
+      x-lajstrom-status: proposed

@@ -258,3 +258,23 @@ export type PolicyPatch = Schemas["PolicyPatch"];
 
 /** POST …/reindex: prune, verify; an empty body takes the defaults. */
 export type ReindexRequest = Schemas["ReindexRequest"];
+
+// CI trust policies (docs/api.md, CI trust policies; docs/spec/rbac.md §11).
+
+/** A CI trust policy: which tokens of an issuer's CI jobs the server exchanges for a CI token,
+ * and what that token may do. One of the configuration (source config) is read-only; one of the
+ * API has its state, its people and its revision (the ETag of its GET). */
+export type CIPolicy = Schemas["CIPolicy"];
+
+/** A role on the repos of a mask, of a policy: reader, writer or maintainer. */
+export type CIGrant = Schemas["CIGrant"];
+
+/** GET /api/v1/ci/policies: those of the configuration, then those of the API; and, proposed,
+ * the server's issuers. */
+export type CIPolicyList = Schemas["CIPolicyList"];
+
+/** An issuer of the server's auth.ci.issuers and its platform (proposed). */
+export type CIIssuer = Schemas["CIIssuer"];
+
+/** POST …/{name}/renew: the expiry asked, 180 days ahead when absent. */
+export type CIPolicyRenewal = Schemas["CIPolicyRenewal"];
