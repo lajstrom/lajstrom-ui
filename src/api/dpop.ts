@@ -121,9 +121,12 @@ export function learnServerClock(date: string | null, now = Date.now()): boolean
   return Math.abs(skew - before) >= 1000;
 }
 
+/** The error of a DPoP challenge (RFC 9449 §7.1) and its error_description, "" without one. */
+export type DpopChallenge = { error: string; description: string };
+
 /** The error of a DPoP challenge, WWW-Authenticate: DPoP error="…" (RFC 9449 §7.1), and its
  * error_description; null for any other challenge. */
-export function dpopChallenge(header: string | null): { error: string; description: string } | null {
+export function dpopChallenge(header: string | null): DpopChallenge | null {
   if (!header || !/(^|,\s*)DPoP(\s|$)/i.test(header)) return null;
   const error = /\berror="([^"]*)"/.exec(header)?.[1];
   if (!error) return null;
