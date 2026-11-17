@@ -37,6 +37,16 @@ const notMocked = new Set([
   "get /api/v1/policy/denylist",
   "post /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/deny",
   "delete /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/deny",
+  // The lockout of local passwords (rbac.md §1): no screen yet.
+  "post /api/v1/users/{user}/unlock",
+  // CI trust policies (lajstrom/lajstrom#937, #74): no screen yet.
+  "get /api/v1/ci/policies",
+  "post /api/v1/ci/policies",
+  "get /api/v1/ci/policies/{name}",
+  "put /api/v1/ci/policies/{name}",
+  "delete /api/v1/ci/policies/{name}",
+  "post /api/v1/ci/policies/{name}/renew",
+  "post /api/v1/ci/policies/{name}/approve",
 ]);
 
 describe("public/openapi.yaml against the mock", () => {

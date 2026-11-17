@@ -106,7 +106,9 @@ function WebhookFields({ draft, set, mask, create }: FieldsProps) {
             </span>
           </label>
         ))}
-        <p className="text-xs text-muted-foreground">None checked: every type, those added later too.</p>
+        <p className="text-xs text-muted-foreground">
+          None checked: every type, those added later too. The <span className="font-mono">ci.policy</span> events reach only a webhook whose mask has a *.
+        </p>
       </fieldset>
       <Field label="Description" htmlFor={ids.description} hint="Optional, at most 256 bytes: what the receiver does with the events.">
         <Input id={ids.description} value={draft.description} maxLength={256} placeholder="rebuild the site" onChange={(e) => set({ description: e.target.value })} />

@@ -292,14 +292,14 @@ export function uidOf(name: string): string {
 }
 
 export const users: User[] = [
-  { uid: uidOf("admin"), name: "admin", kind: "local", disabled: false, createdAt: ago(420) },
-  { uid: uidOf("alice"), name: "alice", kind: "local", disabled: false, createdAt: ago(300) },
-  { uid: uidOf("bob"), name: "bob", kind: "local", disabled: false, createdAt: ago(290) },
-  { uid: uidOf("carol"), name: "carol", kind: "local", disabled: false, createdAt: ago(150) },
-  { uid: uidOf("dave"), name: "dave", kind: "local", disabled: true, createdAt: ago(240) },
+  { uid: uidOf("admin"), name: "admin", kind: "local", disabled: false, createdAt: ago(420), lastSeenAt: ago(0, 0, 5) },
+  { uid: uidOf("alice"), name: "alice", kind: "local", disabled: false, createdAt: ago(300), lastSeenAt: ago(0, 3) },
+  { uid: uidOf("bob"), name: "bob", kind: "local", disabled: false, createdAt: ago(290), lastSeenAt: ago(2) },
+  { uid: uidOf("carol"), name: "carol", kind: "local", disabled: false, createdAt: ago(150), lastSeenAt: ago(40) },
+  { uid: uidOf("dave"), name: "dave", kind: "local", disabled: true, createdAt: ago(240), lastSeenAt: ago(200) },
   // Made by its first OIDC login, without a password; its groups are those of its latest login
   // (rbac.md §8, the proposed User.groups).
-  { uid: uidOf("erin"), name: "erin", kind: "oidc", disabled: false, createdAt: ago(12), groups: ["platform", "payments-oncall"] },
+  { uid: uidOf("erin"), name: "erin", kind: "oidc", disabled: false, createdAt: ago(12), lastSeenAt: ago(0, 1), groups: ["platform", "payments-oncall"] },
 ];
 
 /** Passwords set through the API in the demo, by user name, as the sha256 of the password. Until

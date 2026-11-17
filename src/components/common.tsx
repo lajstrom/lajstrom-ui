@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { AlertTriangle, ChevronRight, Construction, FlaskConical, Globe, KeyRound, Lock, RefreshCw, ShieldCheck, User, Users, UserX } from "lucide-react";
+import { AlertTriangle, ChevronRight, Construction, FlaskConical, Globe, KeyRound, Lock, RefreshCw, ShieldCheck, User, Users, UserX, Workflow } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { ApiError, isUnavailable, isUnreachable } from "@/api/client";
@@ -42,13 +42,13 @@ export function RelativeTime({ iso, className }: { iso: string | null | undefine
   );
 }
 
-/** A principal in canonical form (rbac.md §1): user:alice, token:12, anonymous. */
 /** A principal: `user:<uid>` with the user's name when the answer has it, `group:<name>`,
- * `token:<id>` or `anonymous`. The canonical form is in the tooltip. */
+ * `token:<id>`, a CI job's `ci:<issuer>/<project>` (rbac.md §11) or `anonymous`. The canonical
+ * form is in the tooltip. */
 export function Principal({ value, name, className }: { value: string | null | undefined; name?: string; className?: string }) {
   if (!value) return <span className="text-muted-foreground">—</span>;
   const [kind, id] = value.includes(":") ? (value.split(":", 2) as [string, string]) : [value, ""];
-  const Icon = kind === "token" ? KeyRound : kind === "anonymous" ? UserX : kind === "group" ? Users : User;
+  const Icon = kind === "token" ? KeyRound : kind === "anonymous" ? UserX : kind === "group" ? Users : kind === "ci" ? Workflow : User;
   const label = kind === "token" ? `deploy token #${id}` : kind === "anonymous" ? "anonymous" : (name ?? id);
   return (
     <Tooltip content={value}>

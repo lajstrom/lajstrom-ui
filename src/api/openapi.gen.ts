@@ -1,7 +1,7 @@
 // Generated from public/openapi.yaml by scripts/gen-api-types.ts. Do not edit: npm run gen:api.
 
 /** The commit of lajstrom/lajstrom whose /api/v1 these types describe. */
-export const serverApiCommit = "6c5bf5c64d0d60c51820114f6fff8937cb1fce07";
+export const serverApiCommit = "adc4785aeb05f8c91811a68b3a70f6f979c0336d";
 
 /**
  * components.schemas of the server's openapi.yaml with the UI's proposal; what the proposal adds
@@ -444,6 +444,13 @@ export type Schemas = {
      * a proof of that key, on /api/.
      */
     dpopJkt?: string;
+    /**
+     * true on a live token beyond the bound of its kind, auth.deployTokens.maxTTL for a deploy
+     * token and auth.serviceAccounts.maxTokenTTL for a service account's: made before the bound was
+     * set or lowered, it has no expiry, or expires more than the bound after its creation, and is
+     * to be replaced. Worked out when it is answered; absent otherwise.
+     */
+    beyondMaxTTL?: boolean;
   };
   CreatedToken: Schemas["Token"] & {
     /** Shown this once. */
@@ -484,6 +491,29 @@ export type Schemas = {
     kind: "local" | "oidc" | "service";
     disabled: boolean;
     createdAt: string;
+    /**
+     * The user's last activity, its last successful authentication or its enabling, less than a
+     * minute behind; null before any record (docs/spec/rbac.md §1, Inactive users). It moves no
+     * revision.
+     */
+    lastSeenAt: string | null;
+    /**
+     * With auth.disableInactiveUsersAfter set, the user is inactive beyond it: its next
+     * authentication disables it, but for the last enabled admin. Absent when false.
+     */
+    inactive?: boolean;
+    /**
+     * With auth.lockout.duration set, the end of the lock of the user's password after 10 wrong
+     * passwords in a row; absent while it is not locked (docs/spec/rbac.md §1, Local passwords). It
+     * moves no revision.
+     */
+    lockedUntil?: string;
+    /**
+     * The user's password must be changed before it is used for anything else: it authenticates its
+     * own change and is 403 everywhere else (docs/spec/rbac.md §1, Change at first use). Absent
+     * when false.
+     */
+    mustChange?: boolean;
     /** A service account's owner, user:<uid> or group:<name>; absent for every other kind. */
     owner?: string;
     /** The name of a user owner. */
@@ -542,15 +572,80 @@ export type Schemas = {
     disabled?: boolean;
     /** A service account's new owner, as in UserRequest; 400 for a user of another kind. */
     owner?: string;
+    /**
+     * true: the user's password must be changed before it is used for anything else; false clears
+     * it. Whatever auth.passwords.changeAtFirstUse is; 400 for a user without a password
+     * (docs/spec/rbac.md §1, Change at first use).
+     */
+    mustChange?: boolean;
   };
+  /** {password} alone is an admin's new password; with currentPassword, the user's own change. */
   PasswordRequest: {
     password: Schemas["Password"];
+    /** The user's current password, the credential of its own change. */
+    currentPassword?: string;
   };
   /**
-   * A password of 8 to 1024 bytes of UTF-8; the server counts bytes, and the lengths here count
-   * characters.
+   * A password of at least auth.passwords.minLength characters, Unicode code points (8 by default,
+   * 12 for PCI DSS), and at most 1024 bytes of UTF-8; with auth.passwords.requireLettersAndDigits,
+   * a letter and a digit of any script. The server counts bytes for the maximum, and the lengths
+   * here count characters.
    */
   Password: string;
+  /**
+   * A CI trust policy (docs/spec/rbac.md §11). In a body, source, state, renewal, createdBy,
+   * createdAt, updatedBy, updatedAt, approvedBy and approvedAt are ignored, and the name of a PUT,
+   * when present, is the path's.
+   */
+  CIPolicy: {
+    /** Lowercase letters and digits with single hyphens, at most 63 bytes. */
+    name: string;
+    /** The name of an issuer of auth.ci.issuers. */
+    issuer: string;
+    /**
+     * Each claim to its values, any of which matches; every claim must match. An id (repository_id
+     * or repository_owner_id, project_id or namespace_id) is required.
+     */
+    claims: Record<string, string[]>;
+    grants: Schemas["CIGrant"][];
+    /**
+     * When a policy of the API that grants write stops counting. In a body, at most 180 days ahead,
+     * by default 180 days ahead; refused for a policy that grants reader only.
+     */
+    expiresAt?: string;
+    /** Its owner: config is read-only through the API. */
+    source?: "config" | "api";
+    /**
+     * active counts; pending waits for a second admin's approval and grants nothing; expired grants
+     * nothing (its expiry passed). A policy of the configuration is active.
+     */
+    state?: "active" | "pending" | "expired";
+    /** A renewal that waits for an admin's approval. */
+    renewal?: {
+      expiresAt: string;
+    };
+    /** The principal that made a policy of the API. */
+    createdBy?: string;
+    createdAt?: string;
+    /** The principal of its latest create, change or renewal, who may not approve what waits. */
+    updatedBy?: string;
+    updatedAt?: string;
+    /** The principal of its latest approval. */
+    approvedBy?: string;
+    approvedAt?: string;
+  };
+  CIPolicyRenewal: {
+    /** At most 180 days ahead; by default 180 days ahead. */
+    expiresAt?: string;
+  };
+  CIGrant: {
+    role: "reader" | "writer" | "maintainer";
+    /** <format>/<repo>, each a name or *. */
+    mask: string;
+  };
+  CIPolicyList: {
+    policies: Schemas["CIPolicy"][];
+  };
   Binding: {
     id: number;
     /**
@@ -571,7 +666,8 @@ export type Schemas = {
   BindingRequest: {
     /**
      * user:<name>, user:<uid>, or group:<name>, which need not have members (docs/spec/rbac.md §8);
-     * or a cert: or k8s: principal or pattern, never with the admin role (§9).
+     * or a cert: or k8s: principal or pattern, never with the admin role (§9). A ci: principal has
+     * no bindings (§11).
      */
     principal: string;
     role: "reader" | "attacher" | "writer" | "maintainer" | "admin";
@@ -1081,7 +1177,11 @@ export type Schemas = {
   };
   Whoami: {
     principal: string;
-    kind: "user" | "token";
+    /**
+     * user, token for a deploy token, or ci for a CI token (docs/spec/rbac.md §11), whose name is
+     * <issuer>/<project>.
+     */
+    kind: "user" | "token" | "ci";
     name: string;
     uid?: string;
     /** A user's groups that count now, from its latest OIDC login (docs/spec/rbac.md §8). */
@@ -1181,6 +1281,12 @@ export type Schemas = {
     login: {
       /** The seconds of auth.login.tokenLifetime. */
       tokenLifetime: number;
+      /**
+       * The seconds of auth.login.idleTimeout, 0 when off: a sign-in token unused for longer is
+       * refused (401, error_description="idle") and revoked; the server may refuse up to a minute
+       * before. A server before it answers none, which is off.
+       */
+      idleTimeout?: number;
     };
     caller: Schemas["Caller"];
   };
@@ -1207,7 +1313,7 @@ export type Schemas = {
     mask: string;
     url: string;
     /** The types it gets; empty, every type. */
-    events: ("version.published" | "version.deleted" | "repo.created" | "repo.deleted")[];
+    events: ("version.published" | "version.deleted" | "repo.created" | "repo.deleted" | "policy.rule.created" | "policy.rule.deleted" | "policy.verdict.created" | "policy.verdict.deleted" | "ci.policy.created" | "ci.policy.updated" | "ci.policy.renewed" | "ci.policy.approved" | "ci.policy.expired" | "ci.policy.deleted")[];
     active: boolean;
     description: string;
     /** The principal that created it. */
@@ -1229,7 +1335,7 @@ export type Schemas = {
   WebhookRequest: {
     mask?: string;
     url?: string;
-    events?: ("version.published" | "version.deleted" | "repo.created" | "repo.deleted")[];
+    events?: ("version.published" | "version.deleted" | "repo.created" | "repo.deleted" | "policy.rule.created" | "policy.rule.deleted" | "policy.verdict.created" | "policy.verdict.deleted" | "ci.policy.created" | "ci.policy.updated" | "ci.policy.renewed" | "ci.policy.approved" | "ci.policy.expired" | "ci.policy.deleted")[];
     active?: boolean;
     description?: string;
   };

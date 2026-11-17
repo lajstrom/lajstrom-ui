@@ -292,7 +292,7 @@ export function createUser(body: unknown, by: string): User | Refusal {
   if (bad) return bad;
   if (users.some((u) => u.name === name)) return conflict(`user ${name} already exists`);
   const now = new Date().toISOString();
-  const user: User = { uid: uidOf(`${name} ${now}`), name, kind: "local", disabled: false, createdAt: now };
+  const user: User = { uid: uidOf(`${name} ${now}`), name, kind: "local", disabled: false, createdAt: now, lastSeenAt: null };
   users.push(user);
   passwords.set(name, sha256Hex(str(b.password)));
   if (b.admin === true) bindings.push({ id: nextBindingId++, principal: `user:${name}`, role: "admin", repoMask: "*/*", createdAt: now });
@@ -1293,7 +1293,7 @@ type MockUser = (typeof users)[number];
 export function makeFirstAdmin(name: string, password: string): MockUser {
   const at = new Date().toISOString();
   // A fresh uid, as createUser makes: a user deleted in the demo may have had the name.
-  const user: MockUser = { uid: uidOf(`${name} ${at}`), name, kind: "local", disabled: false, createdAt: at };
+  const user: MockUser = { uid: uidOf(`${name} ${at}`), name, kind: "local", disabled: false, createdAt: at, lastSeenAt: null };
   users.push(user);
   bindings.push({ id: nextBindingId++, principal: `user:${name}`, role: "admin", repoMask: "*/*", createdAt: at });
   passwords.set(name, sha256Hex(password));
