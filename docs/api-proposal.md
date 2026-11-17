@@ -77,6 +77,16 @@ sign-in page with `#code=…`, which the UI redeems at `POST /api/v1/login` with
 verifier, kept in `sessionStorage`. Signing out revokes the token (`DELETE …/tokens/{id}`) and
 forgets the key.
 
+With `info.login.idleTimeout` (seconds, `0` or absent when off; the server's
+`auth.login.idleTimeout`), a token unused that long is refused, `401` with
+`WWW-Authenticate: DPoP error="invalid_token", error_description="idle"`, and revoked. Every
+request with the token is a use, so the UI makes none on its own while nobody touches it: polls
+and refetches stop a minute after the last key or pointer event in any tab, and resume with the
+next. It counts the idle time from its last request with the token in any tab
+(`localStorage`), warns two minutes before a minute short of the bound (the server keeps the
+last use to the minute), signs out there, and says why on the sign-in page; so does a refusal
+with `error_description="idle"`.
+
 A server without `login` in `GET /api/v1/info` gets the token created with the password
 (`POST /api/v1/users/{user}/tokens` with Basic credentials, 12 hours) and sent as
 `Authorization: Bearer`. A user can also sign in with a personal access token they already have,

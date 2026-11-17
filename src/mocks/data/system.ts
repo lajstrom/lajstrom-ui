@@ -19,8 +19,9 @@ export const serverInfo: Omit<ServerInfo, "caller"> = {
     { name: "rpm", artifactType: "application/vnd.lajstrom.rpm.v1" },
   ],
   authModes: ["password", "token"],
-  // auth.login.tokenLifetime, 12 h: POST /api/v1/login answers a DPoP-bound token.
-  login: { tokenLifetime: 43_200 },
+  // auth.login.tokenLifetime, 12 h: POST /api/v1/login answers a DPoP-bound token; and
+  // auth.login.idleTimeout, 15 min as PCI DSS 8.2.8 asks: unused that long, it is refused.
+  login: { tokenLifetime: 43_200, idleTimeout: 900 },
 };
 
 // Capabilities follow the matrix of docs/architecture.md §5, vendors and tiers the table of

@@ -2,6 +2,7 @@ import { config } from "@/app/config";
 
 import { clockSkew, createProof, dpopChallenge, learnServerClock, refusedForIat } from "./dpop";
 import { sessionKey } from "./dpop-key";
+import { noteTokenUse } from "./idle";
 import { getSession, setSession, type Session } from "./session";
 import type { ApiErrorBody } from "./types";
 
@@ -125,6 +126,8 @@ async function request(method: string, path: string, opts: RequestOptions = {}):
     if (opts.authorization) headers.Authorization = opts.authorization;
     if (opts.dpopKey) headers.DPoP = await createProof(opts.dpopKey, { method, url });
     if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+    // Every request with the token is a use of it: the idle bound starts over (src/api/idle.ts).
+    if (session) noteTokenUse();
     try {
       res = await fetch(url, {
         method,
@@ -150,11 +153,13 @@ async function request(method: string, path: string, opts: RequestOptions = {}):
     if (Math.abs(clockSkew() - signedBy) < 1000) break;
   }
   if (failed && !res.ok) {
-    // The session's token was refused: revoked, expired, its user disabled, or bound to a key
-    // this browser no longer has. Signed out. A refused proof is this browser's doing, not the
-    // token's: the session stays.
-    const proofRefused = dpop && dpopChallenge(res.headers.get("WWW-Authenticate"))?.error === "invalid_dpop_proof";
-    if (res.status === 401 && session && !proofRefused && getSession()?.token === session.token) setSession(null);
+    // The session's token was refused: revoked, expired, idle, its user disabled, or bound to a
+    // key this browser no longer has. Signed out, saying so when it was idle. A refused proof is
+    // this browser's doing, not the token's: the session stays.
+    const challenge = dpop ? dpopChallenge(res.headers.get("WWW-Authenticate")) : null;
+    if (res.status === 401 && session && challenge?.error !== "invalid_dpop_proof" && getSession()?.token === session.token) {
+      setSession(null, challenge?.description === "idle" ? "idle" : undefined);
+    }
     const retryAfter = Number(res.headers.get("Retry-After") ?? NaN);
     throw new ApiError(
       res.status,

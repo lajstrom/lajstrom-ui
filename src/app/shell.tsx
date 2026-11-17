@@ -3,7 +3,7 @@ import { Link, Navigate, Outlet, useNavigate, useRouterState } from "@tanstack/r
 import { Boxes, Braces, Check, FlaskConical, History, KeyRound, LogIn, LogOut, MenuIcon, Monitor, Moon, Search, Server, Sun, User, Users, Webhook } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { signOut } from "@/api/auth";
+import { lifetimeText, signOut } from "@/api/auth";
 import { callerQuery, infoQuery } from "@/api/queries";
 import { RelativeTime } from "@/components/common";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,8 @@ import { AboutButton } from "./about";
 import { CommandPalette } from "./command-palette";
 import { config, logoSrc } from "./config";
 import { demoMode, exitDemo, resetDemo } from "./demo";
+import { IdleGuard } from "./idle-guard";
+import { useIdle } from "./idle";
 import { useSession } from "./session";
 import { SkewBar } from "./skew-bar";
 import { setTheme, useTheme, type Theme } from "./theme";
@@ -143,6 +145,7 @@ function ThemeMenu() {
 function UserMenu() {
   const who = useQuery(callerQuery);
   const session = useSession();
+  const idle = useIdle();
   const navigate = useNavigate();
   const here = useRouterState({ select: (s) => s.location.href });
 
@@ -184,6 +187,7 @@ function UserMenu() {
         {session?.expiresAt ? (
           <div className="px-2 pb-1.5 text-xs text-muted-foreground">
             Session ends <RelativeTime iso={session.expiresAt} />
+            {idle.bound ? `, or after ${lifetimeText(idle.bound)} without activity` : null}
           </div>
         ) : null}
         <MenuSeparator />
@@ -324,6 +328,7 @@ export function AppShell() {
 
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
       <Notices />
+      <IdleGuard />
     </div>
   );
 }

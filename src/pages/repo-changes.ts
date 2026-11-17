@@ -7,9 +7,11 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
 import { optimistic, realistic, update } from "@/api/change";
+import { pollsAllowed } from "@/api/idle";
 import { createRepo, deleteRepo, startReindex, updateRepo } from "@/api/mutations";
 import { reindexQuery, repoQuery, reposQuery } from "@/api/queries";
 import type { CreateRepoRequest, PolicyPatch, ReindexRequest, ReindexRun, Repo, RepoPatch } from "@/api/types";
+import { useIdle } from "@/app/idle";
 import { can } from "@/lib/access";
 import { notify } from "@/lib/notices";
 
@@ -119,7 +121,13 @@ export function pollInterval(run: ReindexRun | null | undefined, now: number): n
  * the repo is fetched again, whose state and counts the run changed. */
 export function useReindexRun(repo: Repo) {
   const client = useQueryClient();
-  const run = useQuery({ ...reindexQuery(repo.format, repo.name), refetchInterval: (q) => pollInterval(q.state.data, Date.now()) });
+  // With an idle bound, the poll stops while nobody is there, and comes back with them: the
+  // re-render of useIdle sets the interval again (src/api/idle.ts).
+  const { away } = useIdle();
+  const run = useQuery({
+    ...reindexQuery(repo.format, repo.name),
+    refetchInterval: (q) => (!away && pollsAllowed() ? pollInterval(q.state.data, Date.now()) : false),
+  });
   const state = run.data?.state;
   const was = useRef(state);
   useEffect(() => {

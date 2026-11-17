@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { FlaskConical, KeyRound, LogIn, ShieldCheck } from "lucide-react";
+import { Clock, FlaskConical, KeyRound, LogIn, ShieldCheck } from "lucide-react";
 import { useEffect, useId, useState, type FormEvent } from "react";
 
 import {
@@ -14,10 +14,12 @@ import {
   signInWithToken,
 } from "@/api/auth";
 import { takeOidcCallback } from "@/api/oidc";
+import { sessionEnd } from "@/api/session";
 import { infoQuery } from "@/api/queries";
 import { config } from "@/app/config";
 import { demoMode, demoUsers, enterDemo } from "@/app/demo";
 import { useSession } from "@/app/session";
+import { RelativeTime } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { Field, FormError } from "@/components/ui/field";
@@ -54,6 +56,9 @@ export function SignInPage() {
   const forms = (["password", "token"] as const).filter((m) => modes[m]);
   const method: Method | null = forms.find((m) => m === search.method) ?? forms[0] ?? null;
   const lifetime = info.data?.login ? lifetimeText(info.data.login.tokenLifetime) : SESSION_LIFETIME.replace("h", " hours");
+  const idleTimeout = info.data?.login?.idleTimeout ?? 0;
+  // The last sign-in ended for want of activity (src/api/idle.ts): said until the next one.
+  const idleEnd = session ? null : sessionEnd();
   const ids = { user: useId(), password: useId(), token: useId() };
   const [user, setUser] = useState("");
   const [password, setPassword] = useState("");
@@ -113,6 +118,16 @@ export function SignInPage() {
           "Public repositories are readable without signing in."
         )}
       </p>
+
+      {idleEnd ? (
+        <div role="status" className="mb-4 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2.5 text-sm">
+          <Clock className="mt-0.5 size-4 shrink-0 text-warning" />
+          <p>
+            You were signed out <RelativeTime iso={idleEnd.at} />
+            {idleTimeout ? ` after ${lifetimeText(idleTimeout)} without activity` : " for inactivity"}, as this server requires. Sign in again to go on.
+          </p>
+        </div>
+      ) : null}
 
       <Card>
         <CardBody className="space-y-4">
@@ -177,7 +192,7 @@ export function SignInPage() {
                   <Field
                     label="Password"
                     htmlFor={ids.password}
-                    hint={`Signing in creates a personal access token for this browser that lasts ${lifetime}; signing out revokes it.`}
+                    hint={`Signing in creates a personal access token for this browser that lasts ${lifetime}${idleTimeout ? `, or ${lifetimeText(idleTimeout)} without activity` : ""}; signing out revokes it.`}
                   >
                     <Input
                       id={ids.password}

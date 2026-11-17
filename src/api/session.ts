@@ -27,6 +27,11 @@ export type Session = {
   tokenType?: "Bearer" | "DPoP";
 };
 
+/** How the last session ended, when not by the person's sign-out: "idle", the server's idle bound
+ * (src/api/idle.ts) or the UI's own count of it. Kept beside the session, so that every tab and
+ * the sign-in page can say why. */
+export type SessionEnd = { reason: "idle"; at: string };
+
 /** Where the session is kept: the demo has its own (src/app/demo.ts). Set by initSession. */
 let key = "lajstrom.session";
 
@@ -62,6 +67,8 @@ function read(): Session | null {
 }
 
 let current: Session | null = null;
+/** The end of the last session, when storage is disabled. */
+let end: SessionEnd | null = null;
 
 /** Reads the session kept under storageKey; called once at start-up, before anything is fetched. */
 export function initSession(storageKey: string): void {
@@ -81,15 +88,34 @@ export function getSession(): Session | null {
   return current && !expired(current) ? current : null;
 }
 
-export function setSession(session: Session | null): void {
+/** Sets the session; null ends it, for the reason given, if any. A sign-in, or a sign-out without
+ * a reason, forgets the reason of the one before. */
+export function setSession(session: Session | null, reason?: SessionEnd["reason"]): void {
+  const endChange = reason && !session ? { reason, at: new Date().toISOString() } : session || current ? null : undefined;
+  if (endChange !== undefined) end = endChange;
   current = session;
   try {
+    if (endChange) localStorage.setItem(`${key}.end`, JSON.stringify(endChange));
+    else if (endChange === null) localStorage.removeItem(`${key}.end`);
     if (session) localStorage.setItem(key, JSON.stringify(session));
     else localStorage.removeItem(key);
   } catch {
     // Storage disabled: the session lasts until the page is reloaded.
   }
   for (const fn of listeners) fn(session);
+}
+
+/** How the last session ended, in this tab or another one; null after a sign-in or a plain
+ * sign-out. */
+export function sessionEnd(): SessionEnd | null {
+  try {
+    const raw = localStorage.getItem(`${key}.end`);
+    if (raw === null) return null;
+    const e = JSON.parse(raw) as Partial<SessionEnd>;
+    return e.reason === "idle" && typeof e.at === "string" ? { reason: e.reason, at: e.at } : null;
+  } catch {
+    return end;
+  }
 }
 
 /** Calls fn when this tab or another one signs in or out; returns the unsubscribe. */

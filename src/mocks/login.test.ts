@@ -11,7 +11,7 @@ import { signInWithPassword, signInWithToken, signOut } from "@/api/auth";
 import { apiGet, apiGetAs, apiPath } from "@/api/client";
 import { jwkThumbprint, learnServerClock, publicJwk } from "@/api/dpop";
 import { signInKey } from "@/api/dpop-key";
-import { getSession } from "@/api/session";
+import { getSession, sessionEnd } from "@/api/session";
 import type { ServerInfo, Token, WhoAmI } from "@/api/types";
 
 import { createToken, revokeToken } from "./auth";
@@ -139,6 +139,28 @@ describe("signing in at POST /api/v1/login", () => {
     await expect(whoami()).rejects.toMatchObject({ status: 401 });
     expect(sent.at(-1)!.headers.get("Authorization")).toMatch(/^DPoP /);
     expect(getSession()).toBeNull();
+  });
+
+  it("ends the session as idle once the token went unused for longer than info.login.idleTimeout", async () => {
+    await signInWithPassword("alice", "alice");
+    const s = getSession()!;
+    const bound = serverInfo.login.idleTimeout! * 1000;
+    const start = Date.now();
+    try {
+      // Each use within the bound starts it over.
+      vi.useFakeTimers({ toFake: ["Date"], now: start + bound - 60_000 });
+      expect(await whoami()).toMatchObject({ name: "alice" });
+      vi.setSystemTime(start + 2 * bound - 120_000);
+      expect(await whoami()).toMatchObject({ name: "alice" });
+
+      vi.setSystemTime(start + 3 * bound);
+      await expect(whoami()).rejects.toMatchObject({ status: 401, message: "the sign-in was idle for longer than the server allows: sign in again" });
+      expect(getSession()).toBeNull();
+      expect(sessionEnd()).toMatchObject({ reason: "idle" });
+      expect((await tokenAsAdmin(s.tokenId!))?.revokedAt).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("signs out: revokes the token and forgets the key", async () => {

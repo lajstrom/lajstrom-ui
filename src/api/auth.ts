@@ -13,7 +13,7 @@ import { ApiError, apiGetAs, apiPath, apiSend, basicAuth } from "./client";
 import { dpopSupported, jwkThumbprint, publicJwk } from "./dpop";
 import { forgetKey, signInKey } from "./dpop-key";
 import { oidcLoginUrl, pkceChallenge, pkceVerifier, rememberVerifier } from "./oidc";
-import { getSession, setSession } from "./session";
+import { getSession, setSession, type SessionEnd } from "./session";
 import type { BootstrapRequest, CreatedToken, LoginRequest, LoginToken, ServerInfo, Token, User, WhoAmI } from "./types";
 
 /** How long the token created at sign-in lives on a server without POST /api/v1/login, which
@@ -181,8 +181,9 @@ async function expiryOf(user: string, token: string): Promise<string | null> {
 }
 
 /** Ends the session; the token created at sign-in is revoked, a pasted one is only forgotten.
- * The key of the sign-in goes too, so that a token whose revocation failed is of no use. */
-export async function signOut(): Promise<void> {
+ * The key of the sign-in goes too, so that a token whose revocation failed is of no use. reason
+ * is "idle" when the UI's count of the idle bound ran out (src/api/idle.ts). */
+export async function signOut(reason?: SessionEnd["reason"]): Promise<void> {
   const s = getSession();
   if (s?.tokenId != null) {
     try {
@@ -192,7 +193,7 @@ export async function signOut(): Promise<void> {
     }
   }
   await forgetKey();
-  setSession(null);
+  setSession(null, reason);
 }
 
 /**
