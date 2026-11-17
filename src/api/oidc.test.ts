@@ -49,6 +49,12 @@ describe("oidcLoginUrl", () => {
       dpop_jkt: "0ZcOCORZNYy-DWpqq30jZyJGHTN0d2HglBV3uiguA4I",
     });
   });
+
+  it("asks the IdP to authenticate the person again with prompt=login, a step-up", () => {
+    const p = { returnTo: "https://art.example.com/ui/sign-in", challenge: "c".repeat(43), jkt: "j".repeat(43) };
+    expect(new URL(oidcLoginUrl("https://art.example.com", { ...p, prompt: "login" })).searchParams.get("prompt")).toBe("login");
+    expect(new URL(oidcLoginUrl("https://art.example.com", p)).searchParams.has("prompt")).toBe(false);
+  });
 });
 
 describe("takeOidcCallback", () => {

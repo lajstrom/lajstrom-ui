@@ -121,9 +121,10 @@ export async function signInWithPassword(user: string, password: string): Promis
  * Where to send the person to sign in through the server's OIDC login, after this tab has kept
  * the PKCE verifier: the server's /-/oidc/login with the challenge, the thumbprint of this
  * browser's key, and return_to, this UI's sign-in page, where the code comes back
- * (redeemOidcCode). redirect is where to go once signed in.
+ * (redeemOidcCode). redirect is where to go once signed in. prompt "login" has the IdP
+ * authenticate the person again, a step-up (src/api/step-up.ts).
  */
-export async function oidcSignInUrl(redirect: string | undefined): Promise<string> {
+export async function oidcSignInUrl(redirect: string | undefined, prompt?: "login"): Promise<string> {
   if (!dpopSupported()) throw new SignInError("Single sign-on needs WebCrypto, which a browser has on https or on localhost only.");
   const key = await signInKey();
   const verifier = pkceVerifier();
@@ -139,6 +140,7 @@ export async function oidcSignInUrl(redirect: string | undefined): Promise<strin
     returnTo: returnTo.href,
     challenge: await pkceChallenge(verifier),
     jkt: await jwkThumbprint(await publicJwk(key.publicKey)),
+    prompt,
   });
 }
 

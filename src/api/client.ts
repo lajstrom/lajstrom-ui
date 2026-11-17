@@ -1,6 +1,6 @@
 import { config } from "@/app/config";
 
-import { clockSkew, createProof, dpopChallenge, learnServerClock, refusedForIat } from "./dpop";
+import { clockSkew, createProof, dpopChallenge, learnServerClock, refusedForIat, type DpopChallenge } from "./dpop";
 import { sessionKey } from "./dpop-key";
 import { noteTokenUse } from "./idle";
 import { getSession, setSession, type Session } from "./session";
@@ -14,14 +14,25 @@ export class ApiError extends Error {
   readonly fromServer: boolean;
   /** Seconds to wait before trying again, from Retry-After (a 429); null without it. */
   readonly retryAfter: number | null;
+  /** The DPoP challenge of a 401 (RFC 9449 §7.1), such as error="insufficient_user_authentication"
+   * when a step needs a fresher sign-in (RFC 9470); null for any other answer. */
+  readonly challenge: DpopChallenge | null;
 
-  constructor(status: number, code: string, message: string, fromServer = true, retryAfter: number | null = null) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    fromServer = true,
+    retryAfter: number | null = null,
+    challenge: DpopChallenge | null = null,
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
     this.fromServer = fromServer;
     this.retryAfter = retryAfter;
+    this.challenge = challenge;
   }
 }
 
@@ -103,6 +114,12 @@ async function failure(res: Response): Promise<Failure> {
   }
 }
 
+/** Whether a 401 of a DPoP session leaves the token alone: a proof of this browser refused, or a
+ * step that needs a fresher sign-in, whose token keeps working for what needs no more. */
+function keepsSession(challenge: DpopChallenge | null): boolean {
+  return challenge?.error === "invalid_dpop_proof" || challenge?.error === "insufficient_user_authentication";
+}
+
 async function request(method: string, path: string, opts: RequestOptions = {}): Promise<Response> {
   const url = new URL(config().apiBaseUrl + path, window.location.origin);
   for (const [k, v] of Object.entries(opts.query ?? {})) {
@@ -155,9 +172,11 @@ async function request(method: string, path: string, opts: RequestOptions = {}):
   if (failed && !res.ok) {
     // The session's token was refused: revoked, expired, idle, its user disabled, or bound to a
     // key this browser no longer has. Signed out, saying so when it was idle. A refused proof is
-    // this browser's doing, not the token's: the session stays.
-    const challenge = dpop ? dpopChallenge(res.headers.get("WWW-Authenticate")) : null;
-    if (res.status === 401 && session && challenge?.error !== "invalid_dpop_proof" && getSession()?.token === session.token) {
+    // this browser's doing, not the token's, and a step that asks for a fresher sign-in
+    // (insufficient_user_authentication, rbac.md §10, Asking for more) refuses nothing but
+    // itself: the session stays.
+    const challenge = dpopChallenge(res.headers.get("WWW-Authenticate"));
+    if (res.status === 401 && session && !keepsSession(dpop ? challenge : null) && getSession()?.token === session.token) {
       setSession(null, challenge?.description === "idle" ? "idle" : undefined);
     }
     const retryAfter = Number(res.headers.get("Retry-After") ?? NaN);
@@ -167,6 +186,7 @@ async function request(method: string, path: string, opts: RequestOptions = {}):
       failed.message,
       failed.fromServer,
       Number.isInteger(retryAfter) && retryAfter >= 0 ? retryAfter : null,
+      res.status === 401 ? challenge : null,
     );
   }
   return res;
@@ -186,6 +206,37 @@ export async function apiSend<T = undefined>(
   const res = await request(method, path, opts);
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
+}
+
+/** A resource and its revision: the ETag of the answer, which If-Match sends back with a change of
+ * it (docs/api.md, Revisions); null when the answer has none, such as a CI trust policy of the
+ * configuration. */
+export type Tagged<T> = { data: T; etag: string | null };
+
+/** A GET of one resource with its ETag. */
+export async function apiGetTagged<T>(path: string, signal?: AbortSignal): Promise<Tagged<T>> {
+  const res = await request("GET", path, { signal });
+  return { data: (await res.json()) as T, etag: res.headers.get("ETag") };
+}
+
+/** A change as it is sent, kept as data: what a step-up keeps across its sign-in and sends again
+ * (src/api/step-up.ts). ifMatch is the ETag the change was made on. */
+export type ChangeRequest = {
+  method: "POST" | "PUT" | "PATCH" | "DELETE";
+  path: string;
+  body?: unknown;
+  ifMatch?: string;
+};
+
+/** Sends a change; resolves to its answer, undefined for 204, and the ETag of the revision it
+ * left. With ifMatch the server makes it only while the resource has that revision: 412 when it
+ * changed since. */
+export async function sendChange<T = undefined>(req: ChangeRequest): Promise<Tagged<T>> {
+  const res = await request(req.method, req.path, {
+    body: req.body,
+    headers: req.ifMatch === undefined ? undefined : { "If-Match": req.ifMatch },
+  });
+  return { data: (res.status === 204 ? undefined : await res.json()) as T, etag: res.headers.get("ETag") };
 }
 
 /** A GET with explicit credentials, outside the session: sign-in checks a pasted token with it. */

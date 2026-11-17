@@ -19,9 +19,12 @@ export async function pkceChallenge(verifier: string): Promise<string> {
 }
 
 /** The server's login for a web UI: return_to, the page the callback sends the code to, the
- * challenge, and dpop_jkt, the thumbprint of the key that redeems the code. */
-export function oidcLoginUrl(apiBase: string, p: { returnTo: string; challenge: string; jkt: string }): string {
+ * challenge, and dpop_jkt, the thumbprint of the key that redeems the code. prompt "login" asks
+ * the IdP to authenticate the person again, for a step that needs a fresh sign-in
+ * (docs/spec/http-routing.md §7, rbac.md §10). */
+export function oidcLoginUrl(apiBase: string, p: { returnTo: string; challenge: string; jkt: string; prompt?: "login" }): string {
   const q = new URLSearchParams({ return_to: p.returnTo, code_challenge: p.challenge, code_challenge_method: "S256", dpop_jkt: p.jkt });
+  if (p.prompt) q.set("prompt", p.prompt);
   return `${apiBase}/-/oidc/login?${q.toString()}`;
 }
 

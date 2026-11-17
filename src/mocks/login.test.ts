@@ -8,10 +8,11 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { signInWithPassword, signInWithToken, signOut } from "@/api/auth";
-import { apiGet, apiGetAs, apiPath } from "@/api/client";
+import { apiGet, apiGetAs, apiPath, sendChange } from "@/api/client";
 import { jwkThumbprint, learnServerClock, publicJwk } from "@/api/dpop";
 import { signInKey } from "@/api/dpop-key";
 import { getSession, sessionEnd } from "@/api/session";
+import { needsStepUp } from "@/api/step-up";
 import type { ServerInfo, Token, WhoAmI } from "@/api/types";
 
 import { createToken, revokeToken } from "./auth";
@@ -139,6 +140,28 @@ describe("signing in at POST /api/v1/login", () => {
     await expect(whoami()).rejects.toMatchObject({ status: 401 });
     expect(sent.at(-1)!.headers.get("Authorization")).toMatch(/^DPoP /);
     expect(getSession()).toBeNull();
+  });
+
+  it("keeps the session when a step asks for a fresher sign-in (rbac.md §10, Asking for more)", async () => {
+    await signInWithPassword("alice", "alice");
+    const s = getSession()!;
+    // The answer of lajstrom/lajstrom#1296: the token is not refused, only the step.
+    server.use(
+      http.post("*/api/v1/ci/policies", () =>
+        HttpResponse.json(
+          { error: { code: "UNAUTHENTICATED", message: "this needs a sign-in with a second factor within the last 10 minutes" } },
+          {
+            status: 401,
+            headers: { "WWW-Authenticate": 'DPoP error="insufficient_user_authentication", error_description="a fresh sign-in", algs="ES256", max_age=600' },
+          },
+        ),
+      ),
+    );
+    const err = await sendChange({ method: "POST", path: apiPath("ci", "policies"), body: {} }).catch((e: unknown) => e);
+    expect(err).toMatchObject({ status: 401, challenge: { error: "insufficient_user_authentication", description: "a fresh sign-in" } });
+    expect(needsStepUp(err)).toBe(true);
+    expect(getSession()).toEqual(s);
+    expect(await whoami()).toMatchObject({ name: "alice" });
   });
 
   it("ends the session as idle once the token went unused for longer than info.login.idleTimeout", async () => {
