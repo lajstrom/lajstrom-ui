@@ -65,7 +65,9 @@ separate repository:
   ("Sign in with single sign-on"), or with a token you already have. The first two get a
   personal access token for the browser (12 hours by default, revoked on sign-out) bound to a key
   that the browser keeps non-extractable in IndexedDB: requests carry it as
-  `Authorization: DPoP` with a new proof of the key (RFC 9449). A server without
+  `Authorization: DPoP` with a new proof of the key (RFC 9449). With the server's
+  `auth.login.idleTimeout` (15 minutes for PCI DSS 8.2.8), the UI warns two minutes before it
+  and signs out at it, and makes no request on its own while nobody is there. A server without
   `POST /api/v1/login`, and a token you paste, get `Authorization: Bearer`. There are no cookies.
 - **The first admin** of a new server: "Set up the first admin", linked from the sign-in page,
   exchanges the server's one-time bootstrap token for the first admin with a name and a password,

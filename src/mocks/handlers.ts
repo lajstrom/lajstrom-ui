@@ -31,7 +31,7 @@ function unauthorized(message: string, api = true) {
 function dpopRefused(r: DpopRefusal) {
   const challenge = `DPoP error="${r.error}"${r.why ? `, error_description="${r.why}"` : ""}, algs="ES256"`;
   return HttpResponse.json<ApiErrorBody>(
-    { error: { code: "UNAUTHENTICATED", message: r.why ?? "credentials are needed: the ones sent were refused" } },
+    { error: { code: "UNAUTHENTICATED", message: r.message ?? r.why ?? "credentials are needed: the ones sent were refused" } },
     { status: 401, headers: { "WWW-Authenticate": challenge, Date: new Date().toUTCString() } },
   );
 }

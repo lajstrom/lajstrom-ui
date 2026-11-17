@@ -13,7 +13,7 @@ import { keep, persist } from "./state";
 
 /** Why a request's DPoP credentials are refused: the challenge of RFC 9449 §7.1, with the reason
  * of a refused proof. */
-export type DpopRefusal = { error: "invalid_dpop_proof" | "invalid_token"; why?: string };
+export type DpopRefusal = { error: "invalid_dpop_proof" | "invalid_token"; why?: string; message?: string };
 
 /** The principal of a request: a user name or "anonymous"; or the reason it is refused, with the
  * DPoP challenge on /api/ when the token is a sign-in's or came as DPoP. */
@@ -90,8 +90,21 @@ async function authenticateDpop(request: Request, secret: string): Promise<Authn
   if (!t?.user || !t.dpopJkt || t.dpopJkt !== proof.jkt || !enabledUser(t.user)) return { refused: true, dpop: { error: "invalid_token" } };
   const used = spendProof(proof);
   if (used) return { refused: true, dpop: { error: "invalid_dpop_proof", why: used } };
+  if (idle(t)) {
+    t.revokedAt = new Date().toISOString();
+    persist();
+    return { refused: true, dpop: { error: "invalid_token", why: "idle", message: "the sign-in was idle for longer than the server allows: sign in again" } };
+  }
   touch(t);
   return { principal: t.user };
+}
+
+/** Whether a sign-in's token went unused for longer than info.login.idleTimeout: refused, after
+ * its proof is spent, and revoked (rbac.md §10, Idle). Its last use is kept to the minute, so it
+ * is refused between a minute short of the bound and the bound. */
+function idle(t: Token, now = Date.now()): boolean {
+  const bound = serverInfo.login?.idleTimeout ?? 0;
+  return bound > 0 && now - Date.parse(t.lastUsedAt ?? t.createdAt) > bound * 1000;
 }
 
 export async function authenticate(request: Request): Promise<Authn> {

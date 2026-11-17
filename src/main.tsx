@@ -6,6 +6,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { ApiError } from "./api/client";
+import { pollsAllowed, watchIdle } from "./api/idle";
 import { initSession, onSessionChange } from "./api/session";
 import { applyBranding } from "./app/branding";
 import { configUrl, loadConfig } from "./app/config";
@@ -37,6 +38,9 @@ async function main() {
       queries: {
         staleTime: 30_000,
         refetchOnWindowFocus: false,
+        // With an idle bound, the network coming back refetches nothing while nobody is there: a
+        // request with the token would keep the sign-in alive (src/api/idle.ts).
+        refetchOnReconnect: () => pollsAllowed(),
         // 4xx answers are final; retry network and 5xx errors once.
         retry: (count, err) => !(err instanceof ApiError && err.status >= 400 && err.status < 500) && count < 1,
       },
@@ -65,6 +69,7 @@ async function main() {
   // What the API answers depends on who asks: sign-in, sign-out, another tab, or a token the
   // server refused (src/api/client.ts) start every query over.
   onSessionChange(() => void queryClient.resetQueries());
+  watchIdle();
   // A change in flight, which an optimistic screen already shows as done, is lost with the page:
   // the browser asks before leaving (docs/adr/0003-changes-realistic-by-default.md).
   window.addEventListener("beforeunload", (e) => {
