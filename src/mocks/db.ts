@@ -198,9 +198,22 @@ const deletedUsers: (User & { deletedName: string })[] = [];
 /** The uid of each name a user had before a rename or a delete, for the audit rows of then. */
 const formerUids = new Map<string, string>();
 let nextBindingId = Math.max(0, ...bindings.map((b) => b.id)) + 1;
+/** The wrong passwords in a row of each user, by uid, while the lockout is set; and the hashes
+ * of the passwords before each one's current one, newest first (rbac.md §1, Local passwords). */
+const passwordFailures = new Map<string, number>();
+const passwordHistory = new Map<string, string[]>();
 
 keep("users", {
-  save: () => ({ users, bindings, deletedUsers, formerUids: [...formerUids], passwords: [...passwords], nextBindingId }),
+  save: () => ({
+    users,
+    bindings,
+    deletedUsers,
+    formerUids: [...formerUids],
+    passwords: [...passwords],
+    passwordFailures: [...passwordFailures],
+    passwordHistory: [...passwordHistory],
+    nextBindingId,
+  }),
   load: (data) => {
     const d = data as {
       users?: User[];
@@ -208,6 +221,8 @@ keep("users", {
       deletedUsers?: (User & { deletedName: string })[];
       formerUids?: [string, string][];
       passwords?: [string, string][];
+      passwordFailures?: [string, number][];
+      passwordHistory?: [string, string[]][];
       nextBindingId?: number;
     };
     if (!Array.isArray(d.users) || !Array.isArray(d.bindings)) return;
@@ -216,6 +231,8 @@ keep("users", {
     deletedUsers.splice(0, deletedUsers.length, ...(d.deletedUsers ?? []));
     for (const [name, uid] of d.formerUids ?? []) formerUids.set(name, uid);
     for (const [name, hash] of d.passwords ?? []) passwords.set(name, hash);
+    for (const [uid, n] of d.passwordFailures ?? []) passwordFailures.set(uid, n);
+    for (const [uid, hashes] of d.passwordHistory ?? []) passwordHistory.set(uid, hashes);
     if (typeof d.nextBindingId === "number") nextBindingId = d.nextBindingId;
     auditCache = null;
   },
@@ -244,11 +261,85 @@ function isInactive(u: User, now: number): boolean {
   return after > 0 && !u.disabled && now - Date.parse(u.lastSeenAt ?? u.createdAt) > after * 3_600_000;
 }
 
-/** A user as the API answers it: inactive is worked out when it is answered, and absent when
- * false. */
+/** A user as the API answers it: inactive is worked out when it is answered, lockedUntil is
+ * there while the lock is in force, and both and mustChange are absent when false. */
 export function userView(u: User, now = Date.now()): User {
-  return isInactive(u, now) ? { ...u, inactive: true } : u;
+  const view: User = { ...u };
+  delete view.lockedUntil;
+  delete view.mustChange;
+  if (isInactive(u, now)) view.inactive = true;
+  if (lockedNow(u, now)) view.lockedUntil = u.lockedUntil;
+  if (u.mustChange) view.mustChange = true;
+  return view;
 }
+
+/** The wrong passwords in a row that lock a password (rbac.md §1, The lockout), and the passwords
+ * before the current one that a user's own change does not return to (A user's own password). */
+const LOCKOUT_FAILURES = 10;
+const HISTORY = 3;
+
+/** The 403 of a password that verified and must be changed first (rbac.md §1, Change at first
+ * use): the server's message, the same for every user and route. */
+export const MUST_CHANGE =
+  "the password must be changed before it is used for anything else: change it with lajstrom change-password, or POST /api/v1/users/{user}/password with currentPassword and password";
+
+/** The message of every 401 that refuses a user name and a password: while the lockout is set,
+ * what locks a password and for how long, the same whatever the reason and the account. */
+export function passwordRefusedMessage(): string {
+  return config.lockoutMinutes > 0
+    ? `the user name or the password was refused: ${LOCKOUT_FAILURES} wrong passwords in a row lock a password for ${config.lockoutMinutes}m`
+    : "the user name or the password is wrong";
+}
+
+/** The hash of a user's password: one set through the API, or else a local user of the seed's
+ * name; an OIDC user has none until one is set (src/mocks/data/system.ts, passwords). */
+function passwordHash(u: User): string | undefined {
+  return passwords.get(u.name) ?? (u.kind === "local" ? sha256Hex(u.name) : undefined);
+}
+
+/** Whether the password of u is locked now: the lockout is set and its lock is in force. */
+function lockedNow(u: User, now: number): boolean {
+  return config.lockoutMinutes > 0 && u.lockedUntil !== undefined && Date.parse(u.lockedUntil) > now;
+}
+
+/**
+ * A user name and a password, as every route that takes one checks them (rbac.md §1, Local
+ * passwords). Refused: a name no user has, a disabled user, one without a password, a locked
+ * password whatever it is, and a wrong one, which counts toward the lockout while it is set: the
+ * 10th in a row locks the password, a login.block by anonymous. A password that verifies sets
+ * the count back to 0, then records the user's activity, or disables an inactive user
+ * (authenticated). "must change" when it verified and must be changed before anything but the
+ * user's own change (own).
+ */
+export function checkPassword(name: string, secret: string, own = false, now = Date.now()): "ok" | "refused" | "must change" {
+  const u = users.find((x) => x.name === name);
+  const hash = u && !u.disabled ? passwordHash(u) : undefined;
+  if (!u || hash === undefined || lockedNow(u, now)) return "refused";
+  if (hash !== sha256Hex(secret)) {
+    failedPassword(u, now);
+    return "refused";
+  }
+  if (passwordFailures.delete(u.uid)) persist();
+  if (!authenticated(name, now)) return "refused";
+  return u.mustChange && !own ? "must change" : "ok";
+}
+
+function failedPassword(u: User, now: number): void {
+  if (config.lockoutMinutes <= 0) return;
+  const n = (passwordFailures.get(u.uid) ?? 0) + 1;
+  if (n < LOCKOUT_FAILURES) {
+    passwordFailures.set(u.uid, n);
+    persist();
+    return;
+  }
+  passwordFailures.delete(u.uid);
+  u.lockedUntil = rfc3339(now + config.lockoutMinutes * 60_000);
+  const details = { name: u.name, limit: "lockout", until: u.lockedUntil };
+  changed({ at: new Date(now).toISOString(), principal: "anonymous", action: "login.block", repo: "", subject: `user:${u.name}`, digest: null, ip: DEMO_IP, details });
+}
+
+/** A time as the server writes it, to the second (2026-11-17T10:00:00Z). */
+const rfc3339 = (ms: number) => new Date(ms - (ms % 1000)).toISOString().replace(".000Z", "Z");
 
 /**
  * A user whose credential has verified (rbac.md §1, Inactive users). An inactive one is refused
@@ -267,7 +358,7 @@ export function authenticated(name: string, now = Date.now()): boolean {
     return false;
   }
   if (u.lastSeenAt === null || now - Date.parse(u.lastSeenAt) >= 60_000) {
-    u.lastSeenAt = new Date(now - (now % 1000)).toISOString().replace(".000Z", "Z");
+    u.lastSeenAt = rfc3339(now);
     persist();
   }
   return true;
@@ -297,10 +388,11 @@ export function nameRefusal(name: string): Refusal | null {
   return null;
 }
 
-/** A password of 8 to 1024 bytes that is no token's secret (CheckPassword of the server). */
+/** A password of the rules of auth.passwords at their defaults (PasswordPolicy.Check of the
+ * server): at least 8 characters, at most 1024 bytes, and no token's secret. */
 export function passwordRefusal(password: string): Refusal | null {
-  if (bytes(password) < 8) return invalid("password: must be at least 8 bytes");
   if (bytes(password) > 1024) return invalid("password: must be at most 1024 bytes");
+  if ([...password].length < 8) return invalid("password: must be at least 8 characters (auth.passwords.minLength)");
   if (password.startsWith("ljs_pat_") || password.startsWith("ljs_dep_")) {
     return invalid("password: must not start with ljs_pat_ or ljs_dep_: a secret with either is a token's");
   }
@@ -330,10 +422,13 @@ export function createUser(body: unknown, by: string): User | Refusal {
   if (users.some((u) => u.name === name)) return conflict(`user ${name} already exists`);
   const now = new Date().toISOString();
   const user: User = { uid: uidOf(`${name} ${now}`), name, kind: "local", disabled: false, createdAt: now, lastSeenAt: null };
+  // With auth.passwords.changeAtFirstUse the user changes the admin's password before using it.
+  if (config.changeAtFirstUse) user.mustChange = true;
   users.push(user);
   passwords.set(name, sha256Hex(str(b.password)));
   if (b.admin === true) bindings.push({ id: nextBindingId++, principal: `user:${name}`, role: "admin", repoMask: "*/*", createdAt: now });
-  changed({ at: now, principal: by, action: "user.create", repo: "", subject: `user:${name}`, digest: null, ip: DEMO_IP, details: { name, admin: b.admin === true, source: "api" } });
+  const details = { name, admin: b.admin === true, ...(user.mustChange ? { mustChange: true } : {}), source: "api" };
+  changed({ at: now, principal: by, action: "user.create", repo: "", subject: `user:${name}`, digest: null, ip: DEMO_IP, details });
   return user;
 }
 
@@ -349,17 +444,21 @@ function renameUser(user: User, to: string): void {
   if (hash !== undefined) passwords.set(to, hash);
 }
 
-/** PATCH /api/v1/users/{user}: disabled first, then the name, each an audit row of its own; a
- * value the user has already changes nothing. */
+/** PATCH /api/v1/users/{user}: disabled first, then mustChange, then the name, each an audit row
+ * of its own; a value the user has already changes nothing. */
 export function updateUser(user: User, body: unknown, by: string): User | Refusal {
-  const refused = bodyRefusal(body, ["name", "disabled"]);
+  const refused = bodyRefusal(body, ["name", "disabled", "mustChange"]);
   if (refused) return refused;
-  const b = body as { name?: unknown; disabled?: unknown };
+  const b = body as { name?: unknown; disabled?: unknown; mustChange?: unknown };
   if (b.name !== undefined && b.name !== null && typeof b.name !== "string") return invalid("name: must not be a JSON " + typeof b.name);
   if (b.disabled !== undefined && b.disabled !== null && typeof b.disabled !== "boolean") return invalid("disabled: must not be a JSON " + typeof b.disabled);
+  if (b.mustChange !== undefined && b.mustChange !== null && typeof b.mustChange !== "boolean") return invalid("mustChange: must not be a JSON " + typeof b.mustChange);
   const name = b.name as string | null | undefined;
   const disabled = b.disabled as boolean | null | undefined;
-  if (name == null && disabled == null) return invalid("body: nothing to change; the fields are name and disabled");
+  const mustChange = b.mustChange as boolean | null | undefined;
+  if (name == null && disabled == null && mustChange == null) return invalid("body: nothing to change; the fields are name, disabled and mustChange");
+  // A user without a password has none to change (rbac.md §1, Change at first use).
+  if (mustChange != null && passwordHash(user) === undefined) return invalid(`mustChange: user ${user.name} has no password`);
   const at = new Date().toISOString();
   if (disabled != null && disabled !== user.disabled) {
     if (disabled && !anyAdmin((x) => x.principal === `user:${user.name}`) && bindings.some((x) => x.principal === `user:${user.name}` && x.role === "admin")) {
@@ -369,6 +468,11 @@ export function updateUser(user: User, body: unknown, by: string): User | Refusa
     // Enabling restarts the user's clock, so that its next request does not disable it again.
     if (!disabled) user.lastSeenAt = at;
     changed({ at, principal: by, action: disabled ? "user.disable" : "user.enable", repo: "", subject: `user:${user.name}`, digest: null, ip: DEMO_IP, details: { name: user.name, source: "api" } });
+  }
+  if (mustChange != null && mustChange !== (user.mustChange === true)) {
+    if (mustChange) user.mustChange = true;
+    else delete user.mustChange;
+    changed({ at, principal: by, action: "user.mustchange", repo: "", subject: `user:${user.name}`, digest: null, ip: DEMO_IP, details: { name: user.name, mustChange, source: "api" } });
   }
   if (name != null) {
     const bad = nameRefusal(name);
@@ -383,16 +487,81 @@ export function updateUser(user: User, body: unknown, by: string): User | Refusa
   return user;
 }
 
-/** POST /api/v1/users/{user}/password. */
+/** The password of u replaced by hash: the one it replaces goes to the head of its history, so
+ * that the user's next change returns to neither (rbac.md §1, A user's own password). */
+function replacePassword(u: User, hash: string): void {
+  const replaced = passwordHash(u);
+  if (replaced !== undefined) passwordHistory.set(u.uid, [replaced, ...(passwordHistory.get(u.uid) ?? [])].slice(0, HISTORY));
+  passwords.set(u.name, hash);
+}
+
+/**
+ * POST /api/v1/users/{user}/password without currentPassword: an admin's new password (rbac.md
+ * §1, Local passwords). It is not compared with the user's last passwords; it ends a lock in force
+ * with a user.unlock row, and sets mustChange with auth.passwords.changeAtFirstUse, else clears it.
+ */
 export function setPassword(user: User, body: unknown, by: string): Refusal | null {
   const refused = bodyRefusal(body, ["password"]);
   if (refused) return refused;
   const password = str((body as Record<string, unknown>).password);
   const bad = passwordRefusal(password);
   if (bad) return bad;
-  passwords.set(user.name, sha256Hex(password));
-  changed({ at: new Date().toISOString(), principal: by, action: "user.password", repo: "", subject: `user:${user.name}`, digest: null, ip: DEMO_IP, details: { name: user.name, source: "api" } });
+  const now = Date.now();
+  const at = new Date(now).toISOString();
+  const lock = lockedNow(user, now) ? user.lockedUntil : undefined;
+  replacePassword(user, sha256Hex(password));
+  passwordFailures.delete(user.uid);
+  delete user.lockedUntil;
+  if (config.changeAtFirstUse) user.mustChange = true;
+  else delete user.mustChange;
+  const details = { name: user.name, ...(user.mustChange ? { mustChange: true } : {}), source: "api" };
+  changed({ at, principal: by, action: "user.password", repo: "", subject: `user:${user.name}`, digest: null, ip: DEMO_IP, details });
+  if (lock) unlocked(user, lock, at, by);
   return null;
+}
+
+/**
+ * POST /api/v1/users/{user}/password with currentPassword: the user's own change, which takes no
+ * other credential (rbac.md §1, A user's own password). The current password is checked as every
+ * password is, a wrong one 401 with the message of every refused password and a failure of the
+ * lockout; the new one follows the rules and is none of the user's last four, else 400. The change
+ * clears mustChange and is a user.password row by the user; its tokens are not touched.
+ */
+export function changeOwnPassword(ref: string, body: unknown): Refusal | null {
+  const refused = bodyRefusal(body, ["currentPassword", "password"]);
+  if (refused) return refused;
+  const b = body as Record<string, unknown>;
+  if (typeof b.currentPassword !== "string" || typeof b.password !== "string") return invalid('body: must be {"currentPassword", "password"}, two strings');
+  const now = Date.now();
+  const name = userByRef(ref)?.name ?? ref;
+  if (checkPassword(name, b.currentPassword, true, now) !== "ok") return { status: 401, code: "UNAUTHENTICATED", message: passwordRefusedMessage() };
+  const user = users.find((u) => u.name === name)!;
+  const bad = passwordRefusal(b.password);
+  if (bad) return bad;
+  const hash = sha256Hex(b.password);
+  if (hash === passwordHash(user) || passwordHistory.get(user.uid)?.includes(hash)) {
+    return invalid(`password: was used before: choose one that is none of your last ${HISTORY + 1} passwords`);
+  }
+  replacePassword(user, hash);
+  delete user.mustChange;
+  const by = `user:${name}`;
+  changed({ at: new Date(now).toISOString(), principal: by, action: "user.password", repo: "", subject: by, digest: null, ip: DEMO_IP, details: { name, source: "api" } });
+  return null;
+}
+
+/** POST /api/v1/users/{user}/unlock: the lock ends and the count of wrong passwords is 0, with a
+ * user.unlock row when a lock was in force (rbac.md §1, The lockout). */
+export function unlockUser(user: User, by: string): void {
+  const now = Date.now();
+  const lock = lockedNow(user, now) ? user.lockedUntil : undefined;
+  passwordFailures.delete(user.uid);
+  delete user.lockedUntil;
+  if (lock) unlocked(user, lock, new Date(now).toISOString(), by);
+  else persist();
+}
+
+function unlocked(user: User, lockedUntil: string, at: string, by: string): void {
+  changed({ at, principal: by, action: "user.unlock", repo: "", subject: `user:${user.name}`, digest: null, ip: DEMO_IP, details: { name: user.name, lockedUntil, source: "api" } });
 }
 
 /** DELETE /api/v1/users/{user}: its live tokens revoked, its bindings deleted, the row kept as

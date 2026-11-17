@@ -22,14 +22,20 @@ export function createUser(req: UserRequest): Promise<User> {
   return apiSend<User>("POST", apiPath("users"), { body: req });
 }
 
-/** Changes the name, disabled, or both: disabled first, then the name. */
+/** Changes the name, disabled and mustChange: disabled first, then mustChange, then the name. */
 export function updateUser(user: string, patch: UserPatch): Promise<User> {
   return apiSend<User>("PATCH", apiPath("users", user), { body: patch });
 }
 
-/** Sets the password: the old one fails from the next request on; the user's tokens stay. */
+/** Sets the password: the old one fails from the next request on; the user's tokens stay. It
+ * ends a lock of the lockout, and with auth.passwords.changeAtFirstUse the user must change it. */
 export function setUserPassword(user: string, password: string): Promise<void> {
   return apiSend("POST", apiPath("users", user, "password"), { body: { password } });
+}
+
+/** Ends the lock of a user's password and its count of wrong passwords (the lockout). */
+export function unlockUser(user: string): Promise<void> {
+  return apiSend("POST", apiPath("users", user, "unlock"));
 }
 
 /** Deletes a user: its tokens are revoked and its bindings deleted. It is not undone. */

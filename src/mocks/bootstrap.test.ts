@@ -70,7 +70,7 @@ describe("POST /api/v1/bootstrap in the demo", () => {
       [{ ...right, name: "" }, "name: must not be empty"],
       [{ ...right, name: "deploy" }, 'name: "deploy" is reserved'],
       [{ ...right, name: "01a1c9a1-8909-7932-b435-6fc48e1e252b" }, "has the form of a uid"],
-      [{ ...right, password: "short" }, "password: must be at least 8 bytes"],
+      [{ ...right, password: "short" }, "password: must be at least 8 characters (auth.passwords.minLength)"],
       [{ ...right, password: "ljs_pat_looks-like-a-token" }, "password: must not start with ljs_pat_ or ljs_dep_"],
     ] as const) {
       await expect(exchange(req)).rejects.toMatchObject({ status: 400, code: "INVALID", message: expect.stringContaining(text) });

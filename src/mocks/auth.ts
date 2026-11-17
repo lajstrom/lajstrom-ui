@@ -4,13 +4,14 @@
 // (src/mocks/dpop.ts); refused credentials answered 401. In the demo a user's password is the
 // user's name: admin / admin, alice / alice; a disabled user is refused whatever the password,
 // and an inactive one is disabled once its credential has verified (src/mocks/db.ts,
-// authenticated).
+// authenticated). A password is checked with the lockout and the change at first use
+// (checkPassword).
 
 import type { CreatedToken, LoginToken, Token, TokenRequest, TokenScope } from "@/api/types";
 import { sha256Hex } from "@/lib/sha256";
 
-import { config, passwords, serverInfo, tokens, users } from "./data/system";
-import { authenticated } from "./db";
+import { config, serverInfo, tokens, users } from "./data/system";
+import { authenticated, checkPassword, MUST_CHANGE, passwordRefusedMessage } from "./db";
 import { spendProof, verifyProof } from "./dpop";
 import type { Credential, SignIn } from "./persona";
 import { keep, persist } from "./state";
@@ -20,8 +21,13 @@ import { keep, persist } from "./state";
 export type DpopRefusal = { error: "invalid_dpop_proof" | "invalid_token"; why?: string; message?: string };
 
 /** The principal of a request, a user name or "anonymous", and its credential; or the reason it
- * is refused, with the DPoP challenge on /api/ when the token is a sign-in's or came as DPoP. */
-export type Authn = { principal: string; credential: Credential } | { refused: true; dpop?: DpopRefusal };
+ * is refused, with the DPoP challenge on /api/ when the token is a sign-in's or came as DPoP, or
+ * the message of a refused password; or a password that verified and must be changed first, 403
+ * (rbac.md §1, Change at first use). */
+export type Authn =
+  | { principal: string; credential: Credential }
+  | { refused: true; dpop?: DpopRefusal; message?: string }
+  | { mustChange: true };
 
 const anonymous: Authn = { principal: "anonymous", credential: { kind: "none" } };
 
@@ -62,14 +68,6 @@ function live(t: Token, now = Date.now()): boolean {
 
 function enabledUser(name: string): boolean {
   return users.some((u) => u.name === name && !u.disabled);
-}
-
-/** A password set through the API, or else the name of a local user of the seed; an OIDC user
- * has none until one is set (src/mocks/data/system.ts, passwords). */
-function passwordMatches(name: string, secret: string): boolean {
-  const set = passwords.get(name);
-  if (set !== undefined) return set === sha256Hex(secret);
-  return secret === name && users.some((u) => u.name === name && u.kind === "local");
 }
 
 function tokenOf(secret: string): Token | null {
@@ -153,8 +151,9 @@ export async function authenticate(request: Request): Promise<Authn> {
   }
   if (scheme === "basic") {
     const creds = decodeBasic(value);
-    if (!creds || !enabledUser(creds.user)) return { refused: true };
+    if (!creds) return { refused: true };
     if (creds.secret.startsWith("ljs_pat_")) {
+      if (!enabledUser(creds.user)) return { refused: true };
       const t = tokenOf(creds.secret);
       if (!t || t.user !== creds.user) return { refused: true };
       if (t.dpopJkt) return bound;
@@ -162,7 +161,10 @@ export async function authenticate(request: Request): Promise<Authn> {
       touch(t);
       return { principal: creds.user, credential: { kind: "token" } };
     }
-    if (!passwordMatches(creds.user, creds.secret) || !authenticated(creds.user)) return { refused: true };
+    // A refused password, whatever the reason, has the one message of every refused password.
+    const check = checkPassword(creds.user, creds.secret);
+    if (check === "refused") return { refused: true, message: passwordRefusedMessage() };
+    if (check === "must change") return { mustChange: true };
     return { principal: creds.user, credential: { kind: "password" } };
   }
   return anonymous;
@@ -319,9 +321,10 @@ export async function login(request: Request, body: unknown): Promise<LoginToken
   if (byCode) return invalid("code: unknown, used, expired, or of another verifier or key: sign in again");
 
   const user = b.username as string;
-  if (!enabledUser(user) || !passwordMatches(user, b.password as string) || !authenticated(user)) {
-    return { status: 401, code: "UNAUTHENTICATED", message: "the user name or the password is wrong" };
-  }
+  const check = checkPassword(user, b.password as string);
+  if (check === "refused") return { status: 401, code: "UNAUTHENTICATED", message: passwordRefusedMessage() };
+  // The one 403 of a sign-in, which mints no token: the UI offers the change.
+  if (check === "must change") return { status: 403, code: "FORBIDDEN", message: MUST_CHANGE };
   const now = Date.now();
   const stamp = new Date(now - (now % 1000)).toISOString().replace(".000Z", "Z");
   const secret = randomSecret("ljs_pat_");

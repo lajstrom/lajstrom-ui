@@ -38,7 +38,6 @@ const notMocked = new Set([
   "post /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/deny",
   "delete /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/deny",
   // The lockout of local passwords (rbac.md §1): no screen yet.
-  "post /api/v1/users/{user}/unlock",
 ]);
 
 describe("public/openapi.yaml against the mock", () => {
