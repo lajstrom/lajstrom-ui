@@ -61,6 +61,18 @@ separate repository:
   and users and bindings: create, disable, rename and delete users and set their passwords, bind
   users and OIDC groups to roles on repo masks; a user's page has its bindings and its tokens,
   which the admin may revoke.
+- **CI trust policies**, a tab of Access: which jobs of GitHub Actions or GitLab CI get a CI token
+  of minutes for their platform's OIDC token, and its grants. Those of the server's configuration
+  are shown read-only; the admin makes, changes and deletes the others, with the claims of the
+  issuer's platform offered and the server's refusals at their fields. A policy that writes
+  shows its expiry and waits, pending, for another admin, who sees what waits with who changed it
+  and approves exactly the revision shown (`If-Match`); it is renewed before it expires.
+- **A fresh sign-in to confirm**: what the server takes only with a sign-in through OIDC of the
+  last 10 minutes with a second factor, a CI trust policy that writes, made, changed, renewed or
+  approved, offers "Sign in again to confirm". The UI keeps the change in the tab, signs in again
+  at the IdP (`prompt=login`), and sends the change once when it comes back, whatever then
+  happens. A server without single sign-on says that such policies are its configuration's; the
+  demo, which has no IdP, says what the button would do.
 - **Sign-in** as the server's `authModes` allow: with a password, through the server's OIDC login
   ("Sign in with single sign-on"), or with a token you already have. The first two get a
   personal access token for the browser (12 hours by default, revoked on sign-out) bound to a key

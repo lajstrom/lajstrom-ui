@@ -18,7 +18,7 @@ import { shortDigest } from "@/lib/format";
 function actionTone(action: string): BadgeProps["tone"] {
   if (action === "push") return "primary";
   if (action === "delete" || action === "proxy.reject" || /\.(delete|revoke|disable|drop)$/.test(action)) return "danger";
-  if (action.startsWith("token.") || action.startsWith("binding.") || action.startsWith("key.")) return "warning";
+  if (action.startsWith("token.") || action.startsWith("binding.") || action.startsWith("key.") || action.startsWith("ci.policy.")) return "warning";
   return "neutral";
 }
 
@@ -224,7 +224,12 @@ function AuditRow({ event: e, showRepo }: { event: AuditEvent; showRepo: boolean
         </TD>
       ) : null}
       <TD className="max-w-[20rem]">
-        {e.subject ? (
+        {e.subject && e.action.startsWith("ci.policy.") ? (
+          // A CI trust policy, by its name: its tab of Access.
+          <Link to="/access" search={{ tab: "ci", policy: e.subject }} className="block truncate font-mono text-xs text-primary hover:underline" title={e.subject}>
+            {e.subject}
+          </Link>
+        ) : e.subject ? (
           <span className="block truncate font-mono text-xs" title={e.subject}>
             {e.subject}
           </span>

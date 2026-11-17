@@ -18,11 +18,12 @@ import { errorText } from "@/lib/errors";
 import { maskMatches } from "@/lib/masks";
 import { roleActions, roleTone } from "@/lib/roles";
 
+import { CIPolicies } from "./ci-policies";
 import { MaskTokens } from "./mask-tokens";
 import { deleteBindingKey, disableKey, useDeleteBinding, useDisableUser, type DisableChange } from "./user-changes";
 import { CreateBindingDialog, CreateUserDialog } from "./user-dialogs";
 
-type Tab = "users" | "tokens" | "masks" | "bindings";
+type Tab = "users" | "tokens" | "masks" | "bindings" | "ci";
 
 const userId = (c: DisableChange) => c.user.uid;
 const bindingId = (b: Binding) => b.id;
@@ -36,7 +37,7 @@ export function AccessPage() {
     <>
       <PageHeader
         title="Access"
-        description="Who can do what: users, their tokens, and role bindings on repo masks (docs/spec/rbac.md)."
+        description="Who can do what: users, their tokens, role bindings on repo masks, and the CI jobs that get tokens (docs/spec/rbac.md)."
       />
       <div className="mb-4 flex items-start gap-2 rounded-lg border border-primary/20 bg-primary-soft px-4 py-3 text-sm text-primary-soft-foreground">
         <Info className="mt-0.5 size-4 shrink-0" />
@@ -59,9 +60,20 @@ export function AccessPage() {
           { value: "tokens", label: "Tokens" },
           { value: "masks", label: "Tokens over a mask" },
           { value: "bindings", label: "Bindings" },
+          { value: "ci", label: "CI trust policies" },
         ]}
       />
-      {tab === "users" ? <UsersTable /> : tab === "tokens" ? <TokensTable /> : tab === "masks" ? <MaskTokens /> : <BindingsTable />}
+      {tab === "users" ? (
+        <UsersTable />
+      ) : tab === "tokens" ? (
+        <TokensTable />
+      ) : tab === "masks" ? (
+        <MaskTokens />
+      ) : tab === "ci" ? (
+        <CIPolicies />
+      ) : (
+        <BindingsTable />
+      )}
     </>
   );
 }
