@@ -1,8 +1,8 @@
 # Proposal: what the web UI reads from `/api/v1` that the server does not answer yet
 
-- Status: the server answers all of it but an OIDC user's groups (§2.8), since
-  lajstrom/lajstrom@6c5bf5c, in the shapes its `internal/api/openapi.yaml` gives, which are the
-  contract (lajstrom/lajstrom-ui#2). Each part was an issue labelled `contract` in lajstrom/lajstrom,
+- Status: the server answers all of it but an OIDC user's groups (§2.8) and the issuers of the
+  CI trust policies (§2.9), since lajstrom/lajstrom@6c5bf5c, in the shapes its
+  `internal/api/openapi.yaml` gives, which are the contract (lajstrom/lajstrom-ui#2). Each part was an issue labelled `contract` in lajstrom/lajstrom,
   named below.
 - Shapes: [`openapi/proposed.yaml`](../openapi/proposed.yaml), additions to the server's OpenAPI
   description. `npm run gen:api` merges the two into [`public/openapi.yaml`](../public/openapi.yaml),
@@ -41,6 +41,23 @@ The server makes a user of `kind` `oidc` at the first OIDC login of an identity 
 Its groups, those of its latest login that count now, are in whoami for the caller and nowhere
 for the admin, who binds groups and should see which users a group's bindings reach: the user
 resource gets `groups`, absent for a local user, as whoami has it.
+
+### 2.9 The issuers of the CI trust policies
+
+A CI trust policy names an issuer of the server's `auth.ci.issuers`, and may name only the claims
+of that issuer's platform, GitHub's or GitLab's (rbac.md §11). `GET /api/v1/ci/policies` lists the
+policies but not the issuers, so a form of a policy can neither offer the issuers nor know which
+claims to offer. The list gets `issuers`, `[{name, platform}]` in the configuration's order: the
+admin reads it already, and the names and platforms are no secret of the configuration (its
+issuer URLs, audiences and CA files stay out). Without it the UI offers the issuer names its
+policies use, takes the platform from the ids their claims name, and else lets the person pick
+the platform of the hints; the server refuses a wrong issuer or claim with `400` naming it.
+
+One thing outside the description: a UI on another origin than the server's (`server.corsOrigins`)
+cannot read an `ETag`, nor send `If-Match`, because the server's CORS answers expose and allow
+neither. It then changes a policy without a condition, and cannot approve one at all, since an
+approval requires `If-Match`. `Access-Control-Expose-Headers` would need `ETag`, and
+`Access-Control-Allow-Headers` `If-Match`.
 
 ## 3. Conventions
 

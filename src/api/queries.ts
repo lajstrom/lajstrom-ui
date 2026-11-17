@@ -1,10 +1,12 @@
 import { keepPreviousData, queryOptions } from "@tanstack/react-query";
 
-import { ApiError, apiGet, apiPath, isUnavailable } from "./client";
+import { ApiError, apiGet, apiGetTagged, apiPath, isUnavailable } from "./client";
 import type {
   AttachmentList,
   AuditList,
   Binding,
+  CIPolicy,
+  CIPolicyList,
   DeliveryList,
   ManifestList,
   PackageDetail,
@@ -267,4 +269,24 @@ export const deliveriesQuery = (scope: WebhookScope, id: number, cursor: string 
     queryKey: [...webhooksKey(scope), id, "deliveries", cursor ?? ""],
     queryFn: ({ signal }) => apiGet<DeliveryList>(webhooksPath(scope, id, "deliveries"), { cursor, limit: 20 }, signal),
     placeholderData: keepPreviousData,
+  });
+
+// CI trust policies (docs/api.md, CI trust policies): the admin's. The list has no revisions; a
+// change is made on the policy as its GET answered it, with its ETag.
+
+/** The key of the policies; each policy's is below it, so that a change fetches both again. */
+export const ciPoliciesKey = ["ci-policies"];
+
+/** Every policy, those of the configuration first, and, proposed, the server's issuers. */
+export const ciPoliciesQuery = queryOptions({
+  queryKey: ciPoliciesKey,
+  queryFn: ({ signal }) => apiGet<CIPolicyList>(apiPath("ci", "policies"), undefined, signal),
+});
+
+/** One policy and its ETag, the revision that a change of it names in If-Match; a policy of the
+ * configuration has none. */
+export const ciPolicyQuery = (name: string) =>
+  queryOptions({
+    queryKey: [...ciPoliciesKey, name],
+    queryFn: ({ signal }) => apiGetTagged<CIPolicy>(apiPath("ci", "policies", name), signal),
   });

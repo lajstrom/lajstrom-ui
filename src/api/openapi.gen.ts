@@ -645,6 +645,13 @@ export type Schemas = {
   };
   CIPolicyList: {
     policies: Schemas["CIPolicy"][];
+    /**
+     * Proposed: The issuers of the server's auth.ci.issuers, in its order: the names a policy's
+     * issuer may take, and the platform of each, whose claims a policy may name (docs/spec/rbac.md
+     * §11). The UI offers them in the form of a policy, and the claims of the platform
+     * (lajstrom/lajstrom#937).
+     */
+    issuers?: Schemas["CIIssuer"][];
   };
   Binding: {
     id: number;
@@ -1364,5 +1371,15 @@ export type Schemas = {
     deliveries: Schemas["Delivery"][];
     /** The cursor of the next page; absent on the last. */
     next?: string;
+  };
+  /** Proposed: An issuer of auth.ci.issuers, as a policy names it. */
+  CIIssuer: {
+    /**
+     * The issuer's name: a policy's issuer, and the <issuer> of the principal
+     * ci:<issuer>/<project>.
+     */
+    name: string;
+    /** The CI platform of its tokens. */
+    platform: "github" | "gitlab";
   };
 };
