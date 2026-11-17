@@ -292,15 +292,24 @@ export function uidOf(name: string): string {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-7${h.slice(13, 16)}-${variant}${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 
+/** What the mock's server is configured with and /api/v1/info does not answer (docs/configuration.md
+ * of the server). auth.disableInactiveUsersAfter: PCI DSS 8.2.6's 90 days, in hours as the
+ * configuration writes them; 0 disables nobody (rbac.md §1, Inactive users). */
+export const config = { disableInactiveUsersAfterHours: 2160 };
+
+// A user's lastSeenAt is its last authentication, so no older than its tokens' last use.
 export const users: User[] = [
-  { uid: uidOf("admin"), name: "admin", kind: "local", disabled: false, createdAt: ago(420), lastSeenAt: ago(0, 0, 5) },
-  { uid: uidOf("alice"), name: "alice", kind: "local", disabled: false, createdAt: ago(300), lastSeenAt: ago(0, 3) },
-  { uid: uidOf("bob"), name: "bob", kind: "local", disabled: false, createdAt: ago(290), lastSeenAt: ago(2) },
-  { uid: uidOf("carol"), name: "carol", kind: "local", disabled: false, createdAt: ago(150), lastSeenAt: ago(40) },
-  { uid: uidOf("dave"), name: "dave", kind: "local", disabled: true, createdAt: ago(240), lastSeenAt: ago(200) },
+  { uid: uidOf("admin"), name: "admin", kind: "local", disabled: false, createdAt: ago(420), lastSeenAt: before(0, 0, 5) },
+  { uid: uidOf("alice"), name: "alice", kind: "local", disabled: false, createdAt: ago(300), lastSeenAt: before(0, 1) },
+  { uid: uidOf("bob"), name: "bob", kind: "local", disabled: false, createdAt: ago(290), lastSeenAt: before(1, 2) },
+  { uid: uidOf("carol"), name: "carol", kind: "local", disabled: false, createdAt: ago(150), lastSeenAt: before(2) },
+  { uid: uidOf("dave"), name: "dave", kind: "local", disabled: true, createdAt: ago(240), lastSeenAt: ago(70) },
   // Made by its first OIDC login, without a password; its groups are those of its latest login
   // (rbac.md §8, the proposed User.groups).
-  { uid: uidOf("erin"), name: "erin", kind: "oidc", disabled: false, createdAt: ago(12), lastSeenAt: ago(0, 1), groups: ["platform", "payments-oncall"] },
+  { uid: uidOf("erin"), name: "erin", kind: "oidc", disabled: false, createdAt: ago(12), lastSeenAt: before(0, 1), groups: ["platform", "payments-oncall"] },
+  // Unseen for longer than auth.disableInactiveUsersAfter: inactive, and disabled by its next
+  // authentication (judy / judy in the demo).
+  { uid: uidOf("judy"), name: "judy", kind: "local", disabled: false, createdAt: ago(380), lastSeenAt: before(131) },
 ];
 
 /** Passwords set through the API in the demo, by user name, as the sha256 of the password. Until

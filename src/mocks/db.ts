@@ -45,7 +45,7 @@ import { pypiVersions } from "./data/pypi";
 import { rawVersions } from "./data/raw";
 import { reindexFindings } from "./data/reindex";
 import { rpmVersions } from "./data/rpm";
-import { bindings, registries, repoSeeds, roleActions, serverInfo, tokens, uidOf, users, type MockBinding, type RepoSeed } from "./data/system";
+import { bindings, config, registries, repoSeeds, roleActions, serverInfo, tokens, uidOf, users, type MockBinding, type RepoSeed } from "./data/system";
 import { passwords } from "./data/system";
 import { ago, ahead, before, HOST } from "./data/time";
 import { getPersona, type Persona } from "./persona";
@@ -234,7 +234,43 @@ function nameFor(name: string): string {
 }
 
 export function listUsers(): User[] {
-  return [...users].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return [...users].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).map((u) => userView(u));
+}
+
+/** Whether an enabled user is inactive: auth.disableInactiveUsersAfter has passed since its last
+ * activity, or since its creation when it has none (rbac.md §1, Inactive users). */
+function isInactive(u: User, now: number): boolean {
+  const after = config.disableInactiveUsersAfterHours;
+  return after > 0 && !u.disabled && now - Date.parse(u.lastSeenAt ?? u.createdAt) > after * 3_600_000;
+}
+
+/** A user as the API answers it: inactive is worked out when it is answered, and absent when
+ * false. */
+export function userView(u: User, now = Date.now()): User {
+  return isInactive(u, now) ? { ...u, inactive: true } : u;
+}
+
+/**
+ * A user whose credential has verified (rbac.md §1, Inactive users). An inactive one is refused
+ * and disabled, a user.disable by anonymous for the request that found it; but the last enabled
+ * admin, whom nothing disables. Otherwise its activity is recorded, less than a minute behind.
+ * False when it is refused.
+ */
+export function authenticated(name: string, now = Date.now()): boolean {
+  const u = users.find((x) => x.name === name);
+  if (!u || u.disabled) return false;
+  const lastAdmin = bindings.some((b) => b.principal === `user:${name}` && b.role === "admin") && !anyAdmin((b) => b.principal === `user:${name}`);
+  if (isInactive(u, now) && !lastAdmin) {
+    u.disabled = true;
+    const details = { name, source: "inactivity", reason: "inactive", ...(u.lastSeenAt ? { lastSeenAt: u.lastSeenAt } : {}), after: `${config.disableInactiveUsersAfterHours}h` };
+    changed({ at: new Date(now).toISOString(), principal: "anonymous", action: "user.disable", repo: "", subject: `user:${name}`, digest: null, ip: DEMO_IP, details });
+    return false;
+  }
+  if (u.lastSeenAt === null || now - Date.parse(u.lastSeenAt) >= 60_000) {
+    u.lastSeenAt = new Date(now - (now % 1000)).toISOString().replace(".000Z", "Z");
+    persist();
+  }
+  return true;
 }
 
 const conflict = (message: string): Refusal => ({ status: 409, code: "CONFLICT", message });
@@ -330,6 +366,8 @@ export function updateUser(user: User, body: unknown, by: string): User | Refusa
       return lastAdmin(user.name);
     }
     user.disabled = disabled;
+    // Enabling restarts the user's clock, so that its next request does not disable it again.
+    if (!disabled) user.lastSeenAt = at;
     changed({ at, principal: by, action: disabled ? "user.disable" : "user.enable", repo: "", subject: `user:${user.name}`, digest: null, ip: DEMO_IP, details: { name: user.name, source: "api" } });
   }
   if (name != null) {

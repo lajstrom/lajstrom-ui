@@ -2,12 +2,15 @@
 // Basic with a password or a personal access token, Bearer with a personal access token, and on
 // /api/ DPoP with the token of a sign-in (POST /api/v1/login) and a proof of its key
 // (src/mocks/dpop.ts); refused credentials answered 401. In the demo a user's password is the
-// user's name: admin / admin, alice / alice; a disabled user is refused whatever the password.
+// user's name: admin / admin, alice / alice; a disabled user is refused whatever the password,
+// and an inactive one is disabled once its credential has verified (src/mocks/db.ts,
+// authenticated).
 
 import type { CreatedToken, LoginToken, Token, TokenRequest, TokenScope } from "@/api/types";
 import { sha256Hex } from "@/lib/sha256";
 
 import { passwords, serverInfo, tokens, users } from "./data/system";
+import { authenticated } from "./db";
 import { spendProof, verifyProof } from "./dpop";
 import type { Credential, SignIn } from "./persona";
 import { keep, persist } from "./state";
@@ -110,6 +113,7 @@ async function authenticateDpop(request: Request, secret: string): Promise<Authn
     persist();
     return { refused: true, dpop: { error: "invalid_token", why: "idle", message: "the sign-in was idle for longer than the server allows: sign in again" } };
   }
+  if (!authenticated(t.user)) return { refused: true, dpop: { error: "invalid_token" } };
   touch(t);
   return { principal: t.user, credential: { kind: "sign-in", signIn: signIns.get(t.id) } };
 }
@@ -143,6 +147,7 @@ export async function authenticate(request: Request): Promise<Authn> {
     const t = tokenOf(value);
     if (!t?.user || !enabledUser(t.user)) return { refused: true };
     if (t.dpopJkt) return bound;
+    if (!authenticated(t.user)) return { refused: true };
     touch(t);
     return { principal: t.user, credential: { kind: "token" } };
   }
@@ -153,10 +158,11 @@ export async function authenticate(request: Request): Promise<Authn> {
       const t = tokenOf(creds.secret);
       if (!t || t.user !== creds.user) return { refused: true };
       if (t.dpopJkt) return bound;
+      if (!authenticated(creds.user)) return { refused: true };
       touch(t);
       return { principal: creds.user, credential: { kind: "token" } };
     }
-    if (!passwordMatches(creds.user, creds.secret)) return { refused: true };
+    if (!passwordMatches(creds.user, creds.secret) || !authenticated(creds.user)) return { refused: true };
     return { principal: creds.user, credential: { kind: "password" } };
   }
   return anonymous;
@@ -296,7 +302,7 @@ export async function login(request: Request, body: unknown): Promise<LoginToken
   if (byCode) return invalid("code: unknown, used, expired, or of another verifier or key: sign in again");
 
   const user = b.username as string;
-  if (!enabledUser(user) || !passwordMatches(user, b.password as string)) {
+  if (!enabledUser(user) || !passwordMatches(user, b.password as string) || !authenticated(user)) {
     return { status: 401, code: "UNAUTHENTICATED", message: "the user name or the password is wrong" };
   }
   const now = Date.now();
