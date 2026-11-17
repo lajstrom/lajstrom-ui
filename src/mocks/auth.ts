@@ -9,18 +9,33 @@ import { sha256Hex } from "@/lib/sha256";
 
 import { passwords, serverInfo, tokens, users } from "./data/system";
 import { spendProof, verifyProof } from "./dpop";
+import type { Credential, SignIn } from "./persona";
 import { keep, persist } from "./state";
 
 /** Why a request's DPoP credentials are refused: the challenge of RFC 9449 §7.1, with the reason
  * of a refused proof. */
 export type DpopRefusal = { error: "invalid_dpop_proof" | "invalid_token"; why?: string; message?: string };
 
-/** The principal of a request: a user name or "anonymous"; or the reason it is refused, with the
- * DPoP challenge on /api/ when the token is a sign-in's or came as DPoP. */
-export type Authn = { principal: string } | { refused: true; dpop?: DpopRefusal };
+/** The principal of a request, a user name or "anonymous", and its credential; or the reason it
+ * is refused, with the DPoP challenge on /api/ when the token is a sign-in's or came as DPoP. */
+export type Authn = { principal: string; credential: Credential } | { refused: true; dpop?: DpopRefusal };
+
+const anonymous: Authn = { principal: "anonymous", credential: { kind: "none" } };
 
 /** Secrets of the tokens created in this page, by token id; the seeded tokens have none. */
 const secrets = new Map<string, number>();
+
+/** The sign-ins of OIDC logins, by the id of their token. The demo has no OIDC login, so its
+ * sign-ins have none, and a step that needs a fresh one with a second factor refuses them as the
+ * server refuses a password's sign-in; the tests give a token the sign-in that a login with
+ * prompt=login would (recordSignIn). */
+const signIns = new Map<number, SignIn>();
+
+/** What an OIDC login keeps on the token of its code: when and how the person authenticated at
+ * the IdP (rbac.md §10). */
+export function recordSignIn(tokenId: number, signIn: SignIn): void {
+  signIns.set(tokenId, signIn);
+}
 
 let nextId = Math.max(...tokens.map((t) => t.id)) + 1;
 
@@ -96,7 +111,7 @@ async function authenticateDpop(request: Request, secret: string): Promise<Authn
     return { refused: true, dpop: { error: "invalid_token", why: "idle", message: "the sign-in was idle for longer than the server allows: sign in again" } };
   }
   touch(t);
-  return { principal: t.user };
+  return { principal: t.user, credential: { kind: "sign-in", signIn: signIns.get(t.id) } };
 }
 
 /** Whether a sign-in's token went unused for longer than info.login.idleTimeout: refused, after
@@ -110,9 +125,9 @@ function idle(t: Token, now = Date.now()): boolean {
 export async function authenticate(request: Request): Promise<Authn> {
   const path = new URL(request.url).pathname;
   // The sign-in takes no credential: a UI whose stored token was revoked signs in all the same.
-  if (request.method === "POST" && path === "/api/v1/login") return { principal: "anonymous" };
+  if (request.method === "POST" && path === "/api/v1/login") return anonymous;
   const header = request.headers.get("Authorization");
-  if (!header) return { principal: "anonymous" };
+  if (!header) return anonymous;
   const space = header.indexOf(" ");
   const scheme = (space < 0 ? header : header.slice(0, space)).toLowerCase();
   const value = space < 0 ? "" : header.slice(space + 1).trim();
@@ -124,12 +139,12 @@ export async function authenticate(request: Request): Promise<Authn> {
   if (scheme === "bearer") {
     // Any other bearer goes on as anonymous with the header untouched (docs/auth.md).
     if (value.startsWith("ljs_dep_")) return { refused: true };
-    if (!value.startsWith("ljs_pat_")) return { principal: "anonymous" };
+    if (!value.startsWith("ljs_pat_")) return anonymous;
     const t = tokenOf(value);
     if (!t?.user || !enabledUser(t.user)) return { refused: true };
     if (t.dpopJkt) return bound;
     touch(t);
-    return { principal: t.user };
+    return { principal: t.user, credential: { kind: "token" } };
   }
   if (scheme === "basic") {
     const creds = decodeBasic(value);
@@ -139,12 +154,12 @@ export async function authenticate(request: Request): Promise<Authn> {
       if (!t || t.user !== creds.user) return { refused: true };
       if (t.dpopJkt) return bound;
       touch(t);
-      return { principal: creds.user };
+      return { principal: creds.user, credential: { kind: "token" } };
     }
     if (!passwordMatches(creds.user, creds.secret)) return { refused: true };
-    return { principal: creds.user };
+    return { principal: creds.user, credential: { kind: "password" } };
   }
-  return { principal: "anonymous" };
+  return anonymous;
 }
 
 /** Whether the request's credential is a user's password rather than a token: what creating a
