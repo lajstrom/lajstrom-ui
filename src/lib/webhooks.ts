@@ -9,6 +9,16 @@ export const webhookEvents: { type: WebhookEvent; when: string }[] = [
   { type: "version.deleted", when: "a version deleted, one event per variant" },
   { type: "repo.created", when: "a repo created" },
   { type: "repo.deleted", when: "a repo deleted" },
+  { type: "policy.rule.created", when: "a policy rule created, to the webhooks whose mask covers the rule's" },
+  { type: "policy.rule.deleted", when: "a policy rule deleted" },
+  { type: "policy.verdict.created", when: "a verdict written: a signature or attestation that verifies, a deny, a quarantine over" },
+  { type: "policy.verdict.deleted", when: "a verdict deleted with its referrer" },
+  { type: "ci.policy.created", when: "a CI trust policy made" },
+  { type: "ci.policy.updated", when: "a CI trust policy changed" },
+  { type: "ci.policy.renewed", when: "a CI trust policy that writes renewed" },
+  { type: "ci.policy.approved", when: "a CI trust policy, or its renewal, approved by a second admin" },
+  { type: "ci.policy.expired", when: "a CI trust policy expired" },
+  { type: "ci.policy.deleted", when: "a CI trust policy deleted" },
 ];
 
 /** Whether a mask names one repo, as opposed to a wildcard (rbac.md §3). */

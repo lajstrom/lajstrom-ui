@@ -12,7 +12,22 @@ import { apiPrincipal, audited, serverInfo, type Refusal } from "./db";
 import { keep, persist } from "./state";
 
 /** The types a webhook may ask for, in the order of webhooks.md §1. */
-const TYPES: WebhookEvent[] = ["version.published", "version.deleted", "repo.created", "repo.deleted"];
+const TYPES: WebhookEvent[] = [
+  "version.published",
+  "version.deleted",
+  "repo.created",
+  "repo.deleted",
+  "policy.rule.created",
+  "policy.rule.deleted",
+  "policy.verdict.created",
+  "policy.verdict.deleted",
+  "ci.policy.created",
+  "ci.policy.updated",
+  "ci.policy.renewed",
+  "ci.policy.approved",
+  "ci.policy.expired",
+  "ci.policy.deleted",
+];
 
 /** webhooks.allowedHosts of the demo's configuration: reached over http and at any address. */
 const ALLOWED_HOSTS = ["ci.internal"];
