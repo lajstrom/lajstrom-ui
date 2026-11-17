@@ -1,16 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { Info } from "lucide-react";
+import { Info, UserX } from "lucide-react";
 
 import { useChanges } from "@/api/change";
 import { bindingsQuery, callerQuery, reposQuery, tokensQuery, usersQuery } from "@/api/queries";
 import type { Binding } from "@/api/types";
 import { ErrorState, PageHeader, Principal, RelativeTime } from "@/components/common";
 import { TokenStatus } from "@/components/tokens";
+import { LastSeen, UserStatus } from "@/components/users";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Segmented, Skeleton } from "@/components/ui/misc";
+import { EmptyState, Segmented, Skeleton } from "@/components/ui/misc";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
@@ -91,6 +92,12 @@ function Loading() {
 function UsersTable() {
   const users = useQuery(usersQuery);
   const bindings = useQuery(bindingsQuery);
+  // ?users=inactive: the users that the server answers inactive (rbac.md §1, Inactive users).
+  const search = useSearch({ strict: false }) as { users?: string };
+  const navigate = useNavigate();
+  const onlyInactive = search.users === "inactive";
+  const inactive = users.data?.filter((u) => u.inactive).length ?? 0;
+  const shown = onlyInactive ? users.data?.filter((u) => u.inactive) : users.data;
   // The admin's controls: a new user, and disable or enable on each row but the admin's own
   // (optimistic); the rest is on the user's page.
   const who = useQuery(callerQuery);
@@ -101,6 +108,17 @@ function UsersTable() {
     <Card>
       {admin ? (
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
+          {inactive > 0 || onlyInactive ? (
+            <Segmented
+              aria-label="Which users"
+              value={onlyInactive ? "inactive" : "all"}
+              onChange={(v) => void navigate({ to: ".", search: (p: Record<string, string>) => ({ ...p, users: v === "inactive" ? "inactive" : undefined }), replace: true })}
+              options={[
+                { value: "all", label: "All", count: users.data?.length },
+                { value: "inactive", label: "Inactive", count: inactive },
+              ]}
+            />
+          ) : null}
           <span className="text-xs text-muted-foreground">A user&apos;s page has its bindings and tokens, a new password, a rename and the delete.</span>
           <div className="ml-auto">
             <CreateUserDialog />
@@ -109,8 +127,12 @@ function UsersTable() {
       ) : null}
       {users.isError ? (
         <ErrorState error={users.error} />
-      ) : !users.data ? (
+      ) : !shown ? (
         <Loading />
+      ) : shown.length === 0 ? (
+        <EmptyState icon={<UserX />} title="No inactive users" className="py-8">
+          Every enabled user has authenticated within the server&apos;s bound, or the server disables nobody for inactivity.
+        </EmptyState>
       ) : (
         <Table>
           <THead>
@@ -119,12 +141,13 @@ function UsersTable() {
               <TH>Kind</TH>
               <TH>Bindings</TH>
               <TH>Created</TH>
+              <TH>Last seen</TH>
               <TH>Status</TH>
               {admin ? <TH className="w-0" /> : null}
             </TR>
           </THead>
           <TBody>
-            {users.data.map((u) => {
+            {shown.map((u) => {
               const own = bindings.data?.filter((b) => b.principal === `user:${u.uid}`) ?? [];
               const groupAdmin = bindings.data?.some((b) => b.role === "admin" && u.groups?.some((g) => b.principal === `group:${g}`)) ?? false;
               const change = changes.get(u.uid);
@@ -178,7 +201,12 @@ function UsersTable() {
                   <TD className="text-muted-foreground">
                     <RelativeTime iso={u.createdAt} />
                   </TD>
-                  <TD>{u.disabled ? <Badge tone="danger">disabled</Badge> : <Badge tone="success">active</Badge>}</TD>
+                  <TD className="text-muted-foreground">
+                    <LastSeen user={u} />
+                  </TD>
+                  <TD>
+                    <UserStatus user={u} />
+                  </TD>
                   {admin ? (
                     <TD className="text-right">
                       {self ? null : (

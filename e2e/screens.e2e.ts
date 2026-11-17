@@ -77,6 +77,9 @@ test("access: users and role bindings", async ({ page }) => {
   await page.goto("access");
   await shown(page);
   await expect(page.getByText(user).first()).toBeVisible();
+  // The user has signed in, so the server answers its last activity: Created and Last seen.
+  const row = page.getByRole("row").filter({ has: page.getByRole("link", { name: user }) });
+  await expect(row.locator("time")).toHaveCount(2);
 });
 
 test("access: CI trust policies, the configuration's, and one that reads made and deleted", async ({ page }) => {

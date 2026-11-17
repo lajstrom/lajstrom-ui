@@ -200,6 +200,11 @@ function AuditRow({ event: e, showRepo }: { event: AuditEvent; showRepo: boolean
               </Badge>
             </span>
           </Tooltip>
+          {e.action === "user.disable" && e.details?.reason === "inactive" ? (
+            // The server's, by anonymous, at the authentication of a user inactive for longer
+            // than auth.disableInactiveUsersAfter (rbac.md §1, Inactive users).
+            <span className="text-xs text-muted-foreground">for inactivity</span>
+          ) : null}
           {e.state !== "ok" ? (
             <Tooltip content={stateHelp[e.state] + (e.error ? `: ${e.error}` : "")}>
               <span>

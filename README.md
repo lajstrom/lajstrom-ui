@@ -60,7 +60,9 @@ separate repository:
 - **Admin pages**: registries with their capabilities and health, the audit log, every token,
   and users and bindings: create, disable, rename and delete users and set their passwords, bind
   users and OIDC groups to roles on repo masks; a user's page has its bindings and its tokens,
-  which the admin may revoke.
+  which the admin may revoke. Each user shows its last activity, and those the server will
+  disable at their next authentication (`auth.disableInactiveUsersAfter`) are marked inactive
+  and listed with `?users=inactive`.
 - **CI trust policies**, a tab of Access: which jobs of GitHub Actions or GitLab CI get a CI token
   of minutes for their platform's OIDC token, and its grants. Those of the server's configuration
   are shown read-only; the admin makes, changes and deletes the others, with the claims of the
