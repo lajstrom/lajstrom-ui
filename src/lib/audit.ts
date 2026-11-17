@@ -19,6 +19,8 @@ export const auditActions = [
   "user.enable",
   "user.password",
   "user.delete",
+  "user.unlock",
+  "user.mustchange",
   "user.login",
   "binding.create",
   "binding.delete",
@@ -37,6 +39,7 @@ export const auditActions = [
   "ci.policy.approve",
   "ci.policy.expire",
   "ci.policy.delete",
+  "login.block",
   "reconcile",
   "referrers.repair",
 ];
