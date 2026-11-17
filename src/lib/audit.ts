@@ -19,6 +19,7 @@ export const auditActions = [
   "user.enable",
   "user.password",
   "user.delete",
+  "user.login",
   "binding.create",
   "binding.delete",
   "token.create",

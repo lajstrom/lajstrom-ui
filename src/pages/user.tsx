@@ -11,6 +11,7 @@ import type { Binding, Token, User } from "@/api/types";
 import { useSession } from "@/app/session";
 import { ErrorState, PageHeader, RelativeTime } from "@/components/common";
 import { RevokeTokenDialog, TokenTable } from "@/components/tokens";
+import { LastSeen, UserStatus } from "@/components/users";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -89,7 +90,7 @@ function UserView({ user, admin, self }: { user: User; admin: boolean; self: boo
               </Tooltip>
             ) : null}
             {isAdmin ? <Badge tone="warning">admin</Badge> : null}
-            {user.disabled ? <Badge tone="danger">disabled</Badge> : <Badge tone="success">active</Badge>}
+            <UserStatus user={user} />
             {self ? <Badge tone="outline">you</Badge> : null}
           </>
         }
@@ -101,6 +102,9 @@ function UserView({ user, admin, self }: { user: User; admin: boolean; self: boo
             </span>
             <span>
               Created <RelativeTime iso={user.createdAt} />
+            </span>
+            <span>
+              Last seen <LastSeen user={user} />
             </span>
           </span>
         }
@@ -150,6 +154,12 @@ function UserView({ user, admin, self }: { user: User; admin: boolean; self: boo
         }
       />
 
+      {user.inactive ? (
+        <p className="mb-4 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-warning">
+          {user.name} has not authenticated for longer than the server allows (auth.disableInactiveUsersAfter): its next password, token
+          or OIDC login is refused and disables it, unless it is the last enabled admin. Enabling it again then restarts its clock.
+        </p>
+      ) : null}
       {disabling?.error ? (
         <p role="alert" className="mb-4 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger">
           Not {user.disabled ? "enabled" : "disabled"}. {errorText(disabling.error)}
