@@ -503,14 +503,14 @@ export const handlers = [
 
   get("*/api/v1/users/:user", async ({ params }) => {
     const user = adminOnly() ?? liveUser(params);
-    return user instanceof Response ? user : HttpResponse.json(user);
+    return user instanceof Response ? user : HttpResponse.json(db.userView(user));
   }),
 
   patch("*/api/v1/users/:user", async ({ params, request }) => {
     const user = adminOnly() ?? liveUser(params);
     if (user instanceof Response) return user;
     const updated = db.updateUser(user, await body(request), `user:${getPersona()}`);
-    return "status" in updated ? refusal(updated) : HttpResponse.json(updated);
+    return "status" in updated ? refusal(updated) : HttpResponse.json(db.userView(updated));
   }),
 
   del("*/api/v1/users/:user", async ({ params }) => {

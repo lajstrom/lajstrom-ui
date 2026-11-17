@@ -11,6 +11,8 @@ import { setSession } from "@/api/session";
 import type { AuditList, Binding, Token, User, WhoAmI } from "@/api/types";
 
 import { createToken } from "./auth";
+import { users as seeded } from "./data/system";
+import { userView } from "./db";
 import { handlers } from "./handlers";
 
 const server = setupServer(...handlers);
@@ -163,6 +165,54 @@ describe("users", () => {
   it("show the groups of an OIDC login", async () => {
     signIn("admin");
     expect((await users()).find((u) => u.name === "erin")).toMatchObject({ kind: "oidc", groups: ["platform", "payments-oncall"] });
+  });
+
+  it("record their last activity, to the minute", async () => {
+    const seen = async (name: string) => (await users()).find((u) => u.name === name)!.lastSeenAt;
+    signIn("admin");
+    seeded.find((u) => u.name === "bob")!.lastSeenAt = new Date(Date.now() - 2 * 86_400_000).toISOString();
+    const before = await seen("bob");
+    await whoAs("bob", "bob");
+    const after = await seen("bob");
+    expect(Date.parse(after!)).toBeGreaterThan(Date.parse(before!));
+    expect(Date.now() - Date.parse(after!)).toBeLessThan(60_000);
+    // Within a minute, no second record.
+    await whoAs("bob", "bob");
+    expect(await seen("bob")).toBe(after);
+    expect((await users()).find((u) => u.name === "bob")).not.toHaveProperty("inactive");
+  });
+
+  it("inactive are disabled by their next authentication, and enabling restarts the clock", async () => {
+    signIn("admin");
+    const judy = (await users()).find((u) => u.name === "judy")!;
+    expect(judy).toMatchObject({ disabled: false, inactive: true });
+    await expect(whoAs("judy", "judy")).rejects.toMatchObject({ status: 401 });
+    const disabled = await apiGet<User>(apiPath("users", "judy"));
+    expect(disabled.disabled).toBe(true);
+    expect(disabled).not.toHaveProperty("inactive");
+    expect(disabled.lastSeenAt).toBe(judy.lastSeenAt);
+    expect((await audit("user.disable"))[0]).toMatchObject({
+      principal: "anonymous",
+      subject: `user:${judy.uid}`,
+      details: { name: "judy", source: "inactivity", reason: "inactive", lastSeenAt: judy.lastSeenAt, after: "2160h" },
+    });
+
+    const enabled = await updateUser("judy", { disabled: false });
+    expect(enabled.disabled).toBe(false);
+    expect(enabled).not.toHaveProperty("inactive");
+    expect(Date.now() - Date.parse(enabled.lastSeenAt!)).toBeLessThan(60_000);
+    await expect(whoAs("judy", "judy")).resolves.toMatchObject({ name: "judy" });
+  });
+
+  it("inactive, the last enabled admin is answered so, and its next authentication makes it active again", async () => {
+    // The admin's own requests are its activity, so the answer is read without one.
+    const admin = seeded.find((u) => u.name === "admin")!;
+    admin.lastSeenAt = new Date(Date.now() - 100 * 86_400_000).toISOString();
+    expect(userView(admin)).toMatchObject({ inactive: true });
+    await expect(whoAs("admin", "admin")).resolves.toMatchObject({ name: "admin" });
+    expect(admin.disabled).toBe(false);
+    expect(Date.now() - Date.parse(admin.lastSeenAt)).toBeLessThan(60_000);
+    expect(userView(admin)).not.toHaveProperty("inactive");
   });
 });
 
