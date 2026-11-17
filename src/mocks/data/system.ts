@@ -293,9 +293,11 @@ export function uidOf(name: string): string {
 }
 
 /** What the mock's server is configured with and /api/v1/info does not answer (docs/configuration.md
- * of the server). auth.disableInactiveUsersAfter: PCI DSS 8.2.6's 90 days, in hours as the
- * configuration writes them; 0 disables nobody (rbac.md §1, Inactive users). */
-export const config = { disableInactiveUsersAfterHours: 2160 };
+ * of the server), in hours as the configuration writes them; 0 is off.
+ * auth.disableInactiveUsersAfter: PCI DSS 8.2.6's 90 days (rbac.md §1, Inactive users).
+ * auth.deployTokens.maxTTL: 180 days, set after the seed's deploy tokens without an expiry were
+ * made (rbac.md §1, the lifetime of a deploy token). */
+export const config = { disableInactiveUsersAfterHours: 2160, deployTokensMaxTTLHours: 4320 };
 
 // A user's lastSeenAt is its last authentication, so no older than its tokens' last use.
 export const users: User[] = [
@@ -325,15 +327,15 @@ export const tokens: Token[] = [
   { id: 9, kind: "pat", name: "notebook", user: "carol", scopes: ["read", "write"], expiresAt: ahead(3, 4), lastUsedAt: before(2), createdAt: ago(87), revokedAt: null, hashPrefix: "a2fd807c" },
   { id: 11, kind: "pat", name: "release scripts", user: "admin", scopes: [], expiresAt: ahead(300), lastUsedAt: before(0, 5), createdAt: ago(65), revokedAt: null, hashPrefix: "1b3d0235" },
   { id: 12, kind: "deploy", name: "github-actions payments-api", repo: "maven/payments", scopes: ["read", "write"], expiresAt: null, lastUsedAt: before(0, 0, 4), createdAt: ago(78), revokedAt: null, hashPrefix: "3281d82f" },
-  { id: 15, kind: "deploy", name: "github-actions acme-agent (apt)", repo: "apt/ubuntu-internal", scopes: ["read", "write"], expiresAt: ahead(180), lastUsedAt: before(1, 3), createdAt: ago(120), revokedAt: null, hashPrefix: "e19cb71b" },
-  { id: 16, kind: "deploy", name: "github-actions acme-agent (raw)", repo: "raw/assets", scopes: ["write"], expiresAt: ahead(180), lastUsedAt: before(9, 2), createdAt: ago(90), revokedAt: null, hashPrefix: "3234bb55" },
+  { id: 15, kind: "deploy", name: "github-actions acme-agent (apt)", repo: "apt/ubuntu-internal", scopes: ["read", "write"], expiresAt: ahead(55), lastUsedAt: before(1, 3), createdAt: ago(120), revokedAt: null, hashPrefix: "e19cb71b" },
+  { id: 16, kind: "deploy", name: "github-actions acme-agent (raw)", repo: "raw/assets", scopes: ["write"], expiresAt: ahead(85), lastUsedAt: before(9, 2), createdAt: ago(90), revokedAt: null, hashPrefix: "3234bb55" },
   { id: 18, kind: "deploy", name: "jupyterhub", repo: "pypi/internal", scopes: ["read"], expiresAt: null, lastUsedAt: before(0, 0, 12), createdAt: ago(200), revokedAt: null, hashPrefix: "10df33fe" },
   { id: 21, kind: "deploy", name: "billing CI", repo: "pypi/internal", scopes: ["read", "write"], expiresAt: ahead(45), lastUsedAt: before(4, 2), createdAt: ago(100), revokedAt: null, hashPrefix: "82a21d7c" },
-  { id: 22, kind: "deploy", name: "payments CI (pypi)", repo: "pypi/payments", scopes: ["write"], expiresAt: ahead(140), lastUsedAt: before(6, 3), createdAt: ago(60), revokedAt: null, hashPrefix: "9ab0bbe6" },
+  { id: 22, kind: "deploy", name: "payments CI (pypi)", repo: "pypi/payments", scopes: ["write"], expiresAt: ahead(110), lastUsedAt: before(6, 3), createdAt: ago(60), revokedAt: null, hashPrefix: "9ab0bbe6" },
   { id: 24, kind: "deploy", name: "payments audit mirror", repoMask: "*/payments", scopes: ["read"], expiresAt: null, lastUsedAt: before(0, 2), createdAt: ago(25), revokedAt: null, hashPrefix: "c4e81f07" },
   // npm and rpm (#7): the CI of the npm and rpm seeds.
-  { id: 41, kind: "deploy", name: "github-actions web (npm)", repo: "npm/internal", scopes: ["read", "write"], expiresAt: ahead(120), lastUsedAt: before(1, 5), createdAt: ago(98), revokedAt: null, hashPrefix: "7f04c2a9" },
-  { id: 42, kind: "deploy", name: "github-actions acme-agent (rpm)", repo: "rpm/el9", scopes: ["write"], expiresAt: ahead(180), lastUsedAt: before(1, 3), createdAt: ago(60), revokedAt: null, hashPrefix: "b83e6d10" },
+  { id: 41, kind: "deploy", name: "github-actions web (npm)", repo: "npm/internal", scopes: ["read", "write"], expiresAt: ahead(75), lastUsedAt: before(1, 5), createdAt: ago(98), revokedAt: null, hashPrefix: "7f04c2a9" },
+  { id: 42, kind: "deploy", name: "github-actions acme-agent (rpm)", repo: "rpm/el9", scopes: ["write"], expiresAt: ahead(110), lastUsedAt: before(1, 3), createdAt: ago(60), revokedAt: null, hashPrefix: "b83e6d10" },
 ];
 
 /** The mock's bindings name users as `user:<name>`; the API answers `user:<uid>` and the name

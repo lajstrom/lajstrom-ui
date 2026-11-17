@@ -6,7 +6,7 @@ import { delay, http, HttpResponse, type PathParams } from "msw";
 import type { ApiErrorBody } from "@/api/types";
 import type { User } from "@/api/types";
 
-import { authenticate, byPassword, createToken, login, revokeToken, type DpopRefusal, type Refusal } from "./auth";
+import { authenticate, byPassword, createToken, login, revokeToken, tokenView, type DpopRefusal, type Refusal } from "./auth";
 import { bootstrapOpen, exchangeBootstrapToken } from "./bootstrap";
 import * as ci from "./ci";
 import * as db from "./db";
@@ -454,7 +454,7 @@ export const handlers = [
     const repo = repoOr404(params);
     if (repo instanceof Response) return repo;
     if (!repo.permissions.includes("manage")) return fail(403, "FORBIDDEN", "deploy tokens need manage on the repo");
-    return HttpResponse.json({ tokens: db.tokens.filter((t) => t.kind === "deploy" && t.repo === repo.prefix) });
+    return HttpResponse.json({ tokens: db.tokens.filter((t) => t.kind === "deploy" && t.repo === repo.prefix).map((t) => tokenView(t)) });
   }),
 
   get("*/api/v1/search", async ({ request }) => {
@@ -593,7 +593,7 @@ export const handlers = [
   }),
 
   get("*/api/v1/tokens", async () => {
-    return adminOr403() ?? HttpResponse.json({ tokens: db.tokens });
+    return adminOr403() ?? HttpResponse.json({ tokens: db.tokens.map((t) => tokenView(t)) });
   }),
 
   // Deploy tokens over a mask: the admin's, created with the admin's password only (docs/api.md).
@@ -602,7 +602,7 @@ export const handlers = [
     const denied = adminOr403();
     if (denied) return denied;
     const mask = new URL(request.url).searchParams.get("repoMask");
-    return HttpResponse.json({ tokens: db.tokens.filter((t) => t.repoMask !== undefined && (!mask || t.repoMask === mask)) });
+    return HttpResponse.json({ tokens: db.tokens.filter((t) => t.repoMask !== undefined && (!mask || t.repoMask === mask)).map((t) => tokenView(t)) });
   }),
 
   post("*/api/v1/deploy-tokens", async ({ request }) => {
