@@ -37,11 +37,16 @@ describe("deploy tokens over a mask", () => {
   it("are created with the admin's password, listed by the mask as written, and revoked", async () => {
     signIn("admin");
     const created = await createMaskToken({ repoMask: "pypi/*", name: "wheel mirror", scopes: ["read"] }, "admin", "admin");
-    expect(created).toMatchObject({ kind: "deploy", repoMask: "pypi/*", name: "wheel mirror", scopes: ["read"], expiresAt: null });
+    expect(created).toMatchObject({ kind: "deploy", repoMask: "pypi/*", name: "wheel mirror", scopes: ["read"] });
+    // Without an expiry, it expires at auth.deployTokens.maxTTL, 180 days in the mock.
+    expect(Date.parse(created.expiresAt!) - Date.now()).toBeGreaterThan(179 * 86_400_000);
     expect(created.secret).toMatch(/^ljs_dep_/);
     expect(created).not.toHaveProperty("repo");
 
     expect((await list()).map((t) => t.id)).toContain(created.id);
+    // The seed's token over */payments has no expiry: it was made before the bound.
+    expect((await list("*/payments")).find((t) => t.name === "payments audit mirror")).toMatchObject({ beyondMaxTTL: true });
+    expect((await list("pypi/*")).find((t) => t.id === created.id)).not.toHaveProperty("beyondMaxTTL");
     expect((await list("pypi/*")).map((t) => t.id)).toEqual([created.id]);
     expect((await list("*/*")).map((t) => t.id)).not.toContain(created.id);
 

@@ -9,7 +9,7 @@
 import type { CreatedToken, LoginToken, Token, TokenRequest, TokenScope } from "@/api/types";
 import { sha256Hex } from "@/lib/sha256";
 
-import { passwords, serverInfo, tokens, users } from "./data/system";
+import { config, passwords, serverInfo, tokens, users } from "./data/system";
 import { authenticated } from "./db";
 import { spendProof, verifyProof } from "./dpop";
 import type { Credential, SignIn } from "./persona";
@@ -232,7 +232,9 @@ export function createToken(owner: Owner, body: unknown): CreatedToken | Refusal
 
   if (req.expiresIn !== undefined && req.expiresAt !== undefined) return invalid("expiresAt and expiresIn: one of them at most");
   const now = Date.now();
-  let expiresAt: string | null = deploy ? null : new Date(now + 90 * DAY).toISOString();
+  // A deploy token without an expiry expires at auth.deployTokens.maxTTL, and never without one.
+  const bound = deploy ? config.deployTokensMaxTTLHours * 3_600_000 : 0;
+  let expiresAt: string | null = deploy ? (bound ? new Date(now + bound).toISOString() : null) : new Date(now + 90 * DAY).toISOString();
   if (req.expiresIn !== undefined) {
     const ms = typeof req.expiresIn === "string" || typeof req.expiresIn === "number" ? parseExpiresIn(String(req.expiresIn)) : null;
     if (ms === null || ms <= 0) return invalid("expiresIn: a number of days, 30d, or a duration such as 12h");
@@ -243,7 +245,12 @@ export function createToken(owner: Owner, body: unknown): CreatedToken | Refusal
     if (t <= now) return invalid("expiresAt: in the past");
     expiresAt = new Date(t).toISOString();
   }
-  if (expiresAt && Date.parse(expiresAt) > now + 365 * DAY) return invalid("expiresAt: at most 365 days ahead");
+  const field = req.expiresIn !== undefined ? "expiresIn" : "expiresAt";
+  if (!deploy && expiresAt && Date.parse(expiresAt) > now + 365 * DAY) return invalid(`${field}: a personal access token expires at most 365 days ahead`);
+  if (bound && expiresAt && Date.parse(expiresAt) > now + bound) {
+    const latest = new Date(now + bound - ((now + bound) % 1000)).toISOString().replace(".000Z", "Z");
+    return invalid(`${field}: a deploy token expires at most ${config.deployTokensMaxTTLHours}h0m0s ahead (auth.deployTokens.maxTTL), at ${latest} at the latest`);
+  }
 
   if (tokens.some((t) => owns(owner, t) && live(t, now) && t.name === name)) {
     return { status: 409, code: "CONFLICT", message: `a live token of ${ownerName(owner)} is named ${name}` };
@@ -266,6 +273,16 @@ export function createToken(owner: Owner, body: unknown): CreatedToken | Refusal
   secrets.set(secret, token.id);
   persist();
   return { ...token, secret };
+}
+
+/** A token as the API answers it: a live deploy token beyond auth.deployTokens.maxTTL, without
+ * an expiry or expiring later than the bound after its creation, is beyondMaxTTL, worked out
+ * when it is answered and absent otherwise (rbac.md §1). */
+export function tokenView(t: Token, now = Date.now()): Token {
+  const bound = config.deployTokensMaxTTLHours * 3_600_000;
+  const beyond =
+    t.kind === "deploy" && bound > 0 && live(t, now) && (t.expiresAt === null || Date.parse(t.expiresAt) - Date.parse(t.createdAt) > bound);
+  return beyond ? { ...t, beyondMaxTTL: true } : t;
 }
 
 /** Revokes a token of the owner: true when the id is one of its tokens (revoked already too);
