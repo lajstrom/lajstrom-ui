@@ -29,7 +29,11 @@ function parts(jws: string) {
 }
 
 afterEach(() => {
-  learnServerClock(new Date().toUTCString());
+  // The clocks agree again: a Date of whole seconds, received in that very second, leaves no
+  // skew, where one received later in it would leave up to a second.
+  const t = Date.now();
+  const now = t - (t % 1000);
+  learnServerClock(new Date(now).toUTCString(), now);
 });
 
 describe("base64url", () => {
