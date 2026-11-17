@@ -1,7 +1,7 @@
 // Every screen of the UI against a real server, as the admin that e2e/server.sh made: the
 // repositories, a package and a version of each, tokens, the audit log, access and its CI trust
-// policies, the registries, search and the API page. A test fails on an uncaught error, an answer of the API the UI does
-// not expect (e2e/test.ts) or a page that stays empty.
+// policies, the registries, search and the API page. A test fails on an uncaught error, an answer
+// of the API the UI does not expect (e2e/test.ts) or a page that stays empty.
 
 import type { Page } from "@playwright/test";
 

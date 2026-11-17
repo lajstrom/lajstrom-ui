@@ -2,8 +2,8 @@
 
 - Status: the server answers all of it but an OIDC user's groups (§2.8) and the issuers of the
   CI trust policies (§2.9), since lajstrom/lajstrom@6c5bf5c, in the shapes its
-  `internal/api/openapi.yaml` gives, which are the contract (lajstrom/lajstrom-ui#2). Each part was an issue labelled `contract` in lajstrom/lajstrom,
-  named below.
+  `internal/api/openapi.yaml` gives, which are the contract (lajstrom/lajstrom-ui#2). Each part
+  was an issue labelled `contract` in lajstrom/lajstrom, named below.
 - Shapes: [`openapi/proposed.yaml`](../openapi/proposed.yaml), additions to the server's OpenAPI
   description. `npm run gen:api` merges the two into [`public/openapi.yaml`](../public/openapi.yaml),
   where each addition is marked `x-lajstrom-status: proposed`: the API page of the demo shows it.
