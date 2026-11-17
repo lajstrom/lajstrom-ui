@@ -66,6 +66,14 @@ auth:
   anonymousRead: false
   bootstrap:
     tokenFile: "$work/bootstrap-token"
+  ci:
+    issuers:
+      - {name: github, platform: github, issuer: "https://token.actions.githubusercontent.com"}
+    policies:
+      - name: e2e-config-read
+        issuer: github
+        claims: {repository_id: "1"}
+        grants: [{role: reader, mask: raw/files}]
 repos:
   - {name: files, format: raw, registry: local}
   - {name: python, format: pypi, registry: local}

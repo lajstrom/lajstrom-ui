@@ -2,8 +2,9 @@
 
 The UI image, with `LAJSTROM_API_UPSTREAM`, in front of a Lajstrom built from source. Playwright
 signs in through the form and opens every screen: the repository list, each repo with its first
-package and that package's newest version, tokens, the audit log, access, the registries,
-search and the API page. A test fails on an uncaught error, a page that stays empty,
+package and that package's newest version, tokens, the audit log, access with its CI trust
+policies (one of the configuration, and one that reads made and deleted), the registries, search
+and the API page. A test fails on an uncaught error, a page that stays empty,
 or an answer of the API that the UI does not expect. A `404` for a path the server does not know
 is expected only for an operation the UI proposes (`x-lajstrom-status: proposed` in
 `public/openapi.yaml`). Anything else means the UI calls what the server does not have.
@@ -33,7 +34,8 @@ kill "$(cat /tmp/lajstrom-e2e/server.pid)"
 ```
 
 - `e2e/server.sh` builds the server, serves it on `127.0.0.1:18080` (`LAJSTROM_E2E_PORT`) with an
-  SQLite index, and makes the first admin with the bootstrap token.
+  SQLite index, and makes the first admin with the bootstrap token. Its configuration has an
+  issuer of GitHub Actions for the token exchange of CI and one trust policy that reads.
 - It publishes one package to each repo through the format's own endpoint: raw, pypi, apt,
   maven, npm and rpm. An npm group repo stays without packages of its own. `e2e/fixtures.py`
   builds the files with Python's standard library. The rpm is built with `rpmbuild` in a Rocky
