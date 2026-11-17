@@ -62,7 +62,10 @@ separate repository:
   users and OIDC groups to roles on repo masks; a user's page has its bindings and its tokens,
   which the admin may revoke. Each user shows its last activity, and those the server will
   disable at their next authentication (`auth.disableInactiveUsersAfter`) are marked inactive
-  and listed with `?users=inactive`.
+  and listed with `?users=inactive`. A password locked by 10 wrong ones in a row
+  (`auth.lockout.duration`) is marked, and the admin unlocks it; the admin asks a user for a new
+  password at the next sign-in, or no longer. While the server takes no password
+  (`auth.localPasswords: false`), the UI sets none.
 - **CI trust policies**, a tab of Access: which jobs of GitHub Actions or GitLab CI get a CI token
   of minutes for their platform's OIDC token, and its grants. Those of the server's configuration
   are shown read-only; the admin makes, changes and deletes the others, with the claims of the
@@ -83,6 +86,9 @@ separate repository:
   `auth.login.idleTimeout` (15 minutes for PCI DSS 8.2.8), the UI warns two minutes before it
   and signs out at it, and makes no request on its own while nobody is there. A server without
   `POST /api/v1/login`, and a token you paste, get `Authorization: Bearer`. There are no cookies.
+  A password that must be changed first (an admin's, with `auth.passwords.changeAtFirstUse`, or
+  one the admin asked to be changed) is changed on the sign-in page, which then signs in with the
+  new one; a user changes its own password from the user menu too, with the current one.
 - **The first admin** of a new server: "Set up the first admin", linked from the sign-in page,
   exchanges the server's one-time bootstrap token for the first admin with a name and a password,
   then signs in as it.
@@ -105,7 +111,8 @@ service worker, MSW), and what you change there, such as tokens, is kept in this
 `localStorage`. Nothing reaches a server. It opens at the sign-in page, like the tool behind
 its login will: the accounts are `admin` / `admin`, `alice` / `alice`, `bob` / `bob` and
 `carol` / `carol` (the password is the name), each with the bindings of the demo's data, so
-signing in as another one shows how the UI follows them. The sign-in page lists them; a click
+signing in as another one shows how the UI follows them. `judy` has been inactive for months,
+and signing in disables the account; `nina` chooses a new password at the first sign-in. The sign-in page lists them; a click
 fills the form.
 
 "Set up the first admin" works in the demo too. A real server with an admin answers `404` to the

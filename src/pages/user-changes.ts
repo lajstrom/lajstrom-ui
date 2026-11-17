@@ -1,14 +1,14 @@
 // The admin's changes of users and bindings (docs/adr/0003-changes-realistic-by-default.md):
 // disabling or enabling a user and deleting a binding are optimistic, with Undo in the notice;
-// creating a user or a binding, renaming a user and setting a password are realistic; a user's
-// delete is confirmed, then realistic. Each change is a row of the audit log, which the notice of
+// creating a user or a binding, renaming a user, setting a password, unlocking it and asking for
+// a new one are realistic; a user's delete is confirmed, then realistic. Each change is a row of the audit log, which the notice of
 // a realistic one opens.
 
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 
 import { optimistic, realistic, update } from "@/api/change";
-import { createBinding, createUser, deleteBinding, deleteUser, setUserPassword, updateUser } from "@/api/mutations";
+import { createBinding, createUser, deleteBinding, deleteUser, setUserPassword, unlockUser, updateUser } from "@/api/mutations";
 import { bindingsQuery, tokensQuery, userQuery, usersQuery } from "@/api/queries";
 import type { Binding, BindingRequest, User, UserRequest } from "@/api/types";
 import { errorText } from "@/lib/errors";
@@ -87,12 +87,48 @@ export function useRenameUser(user: User) {
   });
 }
 
-/** Sets a user's password; nothing on the screen changes. */
+/** Sets a user's password, which also ends a lock and sets or clears mustChange: the user is
+ * fetched again. */
 export function useSetPassword(user: User) {
   const audit = useAuditLink();
+  const { onSuccess: refetch } = realistic(usersQuery.queryKey, userQuery(user.name).queryKey);
   return useMutation({
     mutationFn: (password: string) => setUserPassword(user.uid, password),
-    onSuccess: () => notify({ tone: "success", title: `Set the password of ${user.name}`, action: audit("user.password") }),
+    onSuccess: async (data, password, result, context) => {
+      await refetch(data, password, result, context);
+      notify({ tone: "success", title: `Set the password of ${user.name}`, action: audit("user.password") });
+    },
+  });
+}
+
+/** Ends the lock of a user's password and its count of wrong passwords (rbac.md §1, The lockout). */
+export function useUnlockUser(user: User) {
+  const audit = useAuditLink();
+  const { onSuccess: refetch } = realistic(usersQuery.queryKey, userQuery(user.name).queryKey);
+  return useMutation({
+    mutationFn: () => unlockUser(user.uid),
+    onSuccess: async (data, v, result, context) => {
+      await refetch(data, v, result, context);
+      notify({ tone: "success", title: `Unlocked the password of ${user.name}`, action: audit("user.unlock") });
+    },
+  });
+}
+
+/** Asks for a new password before the user's password is used for anything else, or no longer
+ * (mustChange, rbac.md §1, Change at first use). */
+export function useMustChange(user: User) {
+  const audit = useAuditLink();
+  const { onSuccess: refetch } = realistic(usersQuery.queryKey, userQuery(user.name).queryKey);
+  return useMutation({
+    mutationFn: (mustChange: boolean) => updateUser(user.uid, { mustChange }),
+    onSuccess: async (data, mustChange, result, context) => {
+      await refetch(data, mustChange, result, context);
+      notify({
+        tone: "success",
+        title: mustChange ? `${user.name} chooses a new password at the next sign-in` : `${user.name} keeps its password`,
+        action: audit("user.mustchange"),
+      });
+    },
   });
 }
 

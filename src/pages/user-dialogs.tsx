@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { KeyRound, Link2, Pencil, Plus, Trash2, UserPlus } from "lucide-react";
 import { useId, useMemo, useState, type FormEvent } from "react";
 
+import { signInModes } from "@/api/auth";
 import { bindingsQuery, infoQuery, reposQuery, usersQuery } from "@/api/queries";
 import type { User } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +11,7 @@ import { Dialog, DialogActions, DialogClose, DialogContent } from "@/components/
 import { Field, FormError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Segmented } from "@/components/ui/misc";
+import { Tooltip } from "@/components/ui/tooltip";
 import { errorText } from "@/lib/errors";
 import { pluralize } from "@/lib/format";
 import { maskMatches, maskSuggestions, parseMask } from "@/lib/masks";
@@ -18,7 +20,9 @@ import { roleActions, roles, type Role } from "@/lib/roles";
 import { useCreateBinding, useCreateUser, useDeleteUser, useRenameUser, useSetPassword } from "./user-changes";
 
 const NAME_RULE = "1 to 64 lowercase letters, digits, '.', '_' and '-', starting with a letter or a digit; unique among the users.";
-const PASSWORD_RULE = "8 to 1024 bytes.";
+// The rules of auth.passwords at their defaults; a server that asks for more says which rule a
+// password breaks (docs/spec/rbac.md §1, Local passwords).
+const PASSWORD_RULE = "At least 8 characters, or more if the server asks (auth.passwords.minLength); at most 1024 bytes.";
 
 /** Creates a local user with a password, and the admin role if asked; realistic. */
 export function CreateUserDialog() {
@@ -27,7 +31,7 @@ export function CreateUserDialog() {
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [admin, setAdmin] = useState(false);
-  const info = useQuery({ ...infoQuery, enabled: open });
+  const info = useQuery(infoQuery);
   const create = useCreateUser();
   const ready = name.trim() !== "" && password !== "";
 
@@ -51,10 +55,22 @@ export function CreateUserDialog() {
         if (!o) reset();
       }}
     >
-      <Button variant="primary" onClick={() => setOpen(true)}>
-        <UserPlus />
-        New user
-      </Button>
+      {signInModes(info.data).password ? (
+        <Button variant="primary" onClick={() => setOpen(true)}>
+          <UserPlus />
+          New user
+        </Button>
+      ) : (
+        // Local passwords are off: a person's account is made by its first login at the IdP.
+        <Tooltip content="Local passwords are off on this server (auth.localPasswords: false): a person signs in through the identity provider, whose first login makes the account.">
+          <span>
+            <Button variant="primary" disabled>
+              <UserPlus />
+              New user
+            </Button>
+          </span>
+        </Tooltip>
+      )}
       <DialogContent
         title="New user"
         description={
@@ -68,7 +84,11 @@ export function CreateUserDialog() {
           <Field label="Name" htmlFor={ids.name} hint={NAME_RULE}>
             <Input id={ids.name} value={name} maxLength={64} autoFocus spellCheck={false} autoComplete="off" placeholder="frank" onChange={(e) => setName(e.target.value)} />
           </Field>
-          <Field label="Password" htmlFor={ids.password} hint={`${PASSWORD_RULE} Hand it over out of band; the user cannot change it, an admin can.`}>
+          <Field
+            label="Password"
+            htmlFor={ids.password}
+            hint={`${PASSWORD_RULE} Hand it over out of band. The user changes it from the user menu, at the first sign-in if the server asks (auth.passwords.changeAtFirstUse).`}
+          >
             <Input id={ids.password} type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </Field>
           <label htmlFor={ids.admin} className="flex items-start gap-2 text-sm">
@@ -116,7 +136,7 @@ export function SetPasswordDialog({ user, onClose }: UserDialogProps) {
         description={
           user.kind === "oidc"
             ? "An OIDC user signs in at the identity provider; a password lets it sign in here with its name too."
-            : "The old password fails from the next request on. The user's tokens stay valid; revoke them below if the password leaked."
+            : "The old password fails from the next request on, and a lock of the password ends. The user's tokens stay valid; revoke them below if the password leaked. With auth.passwords.changeAtFirstUse the user chooses a new one at the next sign-in."
         }
       >
         <form onSubmit={submit} className="space-y-4">

@@ -4,8 +4,11 @@ import { Clock, FlaskConical, KeyRound, LogIn, ShieldCheck } from "lucide-react"
 import { useEffect, useId, useState, type FormEvent } from "react";
 
 import {
+  changePasswordAndSignIn,
   lifetimeText,
   oidcSignInUrl,
+  ownChangeRefused,
+  PasswordMustChange,
   redeemOidcCode,
   SESSION_LIFETIME,
   SignInError,
@@ -63,6 +66,9 @@ export function SignInPage() {
   const [user, setUser] = useState("");
   const [password, setPassword] = useState("");
   const [token, setToken] = useState("");
+  // A password that verified and must be changed first (rbac.md §1, Change at first use): the
+  // form of the change, which signs in with the new one.
+  const [change, setChange] = useState<{ user: string; current: string } | null>(null);
 
   const signedIn = () => void navigate({ to: safeRedirect(search.redirect), replace: true });
   const signIn = useMutation({
@@ -71,6 +77,11 @@ export function SignInPage() {
       setPassword("");
       setToken("");
       signedIn();
+    },
+    onError: (err) => {
+      if (!(err instanceof PasswordMustChange)) return;
+      setChange({ user: err.user, current: password });
+      setPassword("");
     },
   });
 
@@ -173,7 +184,16 @@ export function SignInPage() {
 
           {!method && !modes.oidc ? <p className="text-sm text-muted-foreground">This server offers no way to sign in here.</p> : null}
 
-          {method ? (
+          {change ? (
+            <MustChangeForm
+              {...change}
+              onDone={signedIn}
+              onCancel={() => {
+                setChange(null);
+                signIn.reset();
+              }}
+            />
+          ) : method ? (
             <form onSubmit={submit} className="space-y-4">
               {method === "password" ? (
                 <>
@@ -279,5 +299,47 @@ export function SignInPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** The change of a password that must be changed before it is used for anything else: the
+ * current one, which the person has just typed, and the new one twice; then the sign-in with the
+ * new one. */
+function MustChangeForm({ user, current, onDone, onCancel }: { user: string; current: string; onDone: () => void; onCancel: () => void }) {
+  const ids = { password: useId(), again: useId() };
+  const [password, setPassword] = useState("");
+  const [again, setAgain] = useState("");
+  const differ = again !== "" && again !== password;
+  const change = useMutation({ mutationFn: () => changePasswordAndSignIn(user, current, password), onSuccess: onDone });
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (password && again === password) change.mutate();
+  };
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <div role="status" className="flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2.5 text-sm">
+        <KeyRound className="mt-0.5 size-4 shrink-0 text-warning" />
+        <p>
+          The server asks <span className="font-mono">{user}</span> to choose a new password before using this one: an admin set it, or asked
+          for a new one.
+        </p>
+      </div>
+      <Field label="New password" htmlFor={ids.password} hint="None of your last four passwords. Your tokens stay valid.">
+        <Input id={ids.password} type="password" autoComplete="new-password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} />
+      </Field>
+      <Field label="Again" htmlFor={ids.again} hint={differ ? <span className="text-danger">The two differ.</span> : undefined}>
+        <Input id={ids.again} type="password" autoComplete="new-password" value={again} onChange={(e) => setAgain(e.target.value)} />
+      </Field>
+      <FormError error={change.error instanceof SignInError ? change.error.message : ownChangeRefused(change.error)} />
+      <div className="flex gap-2">
+        <Button type="button" className="flex-1" disabled={change.isPending} onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" variant="primary" className="flex-1" disabled={!password || again !== password || change.isPending}>
+          <LogIn />
+          {change.isPending ? "Changing…" : "Change and sign in"}
+        </Button>
+      </div>
+    </form>
   );
 }

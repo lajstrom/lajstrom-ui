@@ -1,11 +1,12 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { Ban, History, KeyRound, Link2, MoreHorizontal, Pencil, ShieldCheck, Trash2, UserCheck, Users } from "lucide-react";
+import { Ban, History, KeyRound, Link2, LockOpen, MoreHorizontal, Pencil, RotateCcwKey, ShieldCheck, Trash2, UserCheck, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { optimistic, update, useChanges } from "@/api/change";
 import { revokeUserToken } from "@/api/mutations";
-import { bindingsQuery, callerQuery, reposQuery, userQuery, userTokensQuery } from "@/api/queries";
+import { signInModes } from "@/api/auth";
+import { bindingsQuery, callerQuery, infoQuery, reposQuery, userQuery, userTokensQuery } from "@/api/queries";
 import { setSession } from "@/api/session";
 import type { Binding, Token, User } from "@/api/types";
 import { useSession } from "@/app/session";
@@ -26,7 +27,7 @@ import { roleActions, roleTone } from "@/lib/roles";
 import { revoked, tokenState } from "@/lib/tokens";
 
 import { DeleteUserDialog, CreateBindingDialog, RenameUserDialog, SetPasswordDialog } from "./user-dialogs";
-import { deleteBindingKey, disableKey, useDeleteBinding, useDisableUser, type DisableChange } from "./user-changes";
+import { deleteBindingKey, disableKey, useDeleteBinding, useDisableUser, useMustChange, useUnlockUser, type DisableChange } from "./user-changes";
 
 const live = (t: Token) => tokenState(t) === "active" || tokenState(t) === "expiring";
 const tokenId = (t: Token) => t.id;
@@ -69,6 +70,10 @@ function UserView({ user, admin, self }: { user: User; admin: boolean; self: boo
   const tokens = useQuery(userTokensQuery(user.name));
   const disable = useDisableUser();
   const disabling = useChanges(disableKey, userId).get(user.uid);
+  const unlock = useUnlockUser(user);
+  const mustChange = useMustChange(user);
+  // While the server takes no password (auth.localPasswords: false), none is set or asked for.
+  const passwords = signInModes(useQuery(infoQuery).data).password;
   const [dialog, setDialog] = useState<Dialog>(null);
 
   const principal = `user:${user.uid}`;
@@ -127,7 +132,15 @@ function UserView({ user, admin, self }: { user: User; admin: boolean; self: boo
                 {user.disabled ? "Enable" : "Disable"}
               </Button>
             ) : null}
-            {admin ? (
+            {admin && user.lockedUntil ? (
+              <Tooltip content="End the lock now, and the count of wrong passwords">
+                <Button disabled={unlock.isPending} onClick={() => unlock.mutate()}>
+                  <LockOpen />
+                  {unlock.isPending ? "Unlocking…" : "Unlock"}
+                </Button>
+              </Tooltip>
+            ) : null}
+            {admin && passwords ? (
               <Button onClick={() => setDialog("password")}>
                 <KeyRound />
                 Set password
@@ -141,6 +154,11 @@ function UserView({ user, admin, self }: { user: User; admin: boolean; self: boo
                   </Button>
                 </MenuTrigger>
                 <MenuContent>
+                  {passwords ? (
+                    <MenuItem icon={<RotateCcwKey />} disabled={mustChange.isPending} onSelect={() => mustChange.mutate(!user.mustChange)}>
+                      {user.mustChange ? "Stop asking for a new password" : "Ask for a new password"}
+                    </MenuItem>
+                  ) : null}
                   <MenuItem icon={<Pencil />} onSelect={() => setDialog("rename")}>
                     Rename
                   </MenuItem>
@@ -160,9 +178,27 @@ function UserView({ user, admin, self }: { user: User; admin: boolean; self: boo
           or OIDC login is refused and disables it, unless it is the last enabled admin. Enabling it again then restarts its clock.
         </p>
       ) : null}
+      {user.lockedUntil ? (
+        <p className="mb-4 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-warning">
+          10 wrong passwords in a row locked the password of {user.name}, which is refused whatever it is; the lock ends{" "}
+          <RelativeTime iso={user.lockedUntil} /> (auth.lockout.duration). Its tokens and OIDC logins keep working. Unlock it once you know
+          who asks, or set a new password.
+        </p>
+      ) : null}
+      {user.mustChange ? (
+        <p className="mb-4 rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
+          {user.name}&apos;s password works for its own change only: the next sign-in asks for a new one, and a client that sends the password
+          is refused until then. Its tokens keep working.
+        </p>
+      ) : null}
       {disabling?.error ? (
         <p role="alert" className="mb-4 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger">
           Not {user.disabled ? "enabled" : "disabled"}. {errorText(disabling.error)}
+        </p>
+      ) : null}
+      {unlock.error || mustChange.error ? (
+        <p role="alert" className="mb-4 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger">
+          {unlock.error ? `Not unlocked. ${errorText(unlock.error)}` : `Not changed. ${errorText(mustChange.error)}`}
         </p>
       ) : null}
       {admin && self ? (

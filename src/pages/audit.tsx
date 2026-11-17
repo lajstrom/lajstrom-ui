@@ -18,7 +18,9 @@ import { shortDigest } from "@/lib/format";
 function actionTone(action: string): BadgeProps["tone"] {
   if (action === "push") return "primary";
   if (action === "delete" || action === "proxy.reject" || /\.(delete|revoke|disable|drop)$/.test(action)) return "danger";
-  if (action.startsWith("token.") || action.startsWith("binding.") || action.startsWith("key.") || action.startsWith("ci.policy.")) return "warning";
+  if (action.startsWith("token.") || action.startsWith("binding.") || action.startsWith("key.") || action.startsWith("ci.policy.") || action === "login.block") {
+    return "warning";
+  }
   return "neutral";
 }
 
@@ -204,6 +206,10 @@ function AuditRow({ event: e, showRepo }: { event: AuditEvent; showRepo: boolean
             // The server's, by anonymous, at the authentication of a user inactive for longer
             // than auth.disableInactiveUsersAfter (rbac.md §1, Inactive users).
             <span className="text-xs text-muted-foreground">for inactivity</span>
+          ) : e.action === "login.block" && e.details?.limit === "lockout" ? (
+            // A lock of the lockout, 10 wrong passwords in a row, rather than a throttle that
+            // tripped (rbac.md §1, The lockout).
+            <span className="text-xs text-muted-foreground">password locked</span>
           ) : null}
           {e.state !== "ok" ? (
             <Tooltip content={stateHelp[e.state] + (e.error ? `: ${e.error}` : "")}>

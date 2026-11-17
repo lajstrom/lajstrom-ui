@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, Navigate, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { Boxes, Braces, Check, FlaskConical, History, KeyRound, LogIn, LogOut, MenuIcon, Monitor, Moon, Search, Server, Sun, User, Users, Webhook } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Boxes, Braces, Check, FlaskConical, History, KeyRound, LockKeyhole, LogIn, LogOut, MenuIcon, Monitor, Moon, Search, Server, Sun, User, Users, Webhook } from "lucide-react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
-import { lifetimeText, signOut } from "@/api/auth";
+import { lifetimeText, signInModes, signOut } from "@/api/auth";
 import { callerQuery, infoQuery } from "@/api/queries";
 import { RelativeTime } from "@/components/common";
 import { Badge } from "@/components/ui/badge";
@@ -142,8 +142,15 @@ function ThemeMenu() {
   );
 }
 
+// The change of one's own password, loaded when it is asked for, out of the main chunk.
+const ChangePasswordDialog = lazy(() => import("./change-password").then((m) => ({ default: m.ChangePasswordDialog })));
+
 function UserMenu() {
   const who = useQuery(callerQuery);
+  const info = useQuery(infoQuery);
+  // A user changes its own password while the server takes passwords (rbac.md §1).
+  const passwords = signInModes(info.data).password;
+  const [changing, setChanging] = useState(false);
   const session = useSession();
   const idle = useIdle();
   const navigate = useNavigate();
@@ -167,38 +174,50 @@ function UserMenu() {
     void navigate({ to: "/" });
   };
   return (
-    <Menu>
-      <MenuTrigger asChild>
-        <Button variant="ghost" className="gap-2 px-2">
-          <span className="flex size-6 items-center justify-center rounded-full bg-primary-soft text-xs font-semibold text-primary-soft-foreground uppercase">
-            {me.name.slice(0, 1) || <User className="size-3.5" />}
-          </span>
-          <span className="hidden text-sm lg:inline">{me.name}</span>
-        </Button>
-      </MenuTrigger>
-      <MenuContent className="w-72">
-        <MenuLabel>
-          Signed in as{" "}
-          <Tooltip content={me.principal}>
-            <span className="font-mono text-foreground">{me.name}</span>
-          </Tooltip>
-          {me.admin ? <Badge tone="primary" className="ml-1.5">admin</Badge> : null}
-        </MenuLabel>
-        {session?.expiresAt ? (
-          <div className="px-2 pb-1.5 text-xs text-muted-foreground">
-            Session ends <RelativeTime iso={session.expiresAt} />
-            {idle.bound ? `, or after ${lifetimeText(idle.bound)} without activity` : null}
-          </div>
-        ) : null}
-        <MenuSeparator />
-        <MenuItem icon={<KeyRound />} onSelect={() => void navigate({ to: "/tokens" })}>
-          Personal access tokens
-        </MenuItem>
-        <MenuItem icon={<LogOut />} onSelect={() => void out()}>
-          Sign out
-        </MenuItem>
-      </MenuContent>
-    </Menu>
+    <>
+      <Menu>
+        <MenuTrigger asChild>
+          <Button variant="ghost" className="gap-2 px-2">
+            <span className="flex size-6 items-center justify-center rounded-full bg-primary-soft text-xs font-semibold text-primary-soft-foreground uppercase">
+              {me.name.slice(0, 1) || <User className="size-3.5" />}
+            </span>
+            <span className="hidden text-sm lg:inline">{me.name}</span>
+          </Button>
+        </MenuTrigger>
+        <MenuContent className="w-72">
+          <MenuLabel>
+            Signed in as{" "}
+            <Tooltip content={me.principal}>
+              <span className="font-mono text-foreground">{me.name}</span>
+            </Tooltip>
+            {me.admin ? <Badge tone="primary" className="ml-1.5">admin</Badge> : null}
+          </MenuLabel>
+          {session?.expiresAt ? (
+            <div className="px-2 pb-1.5 text-xs text-muted-foreground">
+              Session ends <RelativeTime iso={session.expiresAt} />
+              {idle.bound ? `, or after ${lifetimeText(idle.bound)} without activity` : null}
+            </div>
+          ) : null}
+          <MenuSeparator />
+          <MenuItem icon={<KeyRound />} onSelect={() => void navigate({ to: "/tokens" })}>
+            Personal access tokens
+          </MenuItem>
+          {passwords && me.kind === "user" ? (
+            <MenuItem icon={<LockKeyhole />} onSelect={() => setChanging(true)}>
+              Change password
+            </MenuItem>
+          ) : null}
+          <MenuItem icon={<LogOut />} onSelect={() => void out()}>
+            Sign out
+          </MenuItem>
+        </MenuContent>
+      </Menu>
+      {changing ? (
+        <Suspense fallback={null}>
+          <ChangePasswordDialog user={me.name} onClose={() => setChanging(false)} />
+        </Suspense>
+      ) : null}
+    </>
   );
 }
 
