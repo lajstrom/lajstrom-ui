@@ -293,11 +293,18 @@ export function uidOf(name: string): string {
 }
 
 /** What the mock's server is configured with and /api/v1/info does not answer (docs/configuration.md
- * of the server), in hours as the configuration writes them; 0 is off.
- * auth.disableInactiveUsersAfter: PCI DSS 8.2.6's 90 days (rbac.md §1, Inactive users).
- * auth.deployTokens.maxTTL: 180 days, set after the seed's deploy tokens without an expiry were
- * made (rbac.md §1, the lifetime of a deploy token). */
-export const config = { disableInactiveUsersAfterHours: 2160, deployTokensMaxTTLHours: 4320 };
+ * of the server); 0 is off.
+ * auth.disableInactiveUsersAfter: PCI DSS 8.2.6's 90 days, in hours (rbac.md §1, Inactive users).
+ * auth.deployTokens.maxTTL: 180 days, in hours, set after the seed's deploy tokens without an
+ * expiry were made (rbac.md §1, the lifetime of a deploy token).
+ * auth.lockout.duration: PCI DSS 8.3.4's 30 minutes; auth.passwords.changeAtFirstUse: off, its
+ * default (rbac.md §1, Local passwords). */
+export const config = {
+  disableInactiveUsersAfterHours: 2160,
+  deployTokensMaxTTLHours: 4320,
+  lockoutMinutes: 30,
+  changeAtFirstUse: false,
+};
 
 // A user's lastSeenAt is its last authentication, so no older than its tokens' last use.
 export const users: User[] = [
@@ -312,6 +319,10 @@ export const users: User[] = [
   // Unseen for longer than auth.disableInactiveUsersAfter: inactive, and disabled by its next
   // authentication (judy / judy in the demo).
   { uid: uidOf("judy"), name: "judy", kind: "local", disabled: false, createdAt: ago(380), lastSeenAt: before(131) },
+  // Made by the admin, who asked for a new password at the first sign-in (nina / nina).
+  { uid: uidOf("nina"), name: "nina", kind: "local", disabled: false, createdAt: before(0, 2), lastSeenAt: null, mustChange: true },
+  // Locked by 10 wrong passwords in a row, until the lock ends or an admin unlocks it.
+  { uid: uidOf("victor"), name: "victor", kind: "local", disabled: false, createdAt: ago(200), lastSeenAt: before(3), lockedUntil: ahead(0, 0, 25) },
 ];
 
 /** Passwords set through the API in the demo, by user name, as the sha256 of the password. Until

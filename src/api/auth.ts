@@ -2,7 +2,8 @@
 // Only endpoints the server has (docs/api.md): POST /api/v1/login, a token bound to this
 // browser's DPoP key for a password or the code of an OIDC login; on a server without it (no
 // login in GET /api/v1/info), POST/GET/DELETE /api/v1/users/{name}/tokens with the password;
-// GET /api/v1/whoami and POST /api/v1/bootstrap.
+// GET /api/v1/whoami and POST /api/v1/bootstrap; a user's own change of its password, POST
+// /api/v1/users/{name}/password with the current one, for a password that must be changed first.
 
 import { basePath } from "@/app/base";
 import { config } from "@/app/config";
@@ -26,6 +27,56 @@ export class SignInError extends Error {
     super(message);
     this.name = "SignInError";
   }
+}
+
+/** The password verified, and the server asks that it be changed before it is used for anything
+ * else (docs/spec/rbac.md §1, Change at first use): the sign-in page offers the change. */
+export class PasswordMustChange extends SignInError {
+  readonly user: string;
+  constructor(user: string) {
+    super("Choose a new password before you use this one.");
+    this.name = "PasswordMustChange";
+    this.user = user;
+  }
+}
+
+/** The server's 403 of a password that must be changed first: the one 403 of POST /api/v1/login,
+ * and on any other route this message. */
+const MUST_CHANGE = /^the password must be changed before it is used for anything else/;
+
+/** What a form says of a refused user name and password. While the lockout is set, the server's
+ * message of every such refusal says what locks a password and for how long, whatever the reason
+ * (docs/spec/rbac.md §1, The lockout). */
+export function passwordRefused(message: string): string {
+  const lockout = /(\d+) wrong passwords in a row lock a password for (\S+)/.exec(message);
+  const why = "Wrong user name or password, or the user is disabled";
+  return lockout ? `${why}, or its password is locked: ${lockout[1]} wrong passwords in a row lock it for ${lockout[2]}.` : `${why}.`;
+}
+
+/** What a form says of a refused change of one's own password; the server's message of a new
+ * password it refuses, which names the rule or says that it was used before. */
+export function ownChangeRefused(err: unknown): string | null {
+  if (!(err instanceof ApiError)) return err instanceof Error ? err.message : null;
+  if (err.status === 401) {
+    const lockout = /(\d+) wrong passwords in a row lock a password for (\S+)/.exec(err.message);
+    return `The current password is wrong${lockout ? `, or it is locked: ${lockout[1]} wrong passwords in a row lock it for ${lockout[2]}` : ""}.`;
+  }
+  if (err.status === 429) return `Too many wrong passwords: try again in ${err.retryAfter === null ? "a minute" : `${err.retryAfter} seconds`}.`;
+  return `${err.message.charAt(0).toUpperCase()}${err.message.slice(1)}.`;
+}
+
+/** The user's own change of its password: the current password is the credential, and no other
+ * is sent (docs/spec/rbac.md §1, A user's own password). The user's tokens stay. Here rather than
+ * with the other changes, since the sign-in page, in the main chunk, makes it. */
+export function changeOwnPassword(user: string, currentPassword: string, password: string): Promise<void> {
+  return apiSend("POST", apiPath("users", user, "password"), { body: { currentPassword, password }, authorization: "" });
+}
+
+/** Changes the password of user with its current one, then signs in with the new one: the sign-in
+ * of a password that must be changed first. */
+export async function changePasswordAndSignIn(user: string, current: string, password: string): Promise<void> {
+  await changeOwnPassword(user, current, password);
+  await signInWithPassword(user, password);
 }
 
 /** How a person may sign in, as the sign-in page offers it: info.authModes, the modes this UI
@@ -78,8 +129,10 @@ async function login(req: LoginRequest): Promise<void> {
   } catch (err) {
     if (!(err instanceof ApiError)) throw err;
     if (err.status === 401) {
-      throw new SignInError("code" in req ? `The server refused the sign-in: ${err.message}.` : "Wrong user name or password, or the user is disabled.");
+      throw new SignInError("code" in req ? `The server refused the sign-in: ${err.message}.` : passwordRefused(err.message));
     }
+    // A password that verified and must be changed first: the one 403 of the sign-in.
+    if (err.status === 403 && "username" in req) throw new PasswordMustChange(req.username);
     if (err.status === 429) {
       const wait = err.retryAfter === null ? "a minute" : `${err.retryAfter} second${err.retryAfter === 1 ? "" : "s"}`;
       throw new SignInError(`Too many failed sign-ins: try again in ${wait}.`);
@@ -110,7 +163,8 @@ export async function signInWithPassword(user: string, password: string): Promis
       authorization: basicAuth(name, password),
     });
   } catch (err) {
-    if (err instanceof ApiError && err.status === 401) throw new SignInError("Wrong user name or password, or the user is disabled.");
+    if (err instanceof ApiError && err.status === 401) throw new SignInError(passwordRefused(err.message));
+    if (err instanceof ApiError && err.status === 403 && MUST_CHANGE.test(err.message)) throw new PasswordMustChange(name);
     if (err instanceof ApiError && err.status === 403) throw new SignInError(`The server refused to create a token: ${err.message}.`);
     throw err;
   }

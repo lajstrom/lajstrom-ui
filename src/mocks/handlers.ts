@@ -62,10 +62,12 @@ function answered(resolver: Resolver): Resolver {
   return async (info) => {
     await latency();
     const authn = await authenticate(info.request);
+    const api = new URL(info.request.url).pathname.startsWith("/api/");
     if ("refused" in authn) {
       if (authn.dpop) return dpopRefused(authn.dpop);
-      return unauthorized("credentials are needed: the ones sent were refused", new URL(info.request.url).pathname.startsWith("/api/"));
+      return unauthorized(authn.message ?? "credentials are needed: the ones sent were refused", api);
     }
+    if ("mustChange" in authn) return api ? fail(403, "FORBIDDEN", db.MUST_CHANGE) : text(403, db.MUST_CHANGE);
     setPersona(authn.principal, authn.credential);
     return resolver(info);
   };
@@ -521,10 +523,24 @@ export const handlers = [
   }),
 
   post("*/api/v1/users/:user/password", async ({ params, request }) => {
+    const b = await body(request);
+    // With currentPassword, the user's own change: the one route of users that is not the admin
+    // role's, whose credential is the current password (rbac.md §1, A user's own password).
+    if (typeof b === "object" && b !== null && "currentPassword" in b) {
+      const refused = db.changeOwnPassword(decode(params.user), b);
+      return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
+    }
     const user = adminOnly() ?? liveUser(params);
     if (user instanceof Response) return user;
-    const refused = db.setPassword(user, await body(request), `user:${getPersona()}`);
+    const refused = db.setPassword(user, b, `user:${getPersona()}`);
     return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
+  }),
+
+  post("*/api/v1/users/:user/unlock", async ({ params }) => {
+    const user = adminOnly() ?? liveUser(params);
+    if (user instanceof Response) return user;
+    db.unlockUser(user, `user:${getPersona()}`);
+    return new HttpResponse(null, { status: 204 });
   }),
 
   post("*/api/v1/bindings", async ({ request }) => {

@@ -7,7 +7,7 @@ import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { signInWithPassword, signInWithToken, signOut } from "@/api/auth";
+import { changePasswordAndSignIn, signInWithPassword, signInWithToken, signOut } from "@/api/auth";
 import { apiGet, apiGetAs, apiPath, sendChange } from "@/api/client";
 import { jwkThumbprint, learnServerClock, publicJwk } from "@/api/dpop";
 import { signInKey } from "@/api/dpop-key";
@@ -123,15 +123,26 @@ describe("signing in at POST /api/v1/login", () => {
   });
 
   it("says why a sign-in failed: a wrong password, a proof that is missing", async () => {
+    // While the lockout is set, the server's message says what locks a password.
     await expect(signInWithPassword("alice", "wrong")).rejects.toMatchObject({
       name: "SignInError",
-      message: "Wrong user name or password, or the user is disabled.",
+      message: "Wrong user name or password, or the user is disabled, or its password is locked: 10 wrong passwords in a row lock it for 30m.",
     });
     await expect(signInWithPassword("dave", "dave")).rejects.toMatchObject({ name: "SignInError" });
     const res = await fetch("http://localhost/api/v1/login", { method: "POST", body: JSON.stringify({ username: "alice", password: "alice" }) });
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: { code: "INVALID", message: "DPoP: the request has no DPoP header" } });
     expect(getSession()).toBeNull();
+  });
+
+  it("offers the change of a password that must be changed first, then signs in with the new one", async () => {
+    // nina's password is right, and must be changed before anything else: the one 403 of a sign-in.
+    await expect(signInWithPassword("nina", "nina")).rejects.toMatchObject({ name: "PasswordMustChange", user: "nina" });
+    expect(getSession()).toBeNull();
+    await expect(changePasswordAndSignIn("nina", "nina", "nina")).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/^password: /) });
+    await changePasswordAndSignIn("nina", "nina", "nina's own passphrase");
+    expect(getSession()).toMatchObject({ user: "nina", tokenType: "DPoP" });
+    expect(await whoami()).toMatchObject({ name: "nina" });
   });
 
   it("ends the session when the token is refused: revoked elsewhere", async () => {

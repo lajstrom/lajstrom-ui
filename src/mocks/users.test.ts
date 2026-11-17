@@ -6,13 +6,14 @@ import { setupServer } from "msw/node";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { apiGet, apiGetAs, apiPath, basicAuth } from "@/api/client";
-import { createBinding, createUser, deleteBinding, deleteUser, revokeUserToken, setUserPassword, updateUser } from "@/api/mutations";
+import { changeOwnPassword } from "@/api/auth";
+import { createBinding, createUser, deleteBinding, deleteUser, revokeUserToken, setUserPassword, unlockUser, updateUser } from "@/api/mutations";
 import { setSession } from "@/api/session";
 import type { AuditList, Binding, Token, User, WhoAmI } from "@/api/types";
 
 import { createToken } from "./auth";
-import { users as seeded } from "./data/system";
-import { userView } from "./db";
+import { config, users as seeded } from "./data/system";
+import { MUST_CHANGE, userView } from "./db";
 import { handlers } from "./handlers";
 
 const server = setupServer(...handlers);
@@ -108,7 +109,7 @@ describe("users", () => {
     await expect(whoAs("bob", bobs)).resolves.toMatchObject({ name: "bob" });
 
     await expect(updateUser("admin", { disabled: true })).rejects.toMatchObject({ status: 409, message: expect.stringContaining("last enabled user with an admin binding") });
-    await expect(updateUser("bob", {})).rejects.toMatchObject({ status: 400, message: "body: nothing to change; the fields are name and disabled" });
+    await expect(updateUser("bob", {})).rejects.toMatchObject({ status: 400, message: "body: nothing to change; the fields are name, disabled and mustChange" });
     await expect(updateUser("nobody", { disabled: true })).rejects.toMatchObject({ status: 404, message: "user nobody does not exist" });
   });
 
@@ -134,7 +135,7 @@ describe("users", () => {
     await setUserPassword("alice", "a new passphrase");
     await expect(whoAs("alice", "alice")).rejects.toMatchObject({ status: 401 });
     await expect(whoAs("alice", "a new passphrase")).resolves.toMatchObject({ name: "alice" });
-    await expect(setUserPassword("alice", "short")).rejects.toMatchObject({ status: 400, message: "password: must be at least 8 bytes" });
+    await expect(setUserPassword("alice", "short")).rejects.toMatchObject({ status: 400, message: "password: must be at least 8 characters (auth.passwords.minLength)" });
     expect((await audit("user.password"))[0]).toMatchObject({ details: { name: "alice" } });
     // An OIDC user has no password until one is set.
     await expect(whoAs("erin", "erin")).rejects.toMatchObject({ status: 401 });
@@ -213,6 +214,100 @@ describe("users", () => {
     expect(admin.disabled).toBe(false);
     expect(Date.now() - Date.parse(admin.lastSeenAt)).toBeLessThan(60_000);
     expect(userView(admin)).not.toHaveProperty("inactive");
+  });
+});
+
+describe("passwords (rbac.md §1, Local passwords)", () => {
+  const user = (name: string) => apiGet<User>(apiPath("users", name));
+  const refusedMessage = "the user name or the password was refused: 10 wrong passwords in a row lock a password for 30m";
+
+  it("are locked by 10 wrong ones in a row, until an admin unlocks them; the tokens keep working", async () => {
+    signIn("admin");
+    await createUser({ name: "lockme", password: "the right one" });
+    const token = createToken({ user: "lockme" }, { name: "kept", expiresIn: "1h" });
+    if ("status" in token) throw new Error(token.message);
+    // A right password sets the count back: 9, a right one, then 9 more lock nothing.
+    for (let i = 0; i < 9; i++) await expect(whoAs("lockme", `wrong ${i}`)).rejects.toMatchObject({ status: 401, message: refusedMessage });
+    await expect(whoAs("lockme", "the right one")).resolves.toMatchObject({ name: "lockme" });
+    for (let i = 0; i < 9; i++) await expect(whoAs("lockme", `wrong ${i}`)).rejects.toMatchObject({ status: 401 });
+    expect(await user("lockme")).not.toHaveProperty("lockedUntil");
+    await expect(whoAs("lockme", "the tenth")).rejects.toMatchObject({ status: 401 });
+
+    const locked = await user("lockme");
+    expect(Date.parse(locked.lockedUntil!) - Date.now()).toBeGreaterThan(29 * 60_000);
+    expect((await audit("login.block"))[0]).toMatchObject({ principal: "anonymous", details: { name: "lockme", limit: "lockout", until: locked.lockedUntil } });
+    // The right password is refused as a wrong one, and the token is not locked.
+    await expect(whoAs("lockme", "the right one")).rejects.toMatchObject({ status: 401, message: refusedMessage });
+    await expect(whoAs("lockme", token.secret)).resolves.toMatchObject({ name: "lockme" });
+
+    await unlockUser("lockme");
+    expect(await user("lockme")).not.toHaveProperty("lockedUntil");
+    expect((await audit("user.unlock"))[0]).toMatchObject({ principalName: "admin", details: { name: "lockme", lockedUntil: locked.lockedUntil } });
+    await expect(whoAs("lockme", "the right one")).resolves.toMatchObject({ name: "lockme" });
+    // Unlocking a user that is not locked writes no row.
+    const rows = (await audit("user.unlock")).length;
+    await unlockUser("lockme");
+    expect(await audit("user.unlock")).toHaveLength(rows);
+    // Some 30 requests, each with the mock's latency.
+  }, 30_000);
+
+  it("are unlocked by an admin's new password too, and the seed's victor is locked", async () => {
+    signIn("admin");
+    expect(await user("victor")).toHaveProperty("lockedUntil");
+    await expect(whoAs("victor", "victor")).rejects.toMatchObject({ status: 401 });
+    await setUserPassword("victor", "a new one, handed over");
+    expect(await user("victor")).not.toHaveProperty("lockedUntil");
+    expect((await audit("user.unlock"))[0]).toMatchObject({ details: { name: "victor" } });
+    await expect(whoAs("victor", "a new one, handed over")).resolves.toMatchObject({ name: "victor" });
+  });
+
+  it("that must be changed authenticate their own change only: 403 elsewhere, then the change", async () => {
+    signIn("admin");
+    await createUser({ name: "changeme", password: "from the admin" });
+    await updateUser("changeme", { mustChange: true });
+    expect(await user("changeme")).toMatchObject({ mustChange: true });
+    expect((await audit("user.mustchange"))[0]).toMatchObject({ details: { name: "changeme", mustChange: true } });
+    await expect(whoAs("changeme", "from the admin")).rejects.toMatchObject({ status: 403, message: MUST_CHANGE });
+    // A wrong password is a 401 as always, so that only the holder of the password learns it.
+    await expect(whoAs("changeme", "a guess")).rejects.toMatchObject({ status: 401 });
+
+    await expect(changeOwnPassword("changeme", "a guess", "my own passphrase")).rejects.toMatchObject({ status: 401, message: refusedMessage });
+    await expect(changeOwnPassword("changeme", "from the admin", "short")).rejects.toMatchObject({ status: 400 });
+    await expect(changeOwnPassword("changeme", "from the admin", "from the admin")).rejects.toMatchObject({
+      status: 400,
+      message: "password: was used before: choose one that is none of your last 4 passwords",
+    });
+    await changeOwnPassword("changeme", "from the admin", "my own passphrase");
+    expect(await user("changeme")).not.toHaveProperty("mustChange");
+    expect((await audit("user.password"))[0]).toMatchObject({ principalName: "changeme", details: { name: "changeme" } });
+    await expect(whoAs("changeme", "my own passphrase")).resolves.toMatchObject({ name: "changeme" });
+
+    // None of the last four: the admin's, then two more, then the admin's again is still refused;
+    // a fifth back is taken.
+    await changeOwnPassword("changeme", "my own passphrase", "the third one");
+    await changeOwnPassword("changeme", "the third one", "the fourth one");
+    await expect(changeOwnPassword("changeme", "the fourth one", "from the admin")).rejects.toMatchObject({ status: 400 });
+    await changeOwnPassword("changeme", "the fourth one", "the fifth one");
+    await changeOwnPassword("changeme", "the fifth one", "from the admin");
+  });
+
+  it("must be changed at first use of the seed's nina, and of an admin's with changeAtFirstUse", async () => {
+    signIn("admin");
+    await expect(whoAs("nina", "nina")).rejects.toMatchObject({ status: 403, message: MUST_CHANGE });
+    config.changeAtFirstUse = true;
+    try {
+      expect(await createUser({ name: "firstuse", password: "from the admin" })).toMatchObject({ mustChange: true });
+      await changeOwnPassword("firstuse", "from the admin", "chosen by me");
+      await setUserPassword("firstuse", "from the admin again");
+      expect(await user("firstuse")).toMatchObject({ mustChange: true });
+    } finally {
+      config.changeAtFirstUse = false;
+    }
+    // Without the setting, an admin's new password clears it.
+    await setUserPassword("firstuse", "and once more");
+    expect(await user("firstuse")).not.toHaveProperty("mustChange");
+    // A user without a password has none to change.
+    await expect(updateUser("erin", { mustChange: true })).rejects.toMatchObject({ status: 400, message: "mustChange: user erin has no password" });
   });
 });
 

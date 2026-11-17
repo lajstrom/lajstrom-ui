@@ -17,10 +17,12 @@ describe("authenticate (docs/auth.md)", () => {
 
   it("takes the user's name as the password, of a user that is not disabled", async () => {
     expect(await authenticate(req(basic("alice", "alice")))).toEqual({ principal: "alice", credential: { kind: "password" } });
-    expect(await authenticate(req(basic("alice", "wrong")))).toEqual({ refused: true });
-    expect(await authenticate(req(basic("alice", "")))).toEqual({ refused: true });
-    expect(await authenticate(req(basic("dave", "dave")))).toEqual({ refused: true });
-    expect(await authenticate(req(basic("nobody", "nobody")))).toEqual({ refused: true });
+    // Every refused password has the one message, which says what locks a password.
+    const refused = { refused: true, message: "the user name or the password was refused: 10 wrong passwords in a row lock a password for 30m" };
+    expect(await authenticate(req(basic("alice", "wrong")))).toEqual(refused);
+    expect(await authenticate(req(basic("alice", "")))).toEqual(refused);
+    expect(await authenticate(req(basic("dave", "dave")))).toEqual(refused);
+    expect(await authenticate(req(basic("nobody", "nobody")))).toEqual(refused);
   });
 
   it("refuses a bearer it does not know, and a deploy token as bearer", async () => {
