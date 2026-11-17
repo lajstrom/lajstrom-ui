@@ -8,8 +8,9 @@ import type { User } from "@/api/types";
 
 import { authenticate, byPassword, createToken, login, revokeToken, type DpopRefusal, type Refusal } from "./auth";
 import { bootstrapOpen, exchangeBootstrapToken } from "./bootstrap";
+import * as ci from "./ci";
 import * as db from "./db";
-import { getPersona, setPersona } from "./persona";
+import { getCredential, getPersona, setPersona } from "./persona";
 import * as hooks from "./webhooks";
 
 function fail(status: number, code: ApiErrorBody["error"]["code"], message: string) {
@@ -65,7 +66,7 @@ function answered(resolver: Resolver): Resolver {
       if (authn.dpop) return dpopRefused(authn.dpop);
       return unauthorized("credentials are needed: the ones sent were refused", new URL(info.request.url).pathname.startsWith("/api/"));
     }
-    setPersona(authn.principal);
+    setPersona(authn.principal, authn.credential);
     return resolver(info);
   };
 }
@@ -211,7 +212,35 @@ const webhookDeliveries: Resolver = async ({ params, request }) => {
   return "status" in page ? refusal(page) : HttpResponse.json(page);
 };
 
+// CI trust policies (docs/api.md, CI trust policies): the admin role, checked before the body is
+// read; src/mocks/ci.ts keeps them. A policy of the API answers its revision as its ETag.
 
+/** The admin of a CI policy route and its credential, read before the body is awaited. */
+function ciAdmin(): { by: string; cred: ReturnType<typeof getCredential> } | Response {
+  const denied = adminOnly();
+  return denied ?? { by: `user:${getPersona()}`, cred: getCredential() };
+}
+
+/** A refusal of src/mocks/ci.ts; a 412 has the ETag of the policy now. */
+function ciRefusal(r: ci.CIRefusal) {
+  return HttpResponse.json<ApiErrorBody>({ error: { code: r.code, message: r.message } }, { status: r.status, headers: r.etag ? { ETag: r.etag } : {} });
+}
+
+/** A policy with its ETag, when it has one. */
+function ciPolicy(t: ci.Tagged, status = 200, headers: Record<string, string> = {}) {
+  return HttpResponse.json(t.policy, { status, headers: { ...headers, ...(t.etag ? { ETag: t.etag } : {}) } });
+}
+
+/** The body of a renewal, which may be left out. */
+async function optionalBody(request: Request): Promise<unknown> {
+  const text = await request.text();
+  if (!text.trim()) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return "not JSON";
+  }
+}
 
 const num = (v: string | null, fallback: number) => {
   const n = Number(v);
@@ -511,6 +540,56 @@ export const handlers = [
     if (denied) return denied;
     const refused = db.deleteBinding(decode(params.id), `user:${getPersona()}`);
     return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
+  }),
+
+  get("*/api/v1/ci/policies", async () => {
+    return adminOnly() ?? HttpResponse.json(ci.listCIPolicies());
+  }),
+
+  post("*/api/v1/ci/policies", async ({ request }) => {
+    const admin = ciAdmin();
+    if (admin instanceof Response) return admin;
+    const made = ci.createCIPolicy(await body(request), admin.by, admin.cred);
+    if ("status" in made) return ciRefusal(made);
+    return ciPolicy(made, 201, { Location: `/api/v1/ci/policies/${made.policy.name}` });
+  }),
+
+  get("*/api/v1/ci/policies/:name", async ({ params, request }) => {
+    const denied = adminOnly();
+    if (denied) return denied;
+    const got = ci.getCIPolicy(decode(params.name), request.headers.get("If-None-Match"));
+    if ("status" in got) return ciRefusal(got);
+    return got.notModified ? new HttpResponse(null, { status: 304, headers: { ETag: got.etag! } }) : ciPolicy(got);
+  }),
+
+  put("*/api/v1/ci/policies/:name", async ({ params, request }) => {
+    const admin = ciAdmin();
+    if (admin instanceof Response) return admin;
+    const ifMatch = request.headers.get("If-Match");
+    const changed = ci.replaceCIPolicy(decode(params.name), await body(request), ifMatch, admin.by, admin.cred);
+    return "status" in changed ? ciRefusal(changed) : ciPolicy(changed);
+  }),
+
+  del("*/api/v1/ci/policies/:name", async ({ params, request }) => {
+    const admin = ciAdmin();
+    if (admin instanceof Response) return admin;
+    const refused = ci.deleteCIPolicy(decode(params.name), request.headers.get("If-Match"), admin.by);
+    return refused ? ciRefusal(refused) : new HttpResponse(null, { status: 204 });
+  }),
+
+  post("*/api/v1/ci/policies/:name/renew", async ({ params, request }) => {
+    const admin = ciAdmin();
+    if (admin instanceof Response) return admin;
+    const ifMatch = request.headers.get("If-Match");
+    const renewed = ci.renewCIPolicy(decode(params.name), await optionalBody(request), ifMatch, admin.by, admin.cred);
+    return "status" in renewed ? ciRefusal(renewed) : ciPolicy(renewed);
+  }),
+
+  post("*/api/v1/ci/policies/:name/approve", async ({ params, request }) => {
+    const admin = ciAdmin();
+    if (admin instanceof Response) return admin;
+    const approved = ci.approveCIPolicy(decode(params.name), request.headers.get("If-Match"), admin.by, admin.cred);
+    return "status" in approved ? ciRefusal(approved) : ciPolicy(approved);
   }),
 
   get("*/api/v1/tokens", async () => {

@@ -36,6 +36,7 @@ import { packagePath } from "@/lib/profile";
 import { sha256Hex } from "@/lib/sha256";
 
 import { aptVersions } from "./data/apt";
+import { ciAuditSeeds } from "./data/ci";
 import { buildVersion, type BuiltVersion, type VersionSpec } from "./data/builders";
 import { mavenVersions } from "./data/maven";
 import { npmDistTags, npmVersions } from "./data/npm";
@@ -1136,6 +1137,7 @@ function auditLog(): (MockEvent & { id: number })[] {
       error: "the registry refused the blob: 413 Request Entity Too Large",
     },
   );
+  events.push(...ciAuditSeeds());
   events.push(...demoEvents);
   events.sort((a, b) => b.at.localeCompare(a.at));
   return events.map((e, i) => ({ id: events.length - i, ...e }));
