@@ -253,6 +253,13 @@ export async function sendChange<T = undefined>(req: ChangeRequest): Promise<Tag
   return { data: (res.status === 204 ? undefined : await res.json()) as T, etag: res.headers.get("ETag") };
 }
 
+/** A GET of a document whose bytes count, such as the access report, which a review names by
+ * their sha256: the bytes as the server sent them. */
+export async function apiGetBytes(path: string, query?: Query, signal?: AbortSignal): Promise<Uint8Array> {
+  const res = await request("GET", path, { query, signal });
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 /** A GET with explicit credentials, outside the session: sign-in checks a pasted token with it. */
 export async function apiGetAs<T>(path: string, authorization: string): Promise<T> {
   const res = await request("GET", path, { authorization });

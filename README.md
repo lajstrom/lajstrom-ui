@@ -73,6 +73,11 @@ separate repository:
   admin approves a request with the admin's password, or a fresh sign-in through single sign-on
   (signing in again when it is older than 10 minutes), which makes the change; any admin rejects
   one, its requester withdrawing it; one waits 7 days at most. The tab lists them by state.
+- **Access review**, a tab of Access: the server's access report of who has what, for everyone,
+  people or systems, with the flags a reviewer looks for (`admin`, `allRepos`, `noExpiry`,
+  `unused` after the days asked, `beyondMaxTTL`, `inactive` …) and a filter by flag. The report
+  downloads as the bytes the server sent, with their sha256; recording a review writes the audit
+  row `access.review` that names the report by it, with a note, and the past reviews follow.
 - **A reason for changes**: a ticket or a sentence, kept in the tab from the user menu and shown
   in the header, that every change of users, bindings, tokens, repos, webhooks and CI trust
   policies sends as `changeReason`; the audit log shows it with the change. While the server

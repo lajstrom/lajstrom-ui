@@ -184,6 +184,15 @@ export type ApprovalList = Schemas["ApprovalList"];
  * its secret, shown this once, which is no credential until the request is approved. */
 export type CreatedApproval = Schemas["CreatedApproval"];
 
+/** Who has what at one moment (docs/spec/rbac.md §14): one document in its canonical form, which
+ * a review names by the sha256 of its bytes. */
+export type AccessReport = Schemas["AccessReport"];
+
+export type AccessFlag = Schemas["AccessFlags"][number];
+
+/** The body of POST /api/v1/access-reviews: the report reviewed and what was found. */
+export type AccessReviewRequest = Schemas["AccessReviewRequest"];
+
 /** A role binding; `principal` is canonical, `user:<uid>` or `group:<name>`, and `name` the
  * user's name now. */
 export type Binding = Schemas["Binding"];

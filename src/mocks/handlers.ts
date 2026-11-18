@@ -7,6 +7,7 @@ import type { ApiErrorBody } from "@/api/types";
 import type { User } from "@/api/types";
 
 import { authenticate, byPassword, createToken, login, revokeToken, tokenView, type DpopRefusal, type Refusal } from "./auth";
+import * as access from "./access";
 import * as approvals from "./approvals";
 import { bootstrapOpen, exchangeBootstrapToken } from "./bootstrap";
 import * as ci from "./ci";
@@ -756,6 +757,23 @@ export const handlers = [
       },
       { read: null },
     );
+  }),
+
+  // The access report and its review (rbac.md §14): the admin role before anything else. The
+  // report is one document, its bytes the ones its sha256 names.
+  get("*/api/v1/access-report", async ({ request }) => {
+    const denied = adminOnly();
+    if (denied) return denied;
+    const q = access.reportQuery(new URL(request.url));
+    if ("status" in q) return refusal(q);
+    return new HttpResponse(access.accessReport(q.scope, q.unusedDays), { headers: { "Content-Type": "application/json" } });
+  }),
+
+  post("*/api/v1/access-reviews", async ({ request }) => {
+    const denied = adminOnly();
+    if (denied) return denied;
+    const row = access.recordReview(await body(request), `user:${getPersona()}`);
+    return "status" in row ? refusal(row) : HttpResponse.json(row, { status: 201 });
   }),
 
   get("*/api/v1/tokens", async () => {

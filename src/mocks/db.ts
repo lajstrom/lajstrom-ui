@@ -1398,6 +1398,12 @@ function auditJson(e: MockEvent & { id: number }): AuditEvent {
   };
 }
 
+/** The newest row of action, as the API answers it: what a POST that writes one answers. */
+export function latestAudit(action: string): AuditEvent | undefined {
+  const e = audit().find((x) => x.action === action);
+  return e && auditJson(e);
+}
+
 export type AuditQuery = {
   repo?: string;
   principal?: string;

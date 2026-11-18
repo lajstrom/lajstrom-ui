@@ -37,9 +37,6 @@ const notMocked = new Set([
   "get /api/v1/policy/denylist",
   "post /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/deny",
   "delete /api/v1/repos/{format}/{repo}/packages/{name}/versions/{version}/deny",
-  // The access report and its review (rbac.md §14): no screen yet.
-  "get /api/v1/access-report",
-  "post /api/v1/access-reviews",
 ]);
 
 describe("public/openapi.yaml against the mock", () => {
