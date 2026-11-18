@@ -5,7 +5,7 @@ import { apiPath, apiSend, basicAuth, type ChangeRequest } from "./client";
 import { normalizeRepo, webhooksPath, type WebhookScope } from "./queries";
 import { getSession } from "./session";
 import type { BatchDeleteRequest, BatchDeleteResult, CreatedToken, MaskTokenRequest, PrefetchRequest, PrefetchResult, TokenRequest } from "./types";
-import type { Binding, BindingRequest, User, UserPatch, UserRequest } from "./types";
+import type { Approval, Binding, BindingRequest, CreatedApproval, User, UserPatch, UserRequest } from "./types";
 import type { CreateRepoRequest, ReindexRequest, ReindexRun, Repo, RepoPatch } from "./types";
 import type { CIPolicy, CreatedWebhook, Delivery, Webhook, WebhookRequest, WebhookSecret } from "./types";
 
@@ -49,8 +49,10 @@ export function deleteUser(user: string): Promise<void> {
   return apiSend("DELETE", apiPath("users", user), { reason: "query" });
 }
 
-export function createBinding(req: BindingRequest): Promise<Binding> {
-  return apiSend<Binding>("POST", apiPath("bindings"), { body: req, reason: "body" });
+/** Creates a binding; with auth.approval second-admin, one of the role admin or on *\/* is a
+ * request for a second admin in its place (202). */
+export function createBinding(req: BindingRequest): Promise<Binding | CreatedApproval> {
+  return apiSend<Binding | CreatedApproval>("POST", apiPath("bindings"), { body: req, reason: "body" });
 }
 
 export function deleteBinding(id: number): Promise<void> {
@@ -66,9 +68,11 @@ export function revokeDeployToken(format: string, repo: string, id: number): Pro
 }
 
 /** Creates a deploy token over a mask. The server takes the admin's password only, not a token,
- * as the request's credential: Basic, the session's bearer left out. */
-export function createMaskToken(req: MaskTokenRequest, user: string, password: string): Promise<CreatedToken> {
-  return apiSend<CreatedToken>("POST", apiPath("deploy-tokens"), { body: req, authorization: basicAuth(user, password), reason: "body" });
+ * as the request's credential: Basic, the session's bearer left out. With auth.approval
+ * second-admin, one whose scopes hold write is a request for a second admin in its place (202),
+ * with the token's secret, no credential until another admin approves it. */
+export function createMaskToken(req: MaskTokenRequest, user: string, password: string): Promise<CreatedToken | CreatedApproval> {
+  return apiSend<CreatedToken | CreatedApproval>("POST", apiPath("deploy-tokens"), { body: req, authorization: basicAuth(user, password), reason: "body" });
 }
 
 export function revokeMaskToken(id: number): Promise<void> {
@@ -194,3 +198,20 @@ export const ciPolicyChanges = {
   /** What waits approved, exactly the revision read: the ETag is required. */
   approve: (name: string, etag: string): ChangeRequest => ({ method: "POST", path: apiPath("ci", "policies", name, "approve"), ifMatch: etag, reason: "query" }),
 };
+
+// The requests for a second admin (docs/spec/rbac.md §13).
+
+/** Approves a request, which makes its change; another admin than the requester. The server
+ * takes the admin's password as the credential (Basic, when given), or the session of a fresh
+ * sign-in through OIDC, which it asks for more when it is not fresh. */
+export function approveRequest(id: number, password?: { user: string; password: string }): Promise<Approval> {
+  return apiSend<Approval>("POST", apiPath("approvals", id, "approve"), {
+    reason: "query",
+    ...(password ? { authorization: basicAuth(password.user, password.password) } : {}),
+  });
+}
+
+/** Rejects a request, or withdraws one's own: any credential of the admin role. */
+export function rejectRequest(id: number): Promise<Approval> {
+  return apiSend<Approval>("POST", apiPath("approvals", id, "reject"), { reason: "query" });
+}

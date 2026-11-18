@@ -12,6 +12,8 @@
 // foreign scripts, which is what keeps it from other code. A bound token is of no use without its
 // key, which WebCrypto keeps non-extractable in IndexedDB (src/api/dpop-key.ts).
 
+import type { Token } from "./types";
+
 export type Session = {
   /** The secret: ljs_pat_… */
   token: string;
@@ -25,7 +27,13 @@ export type Session = {
   /** How the token is sent: "DPoP", with a proof of this browser's key, for the token of
    * POST /api/v1/login (its tokenType); a bearer when absent, for any other token. */
   tokenType?: "Bearer" | "DPoP";
+  /** The sign-in at the identity provider of a sign-in through OIDC, as its token answers it
+   * (auth_time, amr, acr); absent for a password's and a pasted token. A step that takes a fresh
+   * sign-in in place of the password reads it (docs/spec/rbac.md §12). */
+  signIn?: SignIn;
 };
+
+export type SignIn = NonNullable<Token["signIn"]>;
 
 /** How the last session ended, when not by the person's sign-out: "idle", the server's idle bound
  * (src/api/idle.ts) or the UI's own count of it. Kept beside the session, so that every tab and
@@ -47,7 +55,8 @@ function valid(v: unknown): v is Session {
     typeof s.user === "string" &&
     (typeof s.tokenId === "number" || s.tokenId === null) &&
     (typeof s.expiresAt === "string" || s.expiresAt === null) &&
-    (s.tokenType === undefined || s.tokenType === "Bearer" || s.tokenType === "DPoP")
+    (s.tokenType === undefined || s.tokenType === "Bearer" || s.tokenType === "DPoP") &&
+    (s.signIn === undefined || (typeof s.signIn === "object" && s.signIn !== null))
   );
 }
 

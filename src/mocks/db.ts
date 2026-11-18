@@ -611,9 +611,12 @@ function bindable(principal: string): Refusal | null {
   return invalid(`principal: "${principal}": unknown kind "${kind}"`);
 }
 
-/** POST /api/v1/bindings. A user's binding names it by its name or its uid, and counts for the
- * user whatever its name later; a group need not have members. */
-export function createBinding(body: unknown, by: string): Binding | Refusal {
+/** A binding as the mock keeps it: a user by its name inside. */
+export type BindingChange = { principal: string; role: MockBinding["role"]; repoMask: string };
+
+/** The binding of a body of POST /api/v1/bindings, checked as the server checks it, that it does
+ * not exist too; sent is the principal as the request named it. */
+export function checkBinding(body: unknown): (BindingChange & { sent: string }) | Refusal {
   const refused = bodyRefusal(body, ["principal", "role", "repoMask"]);
   if (refused) return refused;
   const b = body as Record<string, unknown>;
@@ -633,10 +636,32 @@ export function createBinding(body: unknown, by: string): Binding | Refusal {
   if (bindings.some((x) => x.principal === principal && x.role === role && x.repoMask === repoMask)) {
     return conflict(`binding ${sent} ${role} on ${repoMask} exists already`);
   }
-  const row: MockBinding = { id: nextBindingId++, principal, role: role as MockBinding["role"], repoMask, createdAt: new Date().toISOString() };
+  return { principal, role: role as MockBinding["role"], repoMask, sent };
+}
+
+/** Makes a binding checked by checkBinding, with its binding.create row by by; details adds to the
+ * row's, such as the approval that made it. */
+export function makeBinding(c: BindingChange, by: string, details: Record<string, unknown> = {}): Binding {
+  const row: MockBinding = { id: nextBindingId++, principal: c.principal, role: c.role, repoMask: c.repoMask, createdAt: new Date().toISOString() };
   bindings.push(row);
-  changed({ at: row.createdAt, principal: by, action: "binding.create", repo: "", subject: principal, digest: null, ip: DEMO_IP, details: { id: row.id, role, repoMask, source: "api" } });
+  changed({
+    at: row.createdAt,
+    principal: by,
+    action: "binding.create",
+    repo: "",
+    subject: c.principal,
+    digest: null,
+    ip: DEMO_IP,
+    details: { id: row.id, role: c.role, repoMask: c.repoMask, ...details, source: "api" },
+  });
   return bindingJson(row);
+}
+
+/** POST /api/v1/bindings. A user's binding names it by its name or its uid, and counts for the
+ * user whatever its name later; a group need not have members. */
+export function createBinding(body: unknown, by: string): Binding | Refusal {
+  const c = checkBinding(body);
+  return "status" in c ? c : makeBinding(c, by);
 }
 
 /** DELETE /api/v1/bindings/{id}: not the last admin binding of an enabled user. */

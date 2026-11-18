@@ -10,6 +10,7 @@ import { setSession } from "@/api/session";
 import type { Token } from "@/api/types";
 
 import { createToken } from "./auth";
+import { serverInfo } from "./data/system";
 import { handlers } from "./handlers";
 
 const server = setupServer(...handlers);
@@ -18,6 +19,8 @@ beforeAll(() => {
   // The client resolves /api/v1 against the page's origin.
   vi.stubGlobal("window", { location: { origin: "http://localhost" } });
   server.listen({ onUnhandledRequest: "error" });
+  // A token is made at once, as by default (auth.approval none); approvals.test.ts has the rest.
+  serverInfo.approval = "none";
 });
 afterAll(() => {
   server.close();

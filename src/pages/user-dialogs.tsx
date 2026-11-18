@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { KeyRound, Link2, Pencil, Plus, Trash2, UserPlus } from "lucide-react";
+import { Hourglass, KeyRound, Link2, Pencil, Plus, Trash2, UserPlus } from "lucide-react";
 import { useId, useMemo, useState, type FormEvent } from "react";
 
+import { bindingWaits } from "@/api/approvals";
 import { signInModes } from "@/api/auth";
 import { bindingsQuery, infoQuery, reposQuery, usersQuery } from "@/api/queries";
 import type { User } from "@/api/types";
@@ -252,6 +253,7 @@ export function CreateBindingDialog({ user }: CreateBindingDialogProps) {
   const [role, setRole] = useState<Role>("reader");
   const [mask, setMask] = useState("");
   const create = useCreateBinding();
+  const info = useQuery(infoQuery);
   const fixed = user ? `user:${user.uid}` : undefined;
   const principal = fixed ?? typed;
   const users = useQuery({ ...usersQuery, enabled: open && !fixed });
@@ -271,6 +273,7 @@ export function CreateBindingDialog({ user }: CreateBindingDialogProps) {
   const valid = parseMask(repoMask) !== null;
   const matched = valid ? prefixes.filter((p) => maskMatches(repoMask, p)) : [];
   const ready = principal.trim() !== "" && valid;
+  const waits = info.data?.approval === "second-admin" && bindingWaits(role, repoMask);
 
   const reset = () => {
     setTyped("");
@@ -345,14 +348,21 @@ export function CreateBindingDialog({ user }: CreateBindingDialogProps) {
             </datalist>
           </Field>
           {valid ? <MaskMatches mask={repoMask} matched={matched} loading={repos.isPending} /> : null}
+          {waits ? (
+            <p className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs">
+              <Hourglass className="mt-0.5 size-3.5 shrink-0 text-warning" />
+              {role === "admin" ? "An admin binding" : "A binding on */*"} waits for another admin (auth.approval): it is a request until an admin other than
+              you approves it.
+            </p>
+          ) : null}
           <FormError error={errorText(create.error)} />
           <DialogActions>
             <Button type="button" disabled={create.isPending} onClick={close}>
               Cancel
             </Button>
             <Button type="submit" variant="primary" disabled={!ready || create.isPending}>
-              <Link2 />
-              {create.isPending ? "Binding…" : "Create binding"}
+              {waits ? <Hourglass /> : <Link2 />}
+              {create.isPending ? "Binding…" : waits ? "Ask for approval" : "Create binding"}
             </Button>
           </DialogActions>
         </form>

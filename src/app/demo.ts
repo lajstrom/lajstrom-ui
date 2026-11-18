@@ -86,6 +86,7 @@ export const demoUsers: { name: string; description: string }[] = [
   { name: "carol", description: "reads everything, publishes to two repos" },
   { name: "judy", description: "inactive for months: signing in disables the account" },
   { name: "nina", description: "made by the admin: chooses a new password at the first sign-in" },
+  { name: "oscar", description: "the second admin: approves what admin asks for, and asks too" },
 ];
 
 /** The bootstrap token of the demo's server (src/mocks/bootstrap.ts): it makes one first admin,

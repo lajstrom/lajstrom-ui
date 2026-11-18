@@ -8,8 +8,9 @@ import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 
 import { optimistic, realistic, update } from "@/api/change";
+import { isApproval } from "@/api/approvals";
 import { createBinding, createUser, deleteBinding, deleteUser, setUserPassword, unlockUser, updateUser } from "@/api/mutations";
-import { bindingsQuery, tokensQuery, userQuery, usersQuery } from "@/api/queries";
+import { approvalsKey, bindingsQuery, tokensQuery, userQuery, usersQuery } from "@/api/queries";
 import type { Binding, BindingRequest, User, UserRequest } from "@/api/types";
 import { errorText } from "@/lib/errors";
 import { notify } from "@/lib/notices";
@@ -147,15 +148,33 @@ export function useDeleteUser(user: User) {
   });
 }
 
-/** Creates a binding; the dialog waits for the list to have it. */
+/** Creates a binding; the dialog waits for the list to have it. With auth.approval
+ * second-admin, one of the role admin or on *\/* is a request for a second admin instead
+ * (docs/spec/rbac.md §13), which the requests show. */
 export function useCreateBinding() {
   const audit = useAuditLink();
+  const navigate = useNavigate();
   const { onSuccess: refetch } = realistic(bindingsQuery.queryKey);
+  const { onSuccess: refetchRequests } = realistic(approvalsKey);
   return useMutation({
     mutationFn: (req: BindingRequest) => createBinding(req),
-    onSuccess: async (binding, req, result, context) => {
-      await refetch(binding, req, result, context);
-      notify({ tone: "success", title: `Bound ${describeBinding(binding)}`, action: audit("binding.create") });
+    onSuccess: async (made, req, result, context) => {
+      if (isApproval(made)) {
+        await refetchRequests(made, req, result, context);
+        // The request names a user by its uid: the notice by its name, when the list has it.
+        const ref = req.principal.startsWith("user:") ? req.principal.slice(5) : null;
+        const known = context.client.getQueriesData<User | User[]>({ queryKey: usersQuery.queryKey }).flatMap(([, d]) => (d === undefined ? [] : Array.isArray(d) ? d : [d]));
+        const user = ref ? known.find((u) => u.uid === ref || u.name === ref) : undefined;
+        notify({
+          tone: "success",
+          title: `Asked another admin to approve ${describeBinding({ ...req, name: user?.name ?? ref ?? req.principal })}`,
+          description: "It grants nothing until an admin other than you approves it, within 7 days.",
+          action: { label: "Requests", run: () => void navigate({ to: "/access", search: { tab: "approvals" } }) },
+        });
+        return;
+      }
+      await refetch(made, req, result, context);
+      notify({ tone: "success", title: `Bound ${describeBinding(made)}`, action: audit("binding.create") });
     },
   });
 }

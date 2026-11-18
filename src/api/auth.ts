@@ -142,7 +142,7 @@ async function login(req: LoginRequest): Promise<void> {
     throw err;
   }
   if (!token.user) throw new SignInError("The server's answer to the sign-in names no user.");
-  setSession({ token: token.secret, user: token.user, tokenId: token.id, expiresAt: token.expiresAt, tokenType: "DPoP" });
+  setSession({ token: token.secret, user: token.user, tokenId: token.id, expiresAt: token.expiresAt, tokenType: "DPoP", ...(token.signIn ? { signIn: token.signIn } : {}) });
 }
 
 /**

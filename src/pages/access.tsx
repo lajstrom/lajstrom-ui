@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { Info, UserX } from "lucide-react";
 
 import { useChanges } from "@/api/change";
-import { bindingsQuery, callerQuery, reposQuery, tokensQuery, usersQuery } from "@/api/queries";
+import { approvalsQuery, bindingsQuery, callerQuery, infoQuery, reposQuery, tokensQuery, usersQuery } from "@/api/queries";
 import type { Binding } from "@/api/types";
 import { ErrorState, PageHeader, Principal, RelativeTime } from "@/components/common";
 import { TokenStatus } from "@/components/tokens";
@@ -19,12 +19,13 @@ import { errorText } from "@/lib/errors";
 import { maskMatches } from "@/lib/masks";
 import { roleActions, roleTone } from "@/lib/roles";
 
+import { Approvals } from "./approvals";
 import { CIPolicies } from "./ci-policies";
 import { MaskTokens } from "./mask-tokens";
 import { deleteBindingKey, disableKey, useDeleteBinding, useDisableUser, type DisableChange } from "./user-changes";
 import { CreateBindingDialog, CreateUserDialog } from "./user-dialogs";
 
-type Tab = "users" | "tokens" | "masks" | "bindings" | "ci";
+type Tab = "users" | "tokens" | "masks" | "bindings" | "ci" | "approvals";
 
 const userId = (c: DisableChange) => c.user.uid;
 const bindingId = (b: Binding) => b.id;
@@ -33,6 +34,13 @@ export function AccessPage() {
   const search = useSearch({ strict: false }) as { tab?: Tab };
   const navigate = useNavigate();
   const tab = search.tab ?? "users";
+  // The requests for a second admin, on a server that has them (info.approval), with how many
+  // wait (rbac.md §13).
+  const info = useQuery(infoQuery);
+  const who = useQuery(callerQuery);
+  const requests = info.data?.approval !== undefined && who.data?.admin === true;
+  const waiting = useQuery({ ...approvalsQuery("pending", undefined), enabled: requests });
+  const count = waiting.data ? `${waiting.data.approvals.length}${waiting.data.next ? "+" : ""}` : null;
 
   return (
     <>
@@ -62,6 +70,7 @@ export function AccessPage() {
           { value: "masks", label: "Tokens over a mask" },
           { value: "bindings", label: "Bindings" },
           { value: "ci", label: "CI trust policies" },
+          ...(requests ? [{ value: "approvals" as const, label: count && count !== "0" ? `Requests (${count})` : "Requests" }] : []),
         ]}
       />
       {tab === "users" ? (
@@ -72,6 +81,8 @@ export function AccessPage() {
         <MaskTokens />
       ) : tab === "ci" ? (
         <CIPolicies />
+      ) : tab === "approvals" ? (
+        <Approvals />
       ) : (
         <BindingsTable />
       )}

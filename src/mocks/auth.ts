@@ -201,7 +201,7 @@ function randomSecret(prefix: string): string {
 
 /** Whose a token is: a user's personal access token, a repo's deploy token, or a deploy token
  * over a mask of repos. */
-type Owner = { user: string } | { repo: string } | { repoMask: string };
+export type Owner = { user: string } | { repo: string } | { repoMask: string };
 
 function owns(owner: Owner, t: Token): boolean {
   if ("user" in owner) return t.kind === "pat" && t.user === owner.user;
@@ -211,10 +211,19 @@ function owns(owner: Owner, t: Token): boolean {
 
 const ownerName = (owner: Owner) => ("user" in owner ? owner.user : "repo" in owner ? owner.repo : owner.repoMask);
 
+/** A token checked, before it is made. */
+export type TokenDraft = { name: string; scopes: TokenScope[]; expiresAt: string | null };
+
 /** Creates a personal access token of a user, or a deploy token of a repo or over a mask, with
  * the rules of docs/api.md (Tokens): the name, the scopes, the expiry and the uniqueness of the
  * name. */
 export function createToken(owner: Owner, body: unknown): CreatedToken | Refusal {
+  const draft = checkToken(owner, body);
+  return "status" in draft ? draft : makeToken(owner, draft);
+}
+
+/** The token of a body, checked as createToken checks it, and not made. */
+export function checkToken(owner: Owner, body: unknown): TokenDraft | Refusal {
   const invalid = (message: string): Refusal => ({ status: 400, code: "INVALID", message });
   if (typeof body !== "object" || body === null) return invalid("the body must be a JSON object");
   const req = body as Partial<TokenRequest> & Record<string, unknown>;
@@ -255,20 +264,33 @@ export function createToken(owner: Owner, body: unknown): CreatedToken | Refusal
     return invalid(`${field}: a deploy token expires at most ${config.deployTokensMaxTTLHours}h0m0s ahead (auth.deployTokens.maxTTL), at ${latest} at the latest`);
   }
 
-  if (tokens.some((t) => owns(owner, t) && live(t, now) && t.name === name)) {
-    return { status: 409, code: "CONFLICT", message: `a live token of ${ownerName(owner)} is named ${name}` };
-  }
+  return nameTaken(owner, name, now) ?? { name, scopes: [...new Set(scopes)].sort() as TokenScope[], expiresAt };
+}
 
-  const secret = randomSecret(deploy ? "ljs_dep_" : "ljs_pat_");
+/** The 409 of a name that a live token of the owner has, or null. */
+export function nameTaken(owner: Owner, name: string, now = Date.now()): Refusal | null {
+  return tokens.some((t) => owns(owner, t) && live(t, now) && t.name === name)
+    ? { status: 409, code: "CONFLICT", message: `a live token of ${ownerName(owner)} is named ${name}` }
+    : null;
+}
+
+/** A secret of a new token: ljs_dep_ for a deploy token, ljs_pat_ for a personal one. */
+export function newSecret(owner: Owner): string {
+  return randomSecret("user" in owner ? "ljs_pat_" : "ljs_dep_");
+}
+
+/** Makes a token checked by checkToken, with secret when it was made before, as a request for a
+ * second admin makes it (src/mocks/approvals.ts). */
+export function makeToken(owner: Owner, draft: TokenDraft, secret = newSecret(owner)): CreatedToken {
   const token: Token = {
     id: nextId++,
-    kind: deploy ? "deploy" : "pat",
-    name,
+    kind: "user" in owner ? "pat" : "deploy",
+    name: draft.name,
     ...owner,
-    scopes: [...new Set(scopes)].sort() as TokenScope[],
-    expiresAt,
+    scopes: draft.scopes,
+    expiresAt: draft.expiresAt,
     lastUsedAt: null,
-    createdAt: new Date(now).toISOString(),
+    createdAt: new Date().toISOString(),
     revokedAt: null,
     hashPrefix: sha256Hex(secret).slice(0, 8),
   };

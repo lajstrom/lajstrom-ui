@@ -66,6 +66,13 @@ separate repository:
   (`auth.lockout.duration`) is marked, and the admin unlocks it; the admin asks a user for a new
   password at the next sign-in, or no longer. While the server takes no password
   (`auth.localPasswords: false`), the UI sets none.
+- **Requests for a second admin**, a tab of Access: with the server's `auth.approval:
+  second-admin`, an admin binding, a binding on `*/*` and a deploy token over a mask that
+  publishes are requests in place of the change, which the dialogs say before they are sent. A
+  deploy token's secret is shown once with its request and works once it is approved. Another
+  admin approves a request with the admin's password, or a fresh sign-in through single sign-on
+  (signing in again when it is older than 10 minutes), which makes the change; any admin rejects
+  one, its requester withdrawing it; one waits 7 days at most. The tab lists them by state.
 - **A reason for changes**: a ticket or a sentence, kept in the tab from the user menu and shown
   in the header, that every change of users, bindings, tokens, repos, webhooks and CI trust
   policies sends as `changeReason`; the audit log shows it with the change. While the server
@@ -117,8 +124,9 @@ service worker, MSW), and what you change there, such as tokens, is kept in this
 its login will: the accounts are `admin` / `admin`, `alice` / `alice`, `bob` / `bob` and
 `carol` / `carol` (the password is the name), each with the bindings of the demo's data, so
 signing in as another one shows how the UI follows them. `judy` has been inactive for months,
-and signing in disables the account; `nina` chooses a new password at the first sign-in. The sign-in page lists them; a click
-fills the form.
+and signing in disables the account; `nina` chooses a new password at the first sign-in; `oscar`
+is a second admin, whose requests wait for `admin` and who approves `admin`'s (the demo's server
+has `auth.approval: second-admin`). The sign-in page lists them; a click fills the form.
 
 "Set up the first admin" works in the demo too. A real server with an admin answers `404` to the
 bootstrap; the demo's server takes its token, `lajstrom-demo-bootstrap-token-0f1e2d3c4b5a6978`,
