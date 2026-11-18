@@ -171,6 +171,19 @@ export type TokenRequest = Schemas["TokenRequest"];
 /** POST /api/v1/deploy-tokens: a deploy token over a mask of repos, oci/* or *\/talos. */
 export type MaskTokenRequest = Schemas["MaskTokenRequest"];
 
+/** A request for a second admin (docs/spec/rbac.md §13): a binding of the role admin or on
+ * `*\/*`, or a deploy token over a mask with write, made by an admin and waiting for another one;
+ * it never changes but for its decision. */
+export type Approval = Schemas["Approval"];
+
+export type ApprovalState = Approval["state"];
+
+export type ApprovalList = Schemas["ApprovalList"];
+
+/** The answer 202 of a change that waits for a second admin: the request, and for a deploy token
+ * its secret, shown this once, which is no credential until the request is approved. */
+export type CreatedApproval = Schemas["CreatedApproval"];
+
 /** A role binding; `principal` is canonical, `user:<uid>` or `group:<name>`, and `name` the
  * user's name now. */
 export type Binding = Schemas["Binding"];

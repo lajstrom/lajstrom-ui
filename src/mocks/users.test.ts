@@ -9,10 +9,10 @@ import { apiGet, apiGetAs, apiPath, basicAuth } from "@/api/client";
 import { changeOwnPassword } from "@/api/auth";
 import { createBinding, createUser, deleteBinding, deleteUser, revokeUserToken, setUserPassword, unlockUser, updateUser } from "@/api/mutations";
 import { setSession } from "@/api/session";
-import type { AuditList, Binding, Token, User, WhoAmI } from "@/api/types";
+import type { AuditList, Binding, BindingRequest, Token, User, WhoAmI } from "@/api/types";
 
 import { createToken } from "./auth";
-import { config, users as seeded } from "./data/system";
+import { bindings as seededBindings, config, serverInfo, users as seeded } from "./data/system";
 import { MUST_CHANGE, userView } from "./db";
 import { handlers } from "./handlers";
 
@@ -22,6 +22,10 @@ beforeAll(() => {
   // The client resolves /api/v1 against the page's origin.
   vi.stubGlobal("window", { location: { origin: "http://localhost" } });
   server.listen({ onUnhandledRequest: "error" });
+  // A binding is made at once, as by default (auth.approval none); and admin is the only admin,
+  // for the tests of the last admin: oscar, the demo's second admin, is none here.
+  serverInfo.approval = "none";
+  seededBindings.splice(seededBindings.findIndex((b) => b.principal === "user:oscar" && b.role === "admin"), 1);
 });
 afterAll(() => {
   server.close();
@@ -42,6 +46,8 @@ const whoAs = (user: string, secret: string) => apiGetAs<WhoAmI>(apiPath("whoami
 const users = () => apiGet<{ users: User[] }>(apiPath("users")).then((r) => r.users);
 const bindingsOf = (principal: string) => apiGet<{ bindings: Binding[] }>(apiPath("bindings"), { principal }).then((r) => r.bindings);
 const tokensOf = (user: string) => apiGet<{ tokens: Token[] }>(apiPath("users", user, "tokens")).then((r) => r.tokens);
+/** A binding, made at once under auth.approval none. */
+const bind = (req: BindingRequest) => createBinding(req) as Promise<Binding>;
 const audit = (action: string) => apiGet<AuditList>(apiPath("audit"), { action }).then((r) => r.events);
 
 describe("users", () => {
@@ -315,11 +321,11 @@ describe("bindings", () => {
   it("are created for a user by name or uid, and for a group, and deleted", async () => {
     signIn("admin");
     const bob = (await users()).find((u) => u.name === "bob")!;
-    const byName = await createBinding({ principal: "user:bob", role: "reader", repoMask: "pypi/*" });
+    const byName = await bind({ principal: "user:bob", role: "reader", repoMask: "pypi/*" });
     expect(byName).toMatchObject({ principal: `user:${bob.uid}`, name: "bob", role: "reader", repoMask: "pypi/*" });
-    const byUid = await createBinding({ principal: `user:${bob.uid}`, role: "writer", repoMask: "maven/releases" });
+    const byUid = await bind({ principal: `user:${bob.uid}`, role: "writer", repoMask: "maven/releases" });
     expect(byUid.name).toBe("bob");
-    const group = await createBinding({ principal: "group:release managers", role: "maintainer", repoMask: "*/*" });
+    const group = await bind({ principal: "group:release managers", role: "maintainer", repoMask: "*/*" });
     expect(group).toMatchObject({ principal: "group:release managers", role: "maintainer" });
     expect(group.name).toBeUndefined();
     expect((await audit("binding.create"))[0]).toMatchObject({ subject: "group:release managers", details: { id: group.id, role: "maintainer", repoMask: "*/*" } });
@@ -352,11 +358,11 @@ describe("bindings", () => {
     signIn("admin");
     await expect(deleteBinding(1)).rejects.toMatchObject({ status: 409, message: expect.stringContaining("last admin binding") });
     // With another admin, it goes; and the other one's is the last then.
-    const other = await createBinding({ principal: "user:bob", role: "admin", repoMask: "*/*" });
+    const other = await bind({ principal: "user:bob", role: "admin", repoMask: "*/*" });
     await deleteBinding(1);
     const bobs = signIn("bob");
     await expect(deleteBinding(other.id)).rejects.toMatchObject({ status: 409 });
-    await createBinding({ principal: "user:admin", role: "admin", repoMask: "*/*" });
+    await bind({ principal: "user:admin", role: "admin", repoMask: "*/*" });
     await deleteBinding(other.id);
     expect(bobs).toMatch(/^ljs_pat_/);
     await expect(apiGet(apiPath("bindings"))).rejects.toMatchObject({ status: 403 });

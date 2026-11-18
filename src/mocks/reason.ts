@@ -60,13 +60,15 @@ export function currentReason(): string | null {
   return current;
 }
 
-/** Runs a change, synchronous, with its reason. */
+/** Runs a change, synchronous, with its reason; the reason before it is the current one again
+ * after it, as an approval makes the change of a request with the request's reason. */
 export function withReason<T>(reason: string | null, run: () => T): T {
+  const before = current;
   current = reason;
   try {
     return run();
   } finally {
-    current = null;
+    current = before;
   }
 }
 

@@ -1,9 +1,11 @@
-import { useMutation, type QueryKey } from "@tanstack/react-query";
-import { AlertTriangle, KeyRound, Plus } from "lucide-react";
+import { useMutation, useQuery, type QueryKey } from "@tanstack/react-query";
+import { AlertTriangle, Hourglass, KeyRound, Plus } from "lucide-react";
 import { useId, useState, type FormEvent } from "react";
 
+import { isApproval, maskTokenWaits } from "@/api/approvals";
 import { realistic, type ChangeState } from "@/api/change";
-import type { CreatedToken, Token, TokenRequest, TokenScope } from "@/api/types";
+import { approvalsKey, infoQuery } from "@/api/queries";
+import type { CreatedApproval, CreatedToken, Token, TokenRequest, TokenScope } from "@/api/types";
 import { cn } from "@/lib/cn";
 import { errorText } from "@/lib/errors";
 import { formatDateTime } from "@/lib/format";
@@ -153,8 +155,9 @@ const accessScopes: Record<Access, TokenScope[]> = { full: [], read: ["read"], w
 
 type CreateTokenDialogProps = {
   kind: "pat" | "deploy";
-  /** Creates it; `over`, the mask and the admin's password, for a deploy token over a mask. */
-  create: (req: TokenRequest, over?: { repoMask: string; password: string }) => Promise<CreatedToken>;
+  /** Creates it; `over`, the mask and the admin's password, for a deploy token over a mask, which
+   * may be a request for a second admin instead (docs/spec/rbac.md §13). */
+  create: (req: TokenRequest, over?: { repoMask: string; password: string }) => Promise<CreatedToken | CreatedApproval>;
   /** What the secret is for, shown with it: the user name for a personal access token, `deploy`
    * for a deploy token (Basic deploy:<token>, docs/auth.md). */
   login: string;
@@ -186,9 +189,12 @@ export function CreateTokenDialog({ kind, create, login, list, mask = false }: C
       )
         // The password is not kept once it is sent: a refused one is typed again.
         .finally(() => setPassword("")),
-    ...realistic(list),
+    ...realistic(list, ...(mask ? [approvalsKey] : [])),
   });
   const ready = name.trim() !== "" && (!mask || (repoMask.trim() !== "" && password !== ""));
+  // With auth.approval second-admin, a token over a mask that publishes waits for another admin.
+  const info = useQuery({ ...infoQuery, enabled: mask });
+  const waits = mask && info.data?.approval === "second-admin" && maskTokenWaits(accessScopes[access]);
 
   const reset = () => {
     setName("");
@@ -221,7 +227,8 @@ export function CreateTokenDialog({ kind, create, login, list, mask = false }: C
     { value: "90d", label: "90 days" },
     { value: "365d", label: "1 year" },
   ];
-  const created = mutation.data;
+  const created = mutation.data && !isApproval(mutation.data) ? mutation.data : undefined;
+  const requested = mutation.data && isApproval(mutation.data) ? mutation.data : undefined;
   const error = errorText(mutation.error);
   // A refused expiry names its field (expiresIn: …, the bound and the latest expiry it allows):
   // it is shown at the field.
@@ -240,9 +247,9 @@ export function CreateTokenDialog({ kind, create, login, list, mask = false }: C
         {kind === "pat" ? "New token" : mask ? "New token over a mask" : "New deploy token"}
       </Button>
       <DialogContent
-        title={created ? "Copy the token now" : kind === "pat" ? "New personal access token" : mask ? "New deploy token over a mask" : "New deploy token"}
+        title={created || requested ? "Copy the token now" : kind === "pat" ? "New personal access token" : mask ? "New deploy token over a mask" : "New deploy token"}
         description={
-          created
+          created || requested
             ? "This is the only time the server shows the secret. Store it in your password manager or your CI's secrets."
             : kind === "pat"
               ? "A token acts as you, for clients that cannot sign in: pip, apt, Maven, scripts."
@@ -252,7 +259,18 @@ export function CreateTokenDialog({ kind, create, login, list, mask = false }: C
         }
       >
         {created ? (
-          <SecretReveal token={created} login={login} />
+          <SecretReveal secret={created.secret} deploy={created.kind === "deploy"} expiresAt={created.expiresAt} login={login} />
+        ) : requested?.secret ? (
+          <div className="space-y-4">
+            <p className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm">
+              <Hourglass className="mt-0.5 size-4 shrink-0 text-warning" />
+              <span>
+                A token over a mask that publishes waits for another admin (auth.approval): it is no credential until an admin other than you approves
+                request {requested.id}, within 7 days. Nobody else ever sees its secret.
+              </span>
+            </p>
+            <SecretReveal secret={requested.secret} deploy expiresAt={requested.change.expiresAt ?? null} login={login} />
+          </div>
         ) : (
           <form onSubmit={submit} className="space-y-4">
             {mask ? (
@@ -299,6 +317,12 @@ export function CreateTokenDialog({ kind, create, login, list, mask = false }: C
                 </p>
               ) : null}
             </Field>
+            {waits ? (
+              <p className="flex items-start gap-2 text-xs text-muted-foreground">
+                <Hourglass className="mt-0.5 size-3.5 shrink-0" />A token that publishes waits for another admin&apos;s approval before it counts
+                (auth.approval).
+              </p>
+            ) : null}
             {mask ? (
               <Field label="Your password" htmlFor={ids.password} hint="The server creates a token over a mask with the admin's password only, never with a token.">
                 <Input id={ids.password} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
@@ -316,7 +340,7 @@ export function CreateTokenDialog({ kind, create, login, list, mask = false }: C
             </DialogActions>
           </form>
         )}
-        {created ? (
+        {created || requested ? (
           <DialogActions>
             <DialogClose asChild>
               <Button variant="primary">Done</Button>
@@ -328,20 +352,20 @@ export function CreateTokenDialog({ kind, create, login, list, mask = false }: C
   );
 }
 
-function SecretReveal({ token, login }: { token: CreatedToken; login: string }) {
+function SecretReveal({ secret, deploy, expiresAt, login }: { secret: string; deploy: boolean; expiresAt: string | null; login: string }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2 rounded-md border border-border bg-code px-3 py-2">
-        <code className="min-w-0 flex-1 font-mono text-[12.5px] break-all">{token.secret}</code>
-        <CopyButton value={token.secret} label="token" size="md" />
+        <code className="min-w-0 flex-1 font-mono text-[12.5px] break-all">{secret}</code>
+        <CopyButton value={secret} label="token" size="md" />
       </div>
       <CodeBlock
         caption="shell: the commands of the Connect tabs read these"
         shell
-        code={`export LAJSTROM_USER=${login}\nexport LAJSTROM_TOKEN=${token.secret}`}
+        code={`export LAJSTROM_USER=${login}\nexport LAJSTROM_TOKEN=${secret}`}
       />
       <p className="text-xs text-muted-foreground">
-        {token.kind === "deploy" ? (
+        {deploy ? (
           <>
             Clients send it as HTTP Basic, <span className="font-mono">deploy:&lt;token&gt;</span>.
           </>
@@ -350,9 +374,9 @@ function SecretReveal({ token, login }: { token: CreatedToken; login: string }) 
             Clients send it as HTTP Basic with your user name, or as <span className="font-mono">Authorization: Bearer</span>.
           </>
         )}{" "}
-        {token.expiresAt ? (
+        {expiresAt ? (
           <>
-            It expires <RelativeTime iso={token.expiresAt} />.
+            It expires <RelativeTime iso={expiresAt} />.
           </>
         ) : (
           "It does not expire; revoke it when it is no longer needed."

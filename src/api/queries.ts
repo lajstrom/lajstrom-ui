@@ -2,6 +2,8 @@ import { keepPreviousData, queryOptions } from "@tanstack/react-query";
 
 import { ApiError, apiGet, apiGetTagged, apiPath, isUnavailable } from "./client";
 import type {
+  ApprovalList,
+  ApprovalState,
   AttachmentList,
   AuditList,
   Binding,
@@ -289,4 +291,18 @@ export const ciPolicyQuery = (name: string) =>
   queryOptions({
     queryKey: [...ciPoliciesKey, name],
     queryFn: ({ signal }) => apiGetTagged<CIPolicy>(apiPath("ci", "policies", name), signal),
+  });
+
+// The requests for a second admin (docs/spec/rbac.md §13): the admin's. A request never changes
+// but for its decision, which fetches them again.
+
+/** The key of the requests; each page's is below it. */
+export const approvalsKey = ["approvals"];
+
+/** A page of the requests of a state, or of every state, newest first. */
+export const approvalsQuery = (state: ApprovalState | undefined, cursor: string | undefined) =>
+  queryOptions({
+    queryKey: [...approvalsKey, state ?? "all", cursor ?? ""],
+    queryFn: ({ signal }) => apiGet<ApprovalList>(apiPath("approvals"), { state, cursor, limit: 50 }, signal),
+    placeholderData: keepPreviousData,
   });

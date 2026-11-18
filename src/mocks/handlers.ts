@@ -7,6 +7,7 @@ import type { ApiErrorBody } from "@/api/types";
 import type { User } from "@/api/types";
 
 import { authenticate, byPassword, createToken, login, revokeToken, tokenView, type DpopRefusal, type Refusal } from "./auth";
+import * as approvals from "./approvals";
 import { bootstrapOpen, exchangeBootstrapToken } from "./bootstrap";
 import * as ci from "./ci";
 import * as db from "./db";
@@ -101,6 +102,13 @@ async function changeWith(
   const r = changeReason(request, read ? await read(request) : undefined, own);
   if ("status" in r) return refusal(r);
   return withReason(r.reason, () => make(r.body));
+}
+
+/** The 202 of a change that waits for a second admin, with the request's Location, or the
+ * refusal of the request. */
+function waiting(made: ReturnType<typeof approvals.requestBinding>): Response {
+  if ("status" in made) return refusal(made);
+  return HttpResponse.json(made, { status: 202, headers: { Location: `/api/v1/approvals/${made.id}` } });
 }
 
 /** A user's own tokens, or anyone's for the admin (docs/api.md, Tokens: who may). */
@@ -606,6 +614,12 @@ export const handlers = [
     const denied = adminOnly();
     if (denied) return denied;
     return changeWith(request, (b) => {
+      // With auth.approval second-admin, a binding of the role admin or on */* is a request for a
+      // second admin in its place (rbac.md §13).
+      const req = typeof b === "object" && b !== null ? (b as Record<string, unknown>) : {};
+      if (db.serverInfo.approval === "second-admin" && approvals.bindingWaits(String(req.role), String(req.repoMask))) {
+        return waiting(approvals.requestBinding(b, `user:${getPersona()}`));
+      }
       const created = db.createBinding(b, `user:${getPersona()}`);
       if ("status" in created) return refusal(created);
       return HttpResponse.json(created, { status: 201, headers: { Location: `/api/v1/bindings/${created.id}` } });
@@ -699,6 +713,51 @@ export const handlers = [
     );
   }),
 
+  // The requests for a second admin (rbac.md §13): the admin role first; an approval takes the
+  // admin's password as its credential, then a reason, like a rejection.
+  get("*/api/v1/approvals", async ({ request }) => {
+    const denied = adminOnly();
+    if (denied) return denied;
+    const sp = new URL(request.url).searchParams;
+    const page = approvals.listApprovals(sp.get("state"), sp.get("cursor"), num(sp.get("limit"), 100));
+    return "status" in page ? refusal(page) : HttpResponse.json(page);
+  }),
+
+  get("*/api/v1/approvals/:id", async ({ params }) => {
+    const denied = adminOnly();
+    if (denied) return denied;
+    const a = approvals.getApproval(decode(params.id));
+    return "status" in a ? refusal(a) : HttpResponse.json(a);
+  }),
+
+  post("*/api/v1/approvals/:id/approve", async ({ params, request }) => {
+    const denied = adminOnly();
+    if (denied) return denied;
+    const cred = approvals.mayApprove(getCredential());
+    if (cred) return refusal(cred);
+    return changeWith(
+      request,
+      () => {
+        const a = approvals.approve(decode(params.id), `user:${getPersona()}`);
+        return "status" in a ? refusal(a) : HttpResponse.json(a);
+      },
+      { read: null },
+    );
+  }),
+
+  post("*/api/v1/approvals/:id/reject", async ({ params, request }) => {
+    const denied = adminOnly();
+    if (denied) return denied;
+    return changeWith(
+      request,
+      () => {
+        const a = approvals.reject(decode(params.id), `user:${getPersona()}`);
+        return "status" in a ? refusal(a) : HttpResponse.json(a);
+      },
+      { read: null },
+    );
+  }),
+
   get("*/api/v1/tokens", async () => {
     return adminOr403() ?? HttpResponse.json({ tokens: db.tokens.map((t) => tokenView(t)) });
   }),
@@ -722,6 +781,10 @@ export const handlers = [
       const { repoMask, ...rest } = b as Record<string, unknown>;
       const bad = db.maskRefusal(repoMask);
       if (bad) return refusal(bad);
+      // With auth.approval second-admin, one whose scopes hold write waits for a second admin.
+      if (db.serverInfo.approval === "second-admin" && Array.isArray(rest.scopes) && approvals.maskTokenWaits(rest.scopes as string[])) {
+        return waiting(approvals.requestMaskToken(repoMask as string, rest, `user:${getPersona()}`));
+      }
       const created = createToken({ repoMask: repoMask as string }, rest);
       if ("status" in created) return refusal(created);
       return HttpResponse.json(created, { status: 201, headers: { Location: `/api/v1/deploy-tokens/${created.id}` } });

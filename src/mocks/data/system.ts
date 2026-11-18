@@ -24,6 +24,9 @@ export const serverInfo: Omit<ServerInfo, "caller"> = {
   login: { tokenLifetime: 43_200, idleTimeout: 900 },
   // auth.requireReason, off as by default: a change takes a reason and needs none (rbac.md §13).
   requireReason: false,
+  // auth.approval: an admin binding, a binding on */* and a deploy token over a mask with write
+  // wait for a second admin (rbac.md §13); oscar is the demo's other admin.
+  approval: "second-admin",
 };
 
 // Capabilities follow the matrix of docs/architecture.md §5, vendors and tiers the table of
@@ -325,6 +328,8 @@ export const users: User[] = [
   { uid: uidOf("nina"), name: "nina", kind: "local", disabled: false, createdAt: before(0, 2), lastSeenAt: null, mustChange: true },
   // Locked by 10 wrong passwords in a row, until the lock ends or an admin unlocks it.
   { uid: uidOf("victor"), name: "victor", kind: "local", disabled: false, createdAt: ago(200), lastSeenAt: before(3), lockedUntil: ahead(0, 0, 25) },
+  // The second admin, who approves what admin asks for under auth.approval, and asks too.
+  { uid: uidOf("oscar"), name: "oscar", kind: "local", disabled: false, createdAt: ago(180), lastSeenAt: before(0, 3) },
 ];
 
 /** Passwords set through the API in the demo, by user name, as the sha256 of the password. Until
@@ -357,6 +362,7 @@ export type MockBinding = Omit<Binding, "name">;
 
 export const bindings: MockBinding[] = [
   { id: 1, principal: "user:admin", role: "admin", repoMask: "*/*", createdAt: ago(420) },
+  { id: 12, principal: "user:oscar", role: "admin", repoMask: "*/*", createdAt: ago(180) },
   { id: 2, principal: "user:alice", role: "reader", repoMask: "*/*", createdAt: ago(300) },
   { id: 3, principal: "user:alice", role: "writer", repoMask: "*/payments", createdAt: ago(80) },
   { id: 4, principal: "user:bob", role: "maintainer", repoMask: "apt/*", createdAt: ago(130) },
