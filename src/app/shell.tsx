@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, Navigate, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { Boxes, Braces, Check, FlaskConical, History, KeyRound, LockKeyhole, LogIn, LogOut, MenuIcon, Monitor, Moon, Search, Server, Sun, User, Users, Webhook } from "lucide-react";
+import { Boxes, Braces, Check, FlaskConical, History, KeyRound, LockKeyhole, LogIn, LogOut, MenuIcon, Monitor, Moon, Search, Server, Sun, Ticket, User, Users, Webhook } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 
 import { lifetimeText, signInModes, signOut } from "@/api/auth";
@@ -15,11 +15,13 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
 
 import { AboutButton } from "./about";
+import { ChangeReason } from "./change-reason";
 import { CommandPalette } from "./command-palette";
 import { config, logoSrc } from "./config";
 import { demoMode, exitDemo, resetDemo } from "./demo";
 import { IdleGuard } from "./idle-guard";
 import { useIdle } from "./idle";
+import { openReasonDialog, useKeptReason } from "./reason";
 import { useSession } from "./session";
 import { SkewBar } from "./skew-bar";
 import { setTheme, useTheme, type Theme } from "./theme";
@@ -153,6 +155,7 @@ function UserMenu() {
   const [changing, setChanging] = useState(false);
   const session = useSession();
   const idle = useIdle();
+  const reason = useKeptReason();
   const navigate = useNavigate();
   const here = useRouterState({ select: (s) => s.location.href });
 
@@ -207,6 +210,9 @@ function UserMenu() {
               Change password
             </MenuItem>
           ) : null}
+          <MenuItem icon={<Ticket />} onSelect={openReasonDialog}>
+            {reason === null ? "Reason for changes" : "Change the reason for changes"}
+          </MenuItem>
           <MenuItem icon={<LogOut />} onSelect={() => void out()}>
             Sign out
           </MenuItem>
@@ -317,6 +323,7 @@ export function AppShell() {
                 <Kbd>K</Kbd>
               </span>
             </button>
+            {who.data && who.data.kind !== "anonymous" ? <ChangeReason /> : null}
             <ThemeMenu />
             {signedOutDemo ? null : <UserMenu />}
           </div>

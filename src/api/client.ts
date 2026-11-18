@@ -3,6 +3,7 @@ import { config } from "@/app/config";
 import { clockSkew, createProof, dpopChallenge, learnServerClock, refusedForIat, type DpopChallenge } from "./dpop";
 import { sessionKey } from "./dpop-key";
 import { noteTokenUse } from "./idle";
+import { withReason, type ReasonIn } from "./reason";
 import { getSession, setSession, type Session } from "./session";
 import type { ApiErrorBody } from "./types";
 
@@ -79,6 +80,14 @@ type RequestOptions = {
   dpopKey?: CryptoKeyPair;
   /** Conditions of a request, such as If-Match. */
   headers?: Record<string, string>;
+};
+
+type SendOptions = Omit<RequestOptions, "signal"> & {
+  /** Where a change of the control plane carries its reason (src/api/reason.ts); absent for a
+   * change that takes none. */
+  reason?: ReasonIn;
+  /** A change of the person's own credentials: it sends the kept reason and never asks for one. */
+  own?: boolean;
 };
 
 /** The key of a DPoP session; a session whose key this browser has lost is over. */
@@ -201,9 +210,9 @@ export async function apiGet<T>(path: string, query?: Query, signal?: AbortSigna
 export async function apiSend<T = undefined>(
   method: "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
-  opts: Omit<RequestOptions, "signal"> = {},
+  { reason, own, ...opts }: SendOptions = {},
 ): Promise<T> {
-  const res = await request(method, path, opts);
+  const res = await request(method, path, await withReason(reason, opts, own));
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
@@ -226,14 +235,19 @@ export type ChangeRequest = {
   path: string;
   body?: unknown;
   ifMatch?: string;
+  /** Where it carries its reason: it is added when the change is sent, and again when a step-up
+   * sends it once more. */
+  reason?: ReasonIn;
 };
 
 /** Sends a change; resolves to its answer, undefined for 204, and the ETag of the revision it
  * left. With ifMatch the server makes it only while the resource has that revision: 412 when it
  * changed since. */
 export async function sendChange<T = undefined>(req: ChangeRequest): Promise<Tagged<T>> {
+  const { query, body } = await withReason(req.reason, { query: {}, body: req.body });
   const res = await request(req.method, req.path, {
-    body: req.body,
+    query,
+    body,
     headers: req.ifMatch === undefined ? undefined : { "If-Match": req.ifMatch },
   });
   return { data: (res.status === 204 ? undefined : await res.json()) as T, etag: res.headers.get("ETag") };

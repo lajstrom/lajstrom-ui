@@ -66,6 +66,11 @@ separate repository:
   (`auth.lockout.duration`) is marked, and the admin unlocks it; the admin asks a user for a new
   password at the next sign-in, or no longer. While the server takes no password
   (`auth.localPasswords: false`), the UI sets none.
+- **A reason for changes**: a ticket or a sentence, kept in the tab from the user menu and shown
+  in the header, that every change of users, bindings, tokens, repos, webhooks and CI trust
+  policies sends as `changeReason`; the audit log shows it with the change. While the server
+  takes those changes only with a reason (`auth.requireReason`), a change sent without one asks
+  for it first; a change of your own tokens or password never does.
 - **CI trust policies**, a tab of Access: which jobs of GitHub Actions or GitLab CI get a CI token
   of minutes for their platform's OIDC token, and its grants. Those of the server's configuration
   are shown read-only; the admin makes, changes and deletes the others, with the claims of the

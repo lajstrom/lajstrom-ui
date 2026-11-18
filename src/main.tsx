@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 
 import { ApiError } from "./api/client";
 import { pollsAllowed, watchIdle } from "./api/idle";
+import { initReason } from "./api/reason";
 import { initSession, onSessionChange } from "./api/session";
 import { applyBranding } from "./app/branding";
 import { configUrl, loadConfig } from "./app/config";
@@ -32,6 +33,7 @@ async function main() {
 
   const demo = initDemo(cfg);
   initSession(demo.active ? DEMO_SESSION : REAL_SESSION);
+  initReason();
 
   const queryClient = new QueryClient({
     defaultOptions: {
