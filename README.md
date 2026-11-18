@@ -443,7 +443,7 @@ versions. Against an older server some screens say that the server has no endpoi
 
 | UI | Built for the server's API at | Works with |
 | --- | --- | --- |
-| `main` | lajstrom/lajstrom@f0d887d (v0.0.1-959-gf0d887d) | the server at that commit; its `main`, checked every night |
+| `main` | lajstrom/lajstrom@1ddd240 (v0.0.1-1176-g1ddd240) | the server at that commit; its `main`, checked every night |
 
 ## Layout
 

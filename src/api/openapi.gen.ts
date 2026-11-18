@@ -1,13 +1,20 @@
 // Generated from public/openapi.yaml by scripts/gen-api-types.ts. Do not edit: npm run gen:api.
 
 /** The commit of lajstrom/lajstrom whose /api/v1 these types describe. */
-export const serverApiCommit = "adc4785aeb05f8c91811a68b3a70f6f979c0336d";
+export const serverApiCommit = "1ddd24017dbd2153ae3aa866525f586cc50101b4";
 
 /**
  * components.schemas of the server's openapi.yaml with the UI's proposal; what the proposal adds
  * starts with "Proposed:". src/api/types.ts names them for the UI.
  */
 export type Schemas = {
+  /**
+   * Why: a ticket or a sentence, the reference of the change's approval, 1 to 1024 bytes of UTF-8
+   * without control characters (docs/spec/rbac.md §13), kept in the change's audit row as
+   * details.changeReason. Required with auth.requireReason, which GET /api/v1/info answers as
+   * requireReason; a person's own credentials take one and never need it.
+   */
+  ChangeReason: string;
   Error: {
     error: {
       code: "NOT_FOUND" | "CONFLICT" | "UNAUTHENTICATED" | "FORBIDDEN" | "INVALID" | "UNAVAILABLE" | "INTERNAL";
@@ -198,6 +205,7 @@ export type Schemas = {
     upstream?: Schemas["Upstream"] | null;
     /** Required on a group, refused on another kind. */
     group?: Schemas["Group"] | null;
+    changeReason?: Schemas["ChangeReason"];
   };
   RepoPatch: {
     anonymousRead?: boolean;
@@ -223,6 +231,7 @@ export type Schemas = {
      * else changes nothing.
      */
     kind?: "hosted";
+    changeReason?: Schemas["ChangeReason"];
   };
   ReindexRequest: {
     prune?: boolean;
@@ -445,12 +454,66 @@ export type Schemas = {
      */
     dpopJkt?: string;
     /**
+     * The sign-in at the identity provider of the token of a web UI's sign-in through OIDC: the
+     * auth_time, the amr and the acr of the ID token of its login, each when it had it; absent for
+     * every other token. A step that needs a fresh sign-in, or one with a second factor
+     * (auth.oidc.mfa), reads it, so that a UI knows what it meets before it asks.
+     */
+    signIn?: {
+      authTime?: string;
+      amr?: string[];
+      acr?: string;
+    };
+    /**
      * true on a live token beyond the bound of its kind, auth.deployTokens.maxTTL for a deploy
      * token and auth.serviceAccounts.maxTokenTTL for a service account's: made before the bound was
      * set or lowered, it has no expiry, or expires more than the bound after its creation, and is
      * to be replaced. Worked out when it is answered; absent otherwise.
      */
     beyondMaxTTL?: boolean;
+  };
+  /**
+   * A request for a second admin (docs/spec/rbac.md §13); it never changes, but for its decision.
+   */
+  Approval: {
+    id: number;
+    kind: "binding" | "deploy-token";
+    /**
+     * What its approval makes: a binding's principal (user:<uid> for a user), role and repoMask, or
+     * a deploy token's name, repoMask, scopes and expiresAt (null for none).
+     */
+    change: {
+      principal?: string;
+      role?: string;
+      repoMask?: string;
+      name?: string;
+      scopes?: string[];
+      expiresAt?: string | null;
+    };
+    /** The requester's reason; absent without one. */
+    changeReason?: string;
+    state: "pending" | "approved" | "rejected" | "expired";
+    /** The requester, user:<uid>. */
+    requestedBy: string;
+    requestedAt: string;
+    /** 7 days after the request; a request still pending then expires. */
+    expiresAt: string;
+    /** Once decided: user:<uid>, or anonymous for an expiry. */
+    decidedBy?: string;
+    decidedAt?: string;
+    /** The decider's reason. */
+    decisionReason?: string;
+    /** What the approval made: binding:<id> or token:<id>. */
+    result?: string;
+  };
+  ApprovalList: {
+    approvals: Schemas["Approval"][];
+    /** The cursor of the next page; absent on the last. */
+    next?: string;
+  };
+  CreatedApproval: Schemas["Approval"] & {
+    /** A deploy token's secret, shown this once: no credential until the request is approved. */
+    secret?: string;
   };
   CreatedToken: Schemas["Token"] & {
     /** Shown this once. */
@@ -474,6 +537,7 @@ export type Schemas = {
     expiresAt?: string;
     /** A number of days (30d) or a duration (12h). */
     expiresIn?: string;
+    changeReason?: Schemas["ChangeReason"];
   };
   MaskTokenRequest: {
     /** <format>/<repo>, each segment a name or * for any: oci/*, *\/talos. */
@@ -483,6 +547,7 @@ export type Schemas = {
     expiresAt?: string;
     /** A number of days (30d) or a duration (12h). */
     expiresIn?: string;
+    changeReason?: Schemas["ChangeReason"];
   };
   User: {
     uid: string;
@@ -548,6 +613,7 @@ export type Schemas = {
      * or group:<name>.
      */
     owner?: string;
+    changeReason?: Schemas["ChangeReason"];
   };
   BootstrapRequest: {
     token: string;
@@ -578,12 +644,14 @@ export type Schemas = {
      * (docs/spec/rbac.md §1, Change at first use).
      */
     mustChange?: boolean;
+    changeReason?: Schemas["ChangeReason"];
   };
   /** {password} alone is an admin's new password; with currentPassword, the user's own change. */
   PasswordRequest: {
     password: Schemas["Password"];
     /** The user's current password, the credential of its own change. */
     currentPassword?: string;
+    changeReason?: Schemas["ChangeReason"];
   };
   /**
    * A password of at least auth.passwords.minLength characters, Unicode code points (8 by default,
@@ -598,6 +666,8 @@ export type Schemas = {
    * when present, is the path's.
    */
   CIPolicy: {
+    /** In a body only: the reason of the change. */
+    changeReason?: Schemas["ChangeReason"];
     /** Lowercase letters and digits with single hyphens, at most 63 bytes. */
     name: string;
     /** The name of an issuer of auth.ci.issuers. */
@@ -637,6 +707,7 @@ export type Schemas = {
   CIPolicyRenewal: {
     /** At most 180 days ahead; by default 180 days ahead. */
     expiresAt?: string;
+    changeReason?: Schemas["ChangeReason"];
   };
   CIGrant: {
     role: "reader" | "writer" | "maintainer";
@@ -679,6 +750,7 @@ export type Schemas = {
     principal: string;
     role: "reader" | "attacher" | "writer" | "maintainer" | "admin";
     repoMask: string;
+    changeReason?: Schemas["ChangeReason"];
   };
   AuditEntry: {
     id: number;
@@ -700,6 +772,113 @@ export type Schemas = {
   AuditList: {
     events: Schemas["AuditEntry"][];
     next?: string;
+  };
+  AccessReviewRequest: {
+    /**
+     * The sha256 of the document's bytes as the reviewer got them, 64 lowercase hexadecimal digits,
+     * without sha256:.
+     */
+    sha256: string;
+    /** The generatedAt of the document; more than 60 seconds after the server's time is 400. */
+    generatedAt: string;
+    /** The scope of the document. */
+    scope?: "all" | "people" | "systems";
+    /**
+     * 1 to 4096 bytes (not characters) of UTF-8 without control characters but line feeds: what was
+     * found and done, who acknowledged, the ticket.
+     */
+    note: string;
+  };
+  /**
+   * The flags that hold, in this order: admin, a binding of the role admin, its own or a current
+   * group's; allRepos, a binding on *\/*, a deploy token over *\/*, a CI grant on *\/*;
+   * adminWithoutEffect, an admin binding of a service account or a local user under the admin mode;
+   * noExpiry, a token or a CI trust policy without an expiry; unused, no use for more than
+   * unusedDays; beyondMaxTTL, a token beyond the bound of its kind; ownerDisabled, a service
+   * account whose user owner is disabled; inactive, a user inactive under
+   * auth.disableInactiveUsersAfter. A reader tolerates a flag it does not know.
+   */
+  AccessFlags: ("admin" | "allRepos" | "adminWithoutEffect" | "noExpiry" | "unused" | "beyondMaxTTL" | "ownerDisabled" | "inactive")[];
+  /** A binding as the bindings API answers it. */
+  AccessBinding: Schemas["Binding"] & {
+    /** group:<name>: a user's binding through a current group of it. */
+    via?: string;
+  };
+  /** A live token as the tokens API answers it, with its flags. */
+  AccessToken: Schemas["Token"] & {
+    /** token:<id>, of a deploy token. */
+    principal?: string;
+    flags: Schemas["AccessFlags"];
+  };
+  /** A live user, a disabled one too, as the users API answers it. */
+  AccessUser: Schemas["User"] & {
+    /** user:<uid>. */
+    principal: string;
+    /** Its current groups, by name, each until the end of the lifetime of its latest login. */
+    groups: {
+      name: string;
+      expiresAt: string;
+    }[];
+    /** Its own bindings and those of its current groups, by role, mask and via. */
+    bindings: Schemas["AccessBinding"][];
+    /** Its personal access tokens neither revoked nor expired, by id. */
+    tokens: Schemas["AccessToken"][];
+    flags: Schemas["AccessFlags"];
+  };
+  /**
+   * Who has what at generatedAt (docs/spec/rbac.md §14). A section that the scope leaves out is
+   * absent; anonymous is absent while auth.anonymousRead is off. Lists are in byte order: users by
+   * name, groups, workloads and members by principal, deployTokens and tokens by id, ciPolicies by
+   * name, bindings by role, mask and via.
+   */
+  AccessReport: {
+    /** The database's time of the read, to the second. */
+    generatedAt: string;
+    scope: "all" | "people" | "systems";
+    unusedDays: number;
+    /** What the flags read of the configuration; the durations in seconds, 0 for off. */
+    settings: {
+      adminMFA: boolean;
+      anonymousRead: boolean;
+      disableInactiveUsersAfter: number;
+      deployTokensMaxTTL: number;
+      serviceAccountsMaxTokenTTL: number;
+    };
+    /**
+     * The users of the scope: every kind for all, local and oidc for people, service for systems.
+     */
+    users: Schemas["AccessUser"][];
+    /** Every group that has a binding. */
+    groups?: {
+      /** group:<name>. */
+      principal: string;
+      bindings: Schemas["AccessBinding"][];
+      /** The live users whose current groups name it. */
+      members: {
+        principal: string;
+        name: string;
+        expiresAt: string;
+      }[];
+      flags: Schemas["AccessFlags"];
+    }[];
+    /** Every cert: and k8s: principal or pattern that has a binding. */
+    workloads?: {
+      principal: string;
+      /** true for a pattern; absent otherwise. */
+      pattern?: boolean;
+      bindings: Schemas["AccessBinding"][];
+      flags: Schemas["AccessFlags"];
+    }[];
+    /** Every live deploy token, of a repo and over a mask. */
+    deployTokens?: Schemas["AccessToken"][];
+    /** Every CI trust policy, of the configuration and of the API, an expired one too. */
+    ciPolicies?: (Schemas["CIPolicy"] & {
+      flags: Schemas["AccessFlags"];
+    })[];
+    anonymous?: {
+      /** The repos with anonymousRead, <format>/<name>. */
+      repos: string[];
+    };
   };
   /** A package with the facts of its manifests, all read from the index. */
   Package: {
@@ -865,6 +1044,7 @@ export type Schemas = {
     effect?: "deny" | "allow";
     reason: string;
     expiresAt?: string | null;
+    changeReason?: Schemas["ChangeReason"];
   };
   /** A verdict the index holds (docs/spec/policy.md §2). */
   Verdict: {
@@ -902,6 +1082,7 @@ export type Schemas = {
   DenyRequest: {
     reason: string;
     validUntil?: string | null;
+    changeReason?: Schemas["ChangeReason"];
   };
   /** The optional body of a yank. */
   YankRequest: {
@@ -1295,6 +1476,22 @@ export type Schemas = {
        */
       idleTimeout?: number;
     };
+    /**
+     * true while auth.admin.requireMFA is on, absent otherwise: the admin role counts only for a
+     * web UI's sign-in through OIDC with a second factor.
+     */
+    adminMFA?: boolean;
+    /**
+     * auth.requireReason: true when a change of the control plane without changeReason is 400
+     * (docs/spec/rbac.md §13). A server before it answers none, which is false.
+     */
+    requireReason?: boolean;
+    /**
+     * auth.approval: with second-admin, an admin binding, a binding on *\/* and a deploy token over
+     * a mask with write are answered 202 with a request for a second admin (docs/spec/rbac.md §13).
+     * A server before it answers none.
+     */
+    approval?: "none" | "second-admin";
     caller: Schemas["Caller"];
   };
   /** A format plugin the server serves, and the artifact type of its manifests. */
@@ -1313,6 +1510,11 @@ export type Schemas = {
     uid?: string;
     /** Whether the request's credential reaches the admin role. */
     admin: boolean;
+    /**
+     * true when the caller has an admin binding that the request's credential does not reach under
+     * adminMFA, absent otherwise: a UI offers a sign-in with a second factor.
+     */
+    adminNeedsMFA?: boolean;
   };
   Webhook: {
     id: number;
@@ -1345,6 +1547,7 @@ export type Schemas = {
     events?: ("version.published" | "version.deleted" | "repo.created" | "repo.deleted" | "policy.rule.created" | "policy.rule.deleted" | "policy.verdict.created" | "policy.verdict.deleted" | "ci.policy.created" | "ci.policy.updated" | "ci.policy.renewed" | "ci.policy.approved" | "ci.policy.expired" | "ci.policy.deleted")[];
     active?: boolean;
     description?: string;
+    changeReason?: Schemas["ChangeReason"];
   };
   WebhookSecret: {
     /** Shown this once. */

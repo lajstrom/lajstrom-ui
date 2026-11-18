@@ -1,4 +1,4 @@
-# Generated from openapi/server.yaml, lajstrom/lajstrom@adc4785aeb05f8c91811a68b3a70f6f979c0336d, and openapi/proposed.yaml.
+# Generated from openapi/server.yaml, lajstrom/lajstrom@1ddd24017dbd2153ae3aa866525f586cc50101b4, and openapi/proposed.yaml.
 # Do not edit: npm run gen:api.
 openapi: 3.1.0
 info:
@@ -34,8 +34,12 @@ tags:
     description: Roles of users on the repos of a mask.
   - name: ci
     description: The CI trust policies of the token exchange for CI (docs/spec/rbac.md §11).
+  - name: approvals
+    description: The requests for a second admin, the changes that wait for one (docs/spec/rbac.md §13).
   - name: audit
     description: The audit log.
+  - name: access
+    description: The access report of who has what, and the record of its review (docs/spec/rbac.md §14).
   - name: webhooks
     description: Where the events of the repos of a mask are sent, and the delivery log.
   - name: policy
@@ -181,6 +185,7 @@ paths:
           schema:
             type: boolean
         - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/changeReason"
       responses:
         "204":
           description: Deleted.
@@ -927,9 +932,13 @@ paths:
         - tokens
       operationId: revokeDeployToken
       summary: Revoke a deploy token (manage); a revoked one again is 204.
+      parameters:
+        - $ref: "#/components/parameters/changeReason"
       responses:
         "204":
           description: Revoked.
+        "400":
+          $ref: "#/components/responses/Invalid"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -965,8 +974,12 @@ paths:
       tags:
         - tokens
       operationId: createMaskToken
-      summary: Create a deploy token over a mask (admin, with its password only, checked before the body);
-        the answer has its secret, once.
+      summary: Create a deploy token over a mask (admin, with its password or a fresh sign-in, checked
+        before the body); the answer has its secret, once.
+      description: The admin's password is the request's credential, or a web UI's sign-in through OIDC in
+        its place when it is fresh, its auth_time within the last 10 minutes; one that is not is
+        asked for more, 401 with insufficient_user_authentication and max_age=600. Any other
+        personal access token, the admin's too, and a deploy token are 403.
       requestBody:
         required: true
         content:
@@ -983,6 +996,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreatedToken"
+        "202":
+          description: "With auth.approval second-admin, one whose scopes hold write: a request for a second
+            admin in its place, pending, which makes nothing until an admin other than the requester
+            approves it (docs/spec/rbac.md §13). The answer has the token's secret, once, which is
+            no credential until then."
+          headers:
+            Location:
+              $ref: "#/components/headers/Location"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedApproval"
         "400":
           $ref: "#/components/responses/Invalid"
         "401":
@@ -999,9 +1024,13 @@ paths:
         - tokens
       operationId: revokeMaskToken
       summary: Revoke a deploy token over a mask (admin); a revoked one again is 204.
+      parameters:
+        - $ref: "#/components/parameters/changeReason"
       responses:
         "204":
           description: Revoked.
+        "400":
+          $ref: "#/components/responses/Invalid"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1190,6 +1219,7 @@ paths:
       summary: Delete a webhook and its delivery log (manage).
       parameters:
         - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/changeReason"
       responses:
         "204":
           description: Deleted.
@@ -1214,6 +1244,8 @@ paths:
       operationId: rotateRepoWebhookSecret
       summary: Give the webhook a new secret (manage); the answer has it, once, and the old one signs
         nothing more.
+      parameters:
+        - $ref: "#/components/parameters/changeReason"
       responses:
         "200":
           description: The new secret.
@@ -1221,6 +1253,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WebhookSecret"
+        "400":
+          $ref: "#/components/responses/Invalid"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1355,9 +1389,13 @@ paths:
         - policy
       operationId: deletePolicyRule
       summary: Delete a rule, with the permission its creation needed; an audit row policy.rule.delete.
+      parameters:
+        - $ref: "#/components/parameters/changeReason"
       responses:
         "204":
           description: Deleted.
+        "400":
+          $ref: "#/components/responses/Invalid"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -1477,9 +1515,13 @@ paths:
       operationId: undenyVersion
       summary: Delete the verdicts of source lajstrom:manual of the version's manifests, their referrers
         (manage).
+      parameters:
+        - $ref: "#/components/parameters/changeReason"
       responses:
         "204":
           description: Deleted.
+        "400":
+          $ref: "#/components/responses/Invalid"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1610,6 +1652,7 @@ paths:
       summary: Delete a webhook and its delivery log (admin).
       parameters:
         - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/changeReason"
       responses:
         "204":
           description: Deleted.
@@ -1632,6 +1675,8 @@ paths:
       operationId: rotateWebhookSecret
       summary: Give the webhook a new secret (admin); the answer has it, once, and the old one signs
         nothing more.
+      parameters:
+        - $ref: "#/components/parameters/changeReason"
       responses:
         "200":
           description: The new secret.
@@ -1639,6 +1684,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WebhookSecret"
+        "400":
+          $ref: "#/components/responses/Invalid"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1834,6 +1881,7 @@ paths:
         service account.
       parameters:
         - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/changeReason"
       responses:
         "204":
           description: Deleted.
@@ -1916,9 +1964,13 @@ paths:
       description: "The lockout of auth.lockout.duration (docs/spec/rbac.md §1, Local passwords): the lock
         ends and the count of wrong passwords is 0. A user.unlock audit row, with the end of the
         lock in its lockedUntil, is written when a lock was in force, none otherwise. No body."
+      parameters:
+        - $ref: "#/components/parameters/changeReason"
       responses:
         "204":
           description: Unlocked, or not locked.
+        "400":
+          $ref: "#/components/responses/Invalid"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1951,10 +2003,12 @@ paths:
         - tokens
       operationId: createToken
       summary: Create a personal access token of a user; the answer has its secret, once.
-      description: "Only a password creates one: a request whose credential is a personal access token,
-        with scopes or without, or a deploy token is 403. A service account's are created by the
-        admin; their expiry is bounded by auth.serviceAccounts.maxTokenTTL, 365 days by default, and
-        with the bound 0 one created without an expiry never expires."
+      description: Only a password creates one, or a web UI's sign-in through OIDC in its place when it is
+        fresh, its auth_time within the last 10 minutes; one that is not is asked for more, 401 with
+        insufficient_user_authentication and max_age=600. Any other personal access token, with
+        scopes or without, or a deploy token is 403. A service account's are created by the admin;
+        their expiry is bounded by auth.serviceAccounts.maxTokenTTL, 365 days by default, and with
+        the bound 0 one created without an expiry never expires.
       requestBody:
         required: true
         content:
@@ -1990,9 +2044,13 @@ paths:
         - tokens
       operationId: revokeToken
       summary: Revoke a personal access token; a revoked one again is 204.
+      parameters:
+        - $ref: "#/components/parameters/changeReason"
       responses:
         "204":
           description: Revoked.
+        "400":
+          $ref: "#/components/responses/Invalid"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -2047,6 +2105,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Binding"
+        "202":
+          description: "With auth.approval second-admin, a binding of the role admin, or on */*: a request for
+            a second admin in its place, pending, which makes nothing until an admin other than the
+            requester approves it (docs/spec/rbac.md §13). The same change pending twice is 409."
+          headers:
+            Location:
+              $ref: "#/components/headers/Location"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedApproval"
         "400":
           $ref: "#/components/responses/Invalid"
         "401":
@@ -2063,6 +2132,8 @@ paths:
         - bindings
       operationId: deleteBinding
       summary: Delete a binding (admin); not the last admin binding of an enabled user.
+      parameters:
+        - $ref: "#/components/parameters/changeReason"
       responses:
         "204":
           description: Deleted.
@@ -2211,6 +2282,7 @@ paths:
         configuration.
       parameters:
         - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/changeReason"
       responses:
         "204":
           description: Deleted.
@@ -2286,6 +2358,7 @@ paths:
         configuration.
       parameters:
         - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/changeReason"
       responses:
         "200":
           description: The policy.
@@ -2310,12 +2383,134 @@ paths:
           $ref: "#/components/responses/Changed"
         "501":
           $ref: "#/components/responses/Unavailable"
+  /api/v1/approvals:
+    get:
+      tags:
+        - approvals
+      operationId: listApprovals
+      summary: A page of the requests for a second admin, newest first (admin).
+      parameters:
+        - name: state
+          in: query
+          description: Only the requests of this state; pending are those that wait.
+          schema:
+            type: string
+            enum:
+              - pending
+              - approved
+              - rejected
+              - expired
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: The page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalList"
+        "400":
+          $ref: "#/components/responses/Invalid"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/approvals/{id}:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    get:
+      tags:
+        - approvals
+      operationId: getApproval
+      summary: One request for a second admin (admin).
+      responses:
+        "200":
+          description: The request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Approval"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/approvals/{id}/approve:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    post:
+      tags:
+        - approvals
+      operationId: approveApproval
+      summary: Approve a request, which makes its change (admin, another admin than the requester).
+      description: "The admin role first, then the admin's password as the request's credential, or a web
+        UI's sign-in through OIDC in its place when it is fresh, its auth_time within the last 10
+        minutes (401 with insufficient_user_authentication and max_age=600 for one that is not); any
+        other token is 403, all before the request is looked up. Under auth.admin.requireMFA, the
+        role needs the sign-in's second factor. The requester is 403. The approval checks again what
+        the request checked, and that the requester is an enabled user with the admin role: one that
+        fails is 409 naming it, and the request stays pending. No body, and no If-Match: a request
+        never changes."
+      parameters:
+        - $ref: "#/components/parameters/changeReason"
+      responses:
+        "200":
+          description: The request, approved, with the result of its change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Approval"
+        "400":
+          $ref: "#/components/responses/Invalid"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/approvals/{id}/reject:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    post:
+      tags:
+        - approvals
+      operationId: rejectApproval
+      summary: Reject a request, or withdraw one's own (admin, any credential that reaches the role).
+      description: 409 for a request decided or expired. No body.
+      parameters:
+        - $ref: "#/components/parameters/changeReason"
+      responses:
+        "200":
+          description: The request, rejected.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Approval"
+        "400":
+          $ref: "#/components/responses/Invalid"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /api/v1/audit:
     get:
       tags:
         - audit
       operationId: listAudit
-      summary: A page of the audit log, newest first (admin).
+      summary: A page of the audit log, newest first; with after, the feed by id (admin).
+      description: "Without after, the rows newest first, a page at a time with next. With after=<id>, the
+        feed (#1278): the rows whose id is above it, by id ascending, with the other filters and
+        limit, and no next; an empty page is the end for now. A collector keeps the ids it holds and
+        asks again from the one it held 10 minutes before: on PostgreSQL and CockroachDB a row whose
+        transaction commits late shows with an id below rows already answered. No route changes or
+        deletes a row."
       parameters:
         - name: repo
           in: query
@@ -2353,15 +2548,106 @@ paths:
           schema:
             type: string
             format: date-time
+        - name: after
+          in: query
+          description: "The feed: the rows whose id is above this one, by id ascending; 0 starts at the oldest
+            row kept. Not with cursor."
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
         - $ref: "#/components/parameters/limit"
         - $ref: "#/components/parameters/cursor"
       responses:
         "200":
-          description: The page.
+          description: The page; in the feed, without next.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuditList"
+        "400":
+          $ref: "#/components/responses/Invalid"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/access-report:
+    get:
+      tags:
+        - access
+      operationId: accessReport
+      summary: Who has what at one moment, one document in its canonical form (admin).
+      description: "One JSON document, read in one read-only transaction, of the users with their groups,
+        bindings and live tokens, the groups that have a binding with their members, the cert: and
+        k8s: principals and patterns, the live deploy tokens, the CI trust policies and what
+        anonymous reads, each entry with the flags a reviewer looks for (docs/spec/rbac.md §14). It
+        is in its canonical form, compact, the keys of every object in byte order, its lists in a
+        fixed order, its times in UTC to the second and a line feed at the end, so that the same
+        rows at the same time are the same bytes, from here and from lajstrom admin access-report: a
+        review names it by the sha256 of the bytes as the client got them. Not paged. It holds no
+        secret and no hash, but a token's hashPrefix. A read: it writes no audit row. The admin role
+        is checked before anything else."
+      parameters:
+        - name: scope
+          in: query
+          description: all, the default; people, the users of kind local and oidc and the groups (PCI DSS
+            7.2.4); or systems, the service accounts, the workloads, the deploy tokens and the CI
+            trust policies (7.2.5.1). anonymous is in every scope.
+          schema:
+            type: string
+            enum:
+              - all
+              - people
+              - systems
+            default: all
+        - name: unusedDays
+          in: query
+          description: A user or a token without a use for more days than this before generatedAt is unused
+            (PCI DSS 8.2.6).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 3650
+            default: 90
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessReport"
+        "400":
+          $ref: "#/components/responses/Invalid"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/access-reviews:
+    post:
+      tags:
+        - access
+      operationId: recordAccessReview
+      summary: Record that a person reviewed an access report, by its sha256 (admin).
+      description: "Writes the audit row access.review by the request's principal, in a transaction of its
+        own: subject sha256:<hex>, details {sha256, generatedAt, scope, note} with the origin and
+        the sign-in of a web UI's token. The admin role, checked before the body is read, with any
+        credential that reaches it (under auth.admin.requireMFA, a web UI's sign-in with a second
+        factor). Lajstrom keeps no report and does not compare the sha256 with one: the reviewer
+        keeps the document with the ticket. No changeReason and no second admin: a review changes no
+        access. Past reviews are GET /api/v1/audit?action=access.review, newest first."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccessReviewRequest"
+      responses:
+        "201":
+          description: The row written, as GET /api/v1/audit answers it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEntry"
         "400":
           $ref: "#/components/responses/Invalid"
         "401":
@@ -2635,7 +2921,11 @@ components:
         ES256, htm and htu of the request (htu with the scheme and host of server.externalURL), iat
         within 5 minutes, ath the base64url SHA-256 of the token, a jti used once. On /api/ only. A
         refused proof is 401 with WWW-Authenticate DPoP error=\"invalid_dpop_proof\", a refused
-        token error=\"invalid_token\"; there is no DPoP-Nonce."
+        token error=\"invalid_token\"; there is no DPoP-Nonce. A step that needs a fresh sign-in
+        through OIDC, or one with a second factor, asks a sign-in short of it for more (RFC 9470):
+        401 with WWW-Authenticate DPoP error=\"insufficient_user_authentication\", error_description
+        what is missing, and max_age=600 when the step needs a fresh sign-in; the token is not
+        revoked, and the UI signs in again with prompt=login."
   headers:
     Location:
       description: The path of the created resource.
@@ -2647,6 +2937,13 @@ components:
       schema:
         type: string
   parameters:
+    changeReason:
+      name: changeReason
+      in: query
+      description: The reason of the change on a route without a body (docs/spec/rbac.md §13), as the
+        changeReason of a body; never both.
+      schema:
+        $ref: "#/components/schemas/ChangeReason"
     dpopProof:
       name: DPoP
       in: header
@@ -2735,10 +3032,13 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
     Unauthorized:
-      description: No credentials, or credentials that are refused; code UNAUTHENTICATED.
+      description: No credentials, or credentials that are refused, or a web UI's sign-in through OIDC
+        asked for more; code UNAUTHENTICATED.
       headers:
         WWW-Authenticate:
-          description: Basic realm="lajstrom".
+          description: Basic realm="lajstrom"; to a web UI's token, the DPoP challenge, and to a sign-in that
+            a step needs more of DPoP error="insufficient_user_authentication" (RFC 9470), with
+            error_description and max_age when the step needs a fresh sign-in.
           schema:
             type: string
       content:
@@ -2792,6 +3092,14 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
   schemas:
+    ChangeReason:
+      type: string
+      minLength: 1
+      maxLength: 1024
+      description: "Why: a ticket or a sentence, the reference of the change's approval, 1 to 1024 bytes
+        of UTF-8 without control characters (docs/spec/rbac.md §13), kept in the change's audit row
+        as details.changeReason. Required with auth.requireReason, which GET /api/v1/info answers as
+        requireReason; a person's own credentials take one and never need it."
     Error:
       type: object
       required:
@@ -3202,6 +3510,8 @@ components:
             - $ref: "#/components/schemas/Group"
             - type: "null"
           description: Required on a group, refused on another kind.
+        changeReason:
+          $ref: "#/components/schemas/ChangeReason"
     RepoPatch:
       type: object
       additionalProperties: false
@@ -3232,6 +3542,8 @@ components:
             holds, its dist-tags and deprecations written to its journal; 409 while a fetch runs or
             when a group of it has a hosted member. On a hosted repo it resumes a conversion that
             stopped half way, else changes nothing."
+        changeReason:
+          $ref: "#/components/schemas/ChangeReason"
     ReindexRequest:
       type: object
       additionalProperties: false
@@ -3687,12 +3999,123 @@ components:
           description: "The JWK SHA-256 thumbprint (RFC 7638) of the DPoP key that the token of a web UI's
             sign-in is bound to; absent for every other token. A bound token works only as
             Authorization: DPoP with a proof of that key, on /api/."
+        signIn:
+          type: object
+          description: "The sign-in at the identity provider of the token of a web UI's sign-in through OIDC:
+            the auth_time, the amr and the acr of the ID token of its login, each when it had it;
+            absent for every other token. A step that needs a fresh sign-in, or one with a second
+            factor (auth.oidc.mfa), reads it, so that a UI knows what it meets before it asks."
+          properties:
+            authTime:
+              type: string
+              format: date-time
+            amr:
+              type: array
+              items:
+                type: string
+            acr:
+              type: string
         beyondMaxTTL:
           type: boolean
           description: "true on a live token beyond the bound of its kind, auth.deployTokens.maxTTL for a
             deploy token and auth.serviceAccounts.maxTokenTTL for a service account's: made before
             the bound was set or lowered, it has no expiry, or expires more than the bound after its
             creation, and is to be replaced. Worked out when it is answered; absent otherwise."
+    Approval:
+      type: object
+      description: A request for a second admin (docs/spec/rbac.md §13); it never changes, but for its decision.
+      required:
+        - id
+        - kind
+        - change
+        - state
+        - requestedBy
+        - requestedAt
+        - expiresAt
+      properties:
+        id:
+          type: integer
+          format: int64
+        kind:
+          type: string
+          enum:
+            - binding
+            - deploy-token
+        change:
+          type: object
+          description: "What its approval makes: a binding's principal (user:<uid> for a user), role and
+            repoMask, or a deploy token's name, repoMask, scopes and expiresAt (null for none)."
+          properties:
+            principal:
+              type: string
+            role:
+              type: string
+            repoMask:
+              type: string
+            name:
+              type: string
+            scopes:
+              type: array
+              items:
+                type: string
+            expiresAt:
+              type:
+                - string
+                - "null"
+              format: date-time
+        changeReason:
+          type: string
+          description: The requester's reason; absent without one.
+        state:
+          type: string
+          enum:
+            - pending
+            - approved
+            - rejected
+            - expired
+        requestedBy:
+          type: string
+          description: The requester, user:<uid>.
+        requestedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          description: 7 days after the request; a request still pending then expires.
+        decidedBy:
+          type: string
+          description: "Once decided: user:<uid>, or anonymous for an expiry."
+        decidedAt:
+          type: string
+          format: date-time
+        decisionReason:
+          type: string
+          description: The decider's reason.
+        result:
+          type: string
+          description: "What the approval made: binding:<id> or token:<id>."
+    ApprovalList:
+      type: object
+      required:
+        - approvals
+      properties:
+        approvals:
+          type: array
+          items:
+            $ref: "#/components/schemas/Approval"
+        next:
+          type: string
+          description: The cursor of the next page; absent on the last.
+    CreatedApproval:
+      allOf:
+        - $ref: "#/components/schemas/Approval"
+        - type: object
+          properties:
+            secret:
+              type: string
+              description: "A deploy token's secret, shown this once: no credential until the request is
+                approved."
     CreatedToken:
       allOf:
         - $ref: "#/components/schemas/Token"
@@ -3759,6 +4182,8 @@ components:
         expiresIn:
           type: string
           description: A number of days (30d) or a duration (12h).
+        changeReason:
+          $ref: "#/components/schemas/ChangeReason"
     MaskTokenRequest:
       type: object
       required:
@@ -3786,6 +4211,8 @@ components:
         expiresIn:
           type: string
           description: A number of days (30d) or a duration (12h).
+        changeReason:
+          $ref: "#/components/schemas/ChangeReason"
     User:
       type: object
       required:
@@ -3889,6 +4316,8 @@ components:
           type: string
           description: "A service account's owner: user:<name> or user:<uid> of a user that is not a service
             account, or group:<name>."
+        changeReason:
+          $ref: "#/components/schemas/ChangeReason"
     BootstrapRequest:
       type: object
       required:
@@ -3947,6 +4376,8 @@ components:
           description: "true: the user's password must be changed before it is used for anything else; false
             clears it. Whatever auth.passwords.changeAtFirstUse is; 400 for a user without a
             password (docs/spec/rbac.md §1, Change at first use)."
+        changeReason:
+          $ref: "#/components/schemas/ChangeReason"
     PasswordRequest:
       type: object
       required:
@@ -3959,6 +4390,8 @@ components:
         currentPassword:
           type: string
           description: The user's current password, the credential of its own change.
+        changeReason:
+          $ref: "#/components/schemas/ChangeReason"
     Password:
       type: string
       minLength: 8
@@ -3978,6 +4411,9 @@ components:
         - claims
         - grants
       properties:
+        changeReason:
+          $ref: "#/components/schemas/ChangeReason"
+          description: "In a body only: the reason of the change."
         name:
           type: string
           description: Lowercase letters and digits with single hyphens, at most 63 bytes.
@@ -4050,6 +4486,8 @@ components:
           type: string
           format: date-time
           description: At most 180 days ahead; by default 180 days ahead.
+        changeReason:
+          $ref: "#/components/schemas/ChangeReason"
     CIGrant:
       type: object
       required:
@@ -4149,6 +4587,8 @@ components:
             - admin
         repoMask:
           type: string
+        changeReason:
+          $ref: "#/components/schemas/ChangeReason"
     AuditEntry:
       type: object
       required:
@@ -4206,6 +4646,255 @@ components:
             $ref: "#/components/schemas/AuditEntry"
         next:
           type: string
+    AccessReviewRequest:
+      type: object
+      required:
+        - sha256
+        - generatedAt
+        - note
+      additionalProperties: false
+      properties:
+        sha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+          description: The sha256 of the document's bytes as the reviewer got them, 64 lowercase hexadecimal
+            digits, without sha256:.
+        generatedAt:
+          type: string
+          format: date-time
+          description: The generatedAt of the document; more than 60 seconds after the server's time is 400.
+        scope:
+          type: string
+          enum:
+            - all
+            - people
+            - systems
+          default: all
+          description: The scope of the document.
+        note:
+          type: string
+          minLength: 1
+          description: "1 to 4096 bytes (not characters) of UTF-8 without control characters but line feeds:
+            what was found and done, who acknowledged, the ticket."
+    AccessFlags:
+      type: array
+      description: "The flags that hold, in this order: admin, a binding of the role admin, its own or a
+        current group's; allRepos, a binding on */*, a deploy token over */*, a CI grant on */*;
+        adminWithoutEffect, an admin binding of a service account or a local user under the admin
+        mode; noExpiry, a token or a CI trust policy without an expiry; unused, no use for more than
+        unusedDays; beyondMaxTTL, a token beyond the bound of its kind; ownerDisabled, a service
+        account whose user owner is disabled; inactive, a user inactive under
+        auth.disableInactiveUsersAfter. A reader tolerates a flag it does not know."
+      items:
+        type: string
+        enum:
+          - admin
+          - allRepos
+          - adminWithoutEffect
+          - noExpiry
+          - unused
+          - beyondMaxTTL
+          - ownerDisabled
+          - inactive
+    AccessBinding:
+      description: A binding as the bindings API answers it.
+      allOf:
+        - $ref: "#/components/schemas/Binding"
+        - type: object
+          properties:
+            via:
+              type: string
+              description: "group:<name>: a user's binding through a current group of it."
+    AccessToken:
+      description: A live token as the tokens API answers it, with its flags.
+      allOf:
+        - $ref: "#/components/schemas/Token"
+        - type: object
+          required:
+            - flags
+          properties:
+            principal:
+              type: string
+              description: token:<id>, of a deploy token.
+            flags:
+              $ref: "#/components/schemas/AccessFlags"
+    AccessUser:
+      description: A live user, a disabled one too, as the users API answers it.
+      allOf:
+        - $ref: "#/components/schemas/User"
+        - type: object
+          required:
+            - principal
+            - groups
+            - bindings
+            - tokens
+            - flags
+          properties:
+            principal:
+              type: string
+              description: user:<uid>.
+            groups:
+              type: array
+              description: Its current groups, by name, each until the end of the lifetime of its latest login.
+              items:
+                type: object
+                required:
+                  - name
+                  - expiresAt
+                properties:
+                  name:
+                    type: string
+                  expiresAt:
+                    type: string
+                    format: date-time
+            bindings:
+              type: array
+              description: Its own bindings and those of its current groups, by role, mask and via.
+              items:
+                $ref: "#/components/schemas/AccessBinding"
+            tokens:
+              type: array
+              description: Its personal access tokens neither revoked nor expired, by id.
+              items:
+                $ref: "#/components/schemas/AccessToken"
+            flags:
+              $ref: "#/components/schemas/AccessFlags"
+    AccessReport:
+      type: object
+      description: "Who has what at generatedAt (docs/spec/rbac.md §14). A section that the scope leaves
+        out is absent; anonymous is absent while auth.anonymousRead is off. Lists are in byte order:
+        users by name, groups, workloads and members by principal, deployTokens and tokens by id,
+        ciPolicies by name, bindings by role, mask and via."
+      required:
+        - generatedAt
+        - scope
+        - unusedDays
+        - settings
+        - users
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+          description: The database's time of the read, to the second.
+        scope:
+          type: string
+          enum:
+            - all
+            - people
+            - systems
+        unusedDays:
+          type: integer
+        settings:
+          type: object
+          description: What the flags read of the configuration; the durations in seconds, 0 for off.
+          required:
+            - adminMFA
+            - anonymousRead
+            - disableInactiveUsersAfter
+            - deployTokensMaxTTL
+            - serviceAccountsMaxTokenTTL
+          properties:
+            adminMFA:
+              type: boolean
+            anonymousRead:
+              type: boolean
+            disableInactiveUsersAfter:
+              type: integer
+            deployTokensMaxTTL:
+              type: integer
+            serviceAccountsMaxTokenTTL:
+              type: integer
+        users:
+          type: array
+          description: "The users of the scope: every kind for all, local and oidc for people, service for
+            systems."
+          items:
+            $ref: "#/components/schemas/AccessUser"
+        groups:
+          type: array
+          description: Every group that has a binding.
+          items:
+            type: object
+            required:
+              - principal
+              - bindings
+              - members
+              - flags
+            properties:
+              principal:
+                type: string
+                description: group:<name>.
+              bindings:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AccessBinding"
+              members:
+                type: array
+                description: The live users whose current groups name it.
+                items:
+                  type: object
+                  required:
+                    - principal
+                    - name
+                    - expiresAt
+                  properties:
+                    principal:
+                      type: string
+                    name:
+                      type: string
+                    expiresAt:
+                      type: string
+                      format: date-time
+              flags:
+                $ref: "#/components/schemas/AccessFlags"
+        workloads:
+          type: array
+          description: "Every cert: and k8s: principal or pattern that has a binding."
+          items:
+            type: object
+            required:
+              - principal
+              - bindings
+              - flags
+            properties:
+              principal:
+                type: string
+              pattern:
+                type: boolean
+                description: true for a pattern; absent otherwise.
+              bindings:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AccessBinding"
+              flags:
+                $ref: "#/components/schemas/AccessFlags"
+        deployTokens:
+          type: array
+          description: Every live deploy token, of a repo and over a mask.
+          items:
+            $ref: "#/components/schemas/AccessToken"
+        ciPolicies:
+          type: array
+          description: Every CI trust policy, of the configuration and of the API, an expired one too.
+          items:
+            allOf:
+              - $ref: "#/components/schemas/CIPolicy"
+              - type: object
+                required:
+                  - flags
+                properties:
+                  flags:
+                    $ref: "#/components/schemas/AccessFlags"
+        anonymous:
+          type: object
+          required:
+            - repos
+          properties:
+            repos:
+              type: array
+              description: The repos with anonymousRead, <format>/<name>.
+              items:
+                type: string
     Package:
       description: A package with the facts of its manifests, all read from the index.
       type: object
@@ -4574,6 +5263,8 @@ components:
             - string
             - "null"
           format: date-time
+        changeReason:
+          $ref: "#/components/schemas/ChangeReason"
     Verdict:
       description: A verdict the index holds (docs/spec/policy.md §2).
       type: object
@@ -4690,6 +5381,8 @@ components:
             - string
             - "null"
           format: date-time
+        changeReason:
+          $ref: "#/components/schemas/ChangeReason"
     YankRequest:
       description: The optional body of a yank.
       type: object
@@ -5567,6 +6260,22 @@ components:
               description: 'The seconds of auth.login.idleTimeout, 0 when off: a sign-in token unused for longer
                 is refused (401, error_description="idle") and revoked; the server may refuse up to
                 a minute before. A server before it answers none, which is off.'
+        adminMFA:
+          type: boolean
+          description: "true while auth.admin.requireMFA is on, absent otherwise: the admin role counts only
+            for a web UI's sign-in through OIDC with a second factor."
+        requireReason:
+          type: boolean
+          description: "auth.requireReason: true when a change of the control plane without changeReason is
+            400 (docs/spec/rbac.md §13). A server before it answers none, which is false."
+        approval:
+          type: string
+          enum:
+            - none
+            - second-admin
+          description: "auth.approval: with second-admin, an admin binding, a binding on */* and a deploy
+            token over a mask with write are answered 202 with a request for a second admin
+            (docs/spec/rbac.md §13). A server before it answers none."
         caller:
           $ref: "#/components/schemas/Caller"
     FormatInfo:
@@ -5606,6 +6315,10 @@ components:
         admin:
           type: boolean
           description: Whether the request's credential reaches the admin role.
+        adminNeedsMFA:
+          type: boolean
+          description: "true when the caller has an admin binding that the request's credential does not reach
+            under adminMFA, absent otherwise: a UI offers a sign-in with a second factor."
     Webhook:
       type: object
       required:
@@ -5714,6 +6427,8 @@ components:
         description:
           type: string
           maxLength: 256
+        changeReason:
+          $ref: "#/components/schemas/ChangeReason"
     WebhookSecret:
       type: object
       required:

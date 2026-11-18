@@ -17,8 +17,11 @@ import { shortDigest } from "@/lib/format";
 
 function actionTone(action: string): BadgeProps["tone"] {
   if (action === "push") return "primary";
-  if (action === "delete" || action === "proxy.reject" || /\.(delete|revoke|disable|drop)$/.test(action)) return "danger";
-  if (action.startsWith("token.") || action.startsWith("binding.") || action.startsWith("key.") || action.startsWith("ci.policy.") || action === "login.block") {
+  if (action === "delete" || action === "proxy.reject" || action === "policy.refuse" || /\.(delete|revoke|disable|drop|prune)$/.test(action)) return "danger";
+  if (
+    ["token.", "binding.", "key.", "ci.policy.", "approval."].some((p) => action.startsWith(p)) ||
+    action === "login.block"
+  ) {
     return "warning";
   }
   return "neutral";
