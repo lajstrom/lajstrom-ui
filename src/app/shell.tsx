@@ -144,6 +144,9 @@ function ThemeMenu() {
   );
 }
 
+// The bar of the admin mode, loaded when the caller needs it, out of the main chunk (rbac.md §12).
+const AdminModeBar = lazy(() => import("./admin-mode").then((m) => ({ default: m.AdminModeBar })));
+
 // The change of one's own password, loaded when it is asked for, out of the main chunk.
 const ChangePasswordDialog = lazy(() => import("./change-password").then((m) => ({ default: m.ChangePasswordDialog })));
 
@@ -330,6 +333,11 @@ export function AppShell() {
         </div>
         {demo.active ? <DemoBar forced={demo.forced} /> : null}
         <SkewBar />
+        {who.data?.adminNeedsMFA ? (
+          <Suspense fallback={null}>
+            <AdminModeBar />
+          </Suspense>
+        ) : null}
       </header>
 
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6">

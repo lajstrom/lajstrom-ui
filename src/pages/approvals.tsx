@@ -6,12 +6,12 @@
 // pending by default, and ?cursor= the page.
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link, useNavigate, useRouterState, useSearch } from "@tanstack/react-router";
-import { BadgeCheck, Hourglass, KeyRound, Link2, LogIn, Ticket, X } from "lucide-react";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { BadgeCheck, Hourglass, KeyRound, Link2, Ticket, X } from "lucide-react";
 import { useId, useState, type FormEvent } from "react";
 
 import { describeRequest } from "@/api/approvals";
-import { oidcSignInUrl, signInModes } from "@/api/auth";
+import { signInModes } from "@/api/auth";
 import { realistic } from "@/api/change";
 import { approveRequest, rejectRequest } from "@/api/mutations";
 import { approvalsKey, approvalsQuery, bindingsQuery, callerQuery, infoQuery } from "@/api/queries";
@@ -19,6 +19,7 @@ import { needsStepUp } from "@/api/step-up";
 import type { Approval, ApprovalState } from "@/api/types";
 import { useSession } from "@/app/session";
 import { CursorPagination, ErrorState, Principal, RelativeTime } from "@/components/common";
+import { SignInAgain } from "@/components/sign-in-again";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -263,13 +264,11 @@ function ApproveDialog({ request: a, names, onClose }: { request: Approval; name
   const ids = { password: useId() };
   const session = useSession();
   const info = useQuery(infoQuery);
-  const here = useRouterState({ select: (s) => s.location.href });
   // A sign-in through OIDC stands for the password; any other session sends the password.
   const byPassword = !session?.signIn;
   const [password, setPassword] = useState("");
   const what = describeRequest(a, nameOf(names));
   const approve = useDecision(() => approveRequest(a.id, byPassword && session ? { user: session.user, password } : undefined).finally(() => setPassword("")));
-  const again = useMutation({ mutationFn: () => oidcSignInUrl(here, "login"), onSuccess: (url) => window.location.assign(url) });
   const ready = !byPassword || password !== "";
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -281,7 +280,6 @@ function ApproveDialog({ request: a, names, onClose }: { request: Approval; name
       },
     });
   };
-  const stepUp = needsStepUp(approve.error);
   return (
     <Dialog open onOpenChange={(o) => !o && !approve.isPending && onClose()}>
       <DialogContent title={`Approve request ${a.id}`} description={`Approved, the change is made at once: ${what}.`}>
@@ -302,19 +300,7 @@ function ApproveDialog({ request: a, names, onClose }: { request: Approval; name
               <p className="text-sm text-muted-foreground">This server takes no password: sign in through single sign-on to approve.</p>
             )
           ) : null}
-          {stepUp ? (
-            <div role="alert" className="space-y-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2.5 text-sm">
-              <p>An approval takes a sign-in of the last 10 minutes: sign in again at your identity provider, then approve once more.</p>
-              <p className="font-mono text-xs break-words text-muted-foreground">{approve.error?.message}</p>
-              <Button size="sm" variant="primary" type="button" disabled={again.isPending || again.isSuccess} onClick={() => again.mutate()}>
-                <LogIn />
-                {again.isPending || again.isSuccess ? "Going to sign in…" : "Sign in again"}
-              </Button>
-              <FormError error={again.error ? `Not signed in again: ${again.error.message}` : null} />
-            </div>
-          ) : (
-            <FormError error={errorText(approve.error)} />
-          )}
+          {needsStepUp(approve.error) ? <SignInAgain error={approve.error} what="An approval" /> : <FormError error={errorText(approve.error)} />}
           <DialogActions>
             <Button type="button" disabled={approve.isPending} onClick={onClose}>
               Cancel

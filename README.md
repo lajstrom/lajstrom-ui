@@ -78,6 +78,9 @@ separate repository:
   `unused` after the days asked, `beyondMaxTTL`, `inactive` …) and a filter by flag. The report
   downloads as the bytes the server sent, with their sha256; recording a review writes the audit
   row `access.review` that names the report by it, with a note, and the past reviews follow.
+- **The admin mode**: while the server's `auth.admin.requireMFA` leaves your admin binding out for
+  this sign-in, a bar under the header says so, with a sign-in through single sign-on again for one
+  with a second factor.
 - **A reason for changes**: a ticket or a sentence, kept in the tab from the user menu and shown
   in the header, that every change of users, bindings, tokens, repos, webhooks and CI trust
   policies sends as `changeReason`; the audit log shows it with the change. While the server
@@ -110,7 +113,9 @@ separate repository:
   exchanges the server's one-time bootstrap token for the first admin with a name and a password,
   then signs in as it.
 - **Tokens**: your personal access tokens and a repository's deploy tokens: create one, copy the
-  secret the one time it is shown, revoke. A deploy token that lives longer than the server's
+  secret the one time it is shown, revoke. A personal access token and a token over a mask are
+  created with your password, as the server asks, or, signed in through single sign-on, with a
+  sign-in of the last 10 minutes in its place, signing in again when it is older. A deploy token that lives longer than the server's
   bound now allows (`auth.deployTokens.maxTTL`, set or lowered after it was made) is marked, to
   be replaced.
 - **Webhooks**: a repository's on its Webhooks tab, for whoever manages it, and those of every

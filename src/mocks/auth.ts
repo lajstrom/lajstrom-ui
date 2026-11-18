@@ -171,18 +171,18 @@ export async function authenticate(request: Request): Promise<Authn> {
   return anonymous;
 }
 
-/** Whether the request's credential is a user's password rather than a token: what creating a
- * deploy token over a mask takes (docs/api.md, Deploy tokens over a mask). authenticate has
- * checked the password already. */
-export function byPassword(request: Request): boolean {
-  const header = request.headers.get("Authorization") ?? "";
-  if (!/^basic /i.test(header)) return false;
-  const creds = decodeBasic(header.slice(6).trim());
-  return creds !== null && !creds.secret.startsWith("ljs_");
-}
-
 /** A failure the handler answers with the error envelope. */
 export type Refusal = { status: number; code: string; message: string };
+
+/** The credential of a creation that takes a password (a personal access token, a deploy token
+ * over a mask) and of an approval: a password, or a web UI's sign-in through OIDC in its place
+ * when it is fresh, its auth_time within the last 10 minutes (rbac.md §12, #1323); else the 403 of
+ * rule. A server asks a sign-in that is not fresh for more (401); the demo has no OIDC login. */
+export function passwordOrFreshSignIn(cred: Credential, rule: string, now = Date.now()): Refusal | null {
+  if (cred.kind === "password") return null;
+  if (cred.kind === "sign-in" && cred.signIn && now - cred.signIn.at <= 600_000 && cred.signIn.at - now <= 60_000) return null;
+  return { status: 403, code: "FORBIDDEN", message: rule };
+}
 
 const DAY = 24 * 60 * 60 * 1000;
 

@@ -13,8 +13,17 @@ import type { CIPolicy, CreatedWebhook, Delivery, Webhook, WebhookRequest, Webho
  * and never needs one. */
 const own = (user: string) => user === getSession()?.user;
 
-export function createUserToken(user: string, req: TokenRequest): Promise<CreatedToken> {
-  return apiSend<CreatedToken>("POST", apiPath("users", user, "tokens"), { body: req, reason: "body", own: own(user) });
+/** The password of a creation that takes one, sent as Basic in place of the session: a personal
+ * access token, a deploy token over a mask, an approval. A sign-in through OIDC stands for it when
+ * it is fresh, and none is given then (docs/spec/rbac.md §12). */
+export type Password = { user: string; password: string };
+
+const withPassword = (password: Password | undefined) => (password ? { authorization: basicAuth(password.user, password.password) } : {});
+
+/** Creates a personal access token: the server takes it with a password, or a web UI's fresh
+ * sign-in through OIDC, never with another token. */
+export function createUserToken(user: string, req: TokenRequest, password?: Password): Promise<CreatedToken> {
+  return apiSend<CreatedToken>("POST", apiPath("users", user, "tokens"), { body: req, reason: "body", own: own(user), ...withPassword(password) });
 }
 
 export function revokeUserToken(user: string, id: number): Promise<void> {
@@ -67,12 +76,12 @@ export function revokeDeployToken(format: string, repo: string, id: number): Pro
   return apiSend("DELETE", apiPath("repos", format, repo, "deploy-tokens", id), { reason: "query" });
 }
 
-/** Creates a deploy token over a mask. The server takes the admin's password only, not a token,
- * as the request's credential: Basic, the session's bearer left out. With auth.approval
- * second-admin, one whose scopes hold write is a request for a second admin in its place (202),
- * with the token's secret, no credential until another admin approves it. */
-export function createMaskToken(req: MaskTokenRequest, user: string, password: string): Promise<CreatedToken | CreatedApproval> {
-  return apiSend<CreatedToken | CreatedApproval>("POST", apiPath("deploy-tokens"), { body: req, authorization: basicAuth(user, password), reason: "body" });
+/** Creates a deploy token over a mask, with the admin's password, or a web UI's fresh sign-in
+ * through OIDC in its place, never with another token. With auth.approval second-admin, one whose
+ * scopes hold write is a request for a second admin in its place (202), with the token's secret,
+ * no credential until another admin approves it. */
+export function createMaskToken(req: MaskTokenRequest, password?: Password): Promise<CreatedToken | CreatedApproval> {
+  return apiSend<CreatedToken | CreatedApproval>("POST", apiPath("deploy-tokens"), { body: req, reason: "body", ...withPassword(password) });
 }
 
 export function revokeMaskToken(id: number): Promise<void> {
@@ -204,11 +213,8 @@ export const ciPolicyChanges = {
 /** Approves a request, which makes its change; another admin than the requester. The server
  * takes the admin's password as the credential (Basic, when given), or the session of a fresh
  * sign-in through OIDC, which it asks for more when it is not fresh. */
-export function approveRequest(id: number, password?: { user: string; password: string }): Promise<Approval> {
-  return apiSend<Approval>("POST", apiPath("approvals", id, "approve"), {
-    reason: "query",
-    ...(password ? { authorization: basicAuth(password.user, password.password) } : {}),
-  });
+export function approveRequest(id: number, password?: Password): Promise<Approval> {
+  return apiSend<Approval>("POST", apiPath("approvals", id, "approve"), { reason: "query", ...withPassword(password) });
 }
 
 /** Rejects a request, or withdraws one's own: any credential of the admin role. */

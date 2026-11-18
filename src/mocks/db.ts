@@ -48,7 +48,7 @@ import { rpmVersions } from "./data/rpm";
 import { bindings, config, registries, repoSeeds, roleActions, serverInfo, tokens, uidOf, users, type MockBinding, type RepoSeed } from "./data/system";
 import { passwords } from "./data/system";
 import { ago, ahead, before, HOST } from "./data/time";
-import { getPersona, type Persona } from "./persona";
+import { getCredential, getPersona, secondFactor, type Persona } from "./persona";
 import { durationSeconds, groupRefusal, isPackageName, mergeGroup, mergeUpstream, prefetchImages, prefetchNames, upstreamRefusal } from "./proxy";
 import { currentReason, tokenReason } from "./reason";
 import { keep, persist } from "./state";
@@ -124,8 +124,11 @@ function permissions(persona: Persona, seed: RepoSeed): Action[] {
   if (persona !== "anonymous") {
     const principals = principalsOf(persona);
     const granted = new Set<Action>();
+    // The admin mode leaves the admin bindings out for this credential, and the others count as
+    // they do without them (rbac.md §12).
+    const leftOut = adminLeftOut(persona);
     for (const b of bindings) {
-      if (!principals.includes(b.principal)) continue;
+      if (!principals.includes(b.principal) || (b.role === "admin" && leftOut)) continue;
       if (b.role === "admin" || maskMatches(b.repoMask, repoKey)) roleActions[b.role].forEach((a) => granted.add(a));
     }
     if (granted.size) return (["read", "write", "delete", "manage"] as Action[]).filter((a) => granted.has(a));
@@ -133,9 +136,34 @@ function permissions(persona: Persona, seed: RepoSeed): Action[] {
   return seed.anonymousRead && serverInfo.anonymousRead ? ["read"] : [];
 }
 
-export function isAdmin(persona = getPersona()): boolean {
+/** Whether the user has an admin binding, its own or a group's, whatever the admin mode. */
+export function hasAdminBinding(persona = getPersona()): boolean {
   const principals = principalsOf(persona);
   return bindings.some((b) => principals.includes(b.principal) && b.role === "admin");
+}
+
+/** Whether the admin mode (auth.admin.requireMFA, rbac.md §12) leaves the admin bindings of the
+ * request's persona out: its credential is no web UI's sign-in through OIDC with a second factor.
+ * Another user than the request's is answered by its bindings alone, as the last-admin rule and a
+ * request's requester are. */
+export function adminLeftOut(persona = getPersona()): boolean {
+  if (!serverInfo.adminMFA || persona !== getPersona()) return false;
+  const c = getCredential();
+  return !(c.kind === "sign-in" && c.signIn && secondFactor(c.signIn.amr));
+}
+
+/** The admin role: an admin binding that counts for the request's credential. */
+export function isAdmin(persona = getPersona()): boolean {
+  return hasAdminBinding(persona) && !adminLeftOut(persona);
+}
+
+/** What the admin mode says to a credential it leaves without the role (auth.AdminMFARefusal):
+ * the 403 that names auth.admin.requireMFA and the kind of the credential. The demo has no OIDC
+ * login, so no sign-in of it is asked for more. */
+export function adminModeRefusal(): string {
+  const c = getCredential();
+  const kind = c.kind === "password" ? "a password" : c.kind === "sign-in" ? "a web UI's token of a password" : "a personal access token";
+  return `the admin role counts only for a web UI's sign-in through OIDC with a second factor (auth.admin.requireMFA): this needs a sign-in with a second factor, and the request's credential is ${kind}: sign in again in a web UI through OIDC (prompt=login)`;
 }
 
 /** The principals whose bindings a user has: its own and those of its groups now (rbac.md §8). */
@@ -166,7 +194,15 @@ export function userByRef(ref: string) {
 /** The caller of /api/v1/info. */
 export function caller(persona = getPersona()): Caller {
   if (persona === "anonymous") return { principal: "anonymous", kind: "anonymous", name: "anonymous", admin: false };
-  return { principal: apiPrincipal(`user:${persona}`), kind: "user", name: persona, uid: uidFor(persona), admin: isAdmin(persona) };
+  return {
+    principal: apiPrincipal(`user:${persona}`),
+    kind: "user",
+    name: persona,
+    uid: uidFor(persona),
+    admin: isAdmin(persona),
+    // An admin binding that the request's credential does not reach under the admin mode.
+    ...(hasAdminBinding(persona) && adminLeftOut(persona) ? { adminNeedsMFA: true } : {}),
+  };
 }
 
 export function whoami(persona = getPersona()): WhoAmI {

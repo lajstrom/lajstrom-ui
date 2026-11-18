@@ -89,7 +89,15 @@ export function TokensPage() {
             expired tokens stay listed for the record.
           </>
         }
-        actions={<CreateTokenDialog kind="pat" login={user} create={(req) => createUserToken(user, req)} list={list} />}
+        actions={
+          <CreateTokenDialog
+            kind="pat"
+            login={user}
+            byPassword
+            create={(req, over) => createUserToken(user, req, over.password === undefined ? undefined : { user, password: over.password })}
+            list={list}
+          />
+        }
       />
 
       <Card>

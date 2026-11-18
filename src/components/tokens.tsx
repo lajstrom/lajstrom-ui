@@ -5,13 +5,16 @@ import { useId, useState, type FormEvent } from "react";
 import { isApproval, maskTokenWaits } from "@/api/approvals";
 import { realistic, type ChangeState } from "@/api/change";
 import { approvalsKey, infoQuery } from "@/api/queries";
+import { needsStepUp } from "@/api/step-up";
 import type { CreatedApproval, CreatedToken, Token, TokenRequest, TokenScope } from "@/api/types";
+import { useSession } from "@/app/session";
 import { cn } from "@/lib/cn";
 import { errorText } from "@/lib/errors";
 import { formatDateTime } from "@/lib/format";
 import { tokenState } from "@/lib/tokens";
 
 import { RelativeTime } from "./common";
+import { SignInAgain } from "./sign-in-again";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { CodeBlock } from "./ui/code-block";
@@ -155,21 +158,25 @@ const accessScopes: Record<Access, TokenScope[]> = { full: [], read: ["read"], w
 
 type CreateTokenDialogProps = {
   kind: "pat" | "deploy";
-  /** Creates it; `over`, the mask and the admin's password, for a deploy token over a mask, which
-   * may be a request for a second admin instead (docs/spec/rbac.md §13). */
-  create: (req: TokenRequest, over?: { repoMask: string; password: string }) => Promise<CreatedToken | CreatedApproval>;
+  /** Creates it, with the mask of a deploy token over a mask, which may be a request for a second
+   * admin instead (docs/spec/rbac.md §13), and the password when the form asked for it. */
+  create: (req: TokenRequest, over: { repoMask?: string; password?: string }) => Promise<CreatedToken | CreatedApproval>;
   /** What the secret is for, shown with it: the user name for a personal access token, `deploy`
    * for a deploy token (Basic deploy:<token>, docs/auth.md). */
   login: string;
   /** The query of the list the token joins. */
   list: QueryKey;
-  /** A deploy token over a mask: the form asks for the mask and the admin's password. */
+  /** A deploy token over a mask: the form asks for the mask. */
   mask?: boolean;
+  /** The server takes it with a password, or a web UI's fresh sign-in through OIDC in its place,
+   * never with another token (docs/spec/rbac.md §12): a personal access token, a deploy token over
+   * a mask. The form asks for the password unless the session is such a sign-in. */
+  byPassword?: boolean;
 };
 
 /** Creates a token and shows its secret, the one time the server answers it. Realistic: the
  * secret exists only in the answer, and the dialog waits for the list to have the token. */
-export function CreateTokenDialog({ kind, create, login, list, mask = false }: CreateTokenDialogProps) {
+export function CreateTokenDialog({ kind, create, login, list, mask = false, byPassword = false }: CreateTokenDialogProps) {
   const ids = { name: useId(), access: useId(), expiry: useId(), mask: useId(), password: useId() };
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -177,6 +184,8 @@ export function CreateTokenDialog({ kind, create, login, list, mask = false }: C
   const [password, setPassword] = useState("");
   const [access, setAccess] = useState<Access>(kind === "pat" ? "full" : "read-write");
   const [expiry, setExpiry] = useState(kind === "pat" ? "90d" : "never");
+  const session = useSession();
+  const asksPassword = byPassword && !session?.signIn;
   const mutation = useMutation({
     mutationFn: () =>
       create(
@@ -185,13 +194,13 @@ export function CreateTokenDialog({ kind, create, login, list, mask = false }: C
           ...(accessScopes[access].length ? { scopes: accessScopes[access] } : {}),
           ...(expiry === "never" ? {} : { expiresIn: expiry }),
         },
-        mask ? { repoMask: repoMask.trim(), password } : undefined,
+        { ...(mask ? { repoMask: repoMask.trim() } : {}), ...(asksPassword ? { password } : {}) },
       )
         // The password is not kept once it is sent: a refused one is typed again.
         .finally(() => setPassword("")),
     ...realistic(list, ...(mask ? [approvalsKey] : [])),
   });
-  const ready = name.trim() !== "" && (!mask || (repoMask.trim() !== "" && password !== ""));
+  const ready = name.trim() !== "" && (!mask || repoMask.trim() !== "") && (!asksPassword || password !== "");
   // With auth.approval second-admin, a token over a mask that publishes waits for another admin.
   const info = useQuery({ ...infoQuery, enabled: mask });
   const waits = mask && info.data?.approval === "second-admin" && maskTokenWaits(accessScopes[access]);
@@ -323,12 +332,12 @@ export function CreateTokenDialog({ kind, create, login, list, mask = false }: C
                 (auth.approval).
               </p>
             ) : null}
-            {mask ? (
-              <Field label="Your password" htmlFor={ids.password} hint="The server creates a token over a mask with the admin's password only, never with a token.">
+            {asksPassword ? (
+              <Field label="Your password" htmlFor={ids.password} hint="The server creates it with your password, or a fresh sign-in through single sign-on, never with a token.">
                 <Input id={ids.password} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
               </Field>
             ) : null}
-            <FormError error={expiryError ? null : error} />
+            {needsStepUp(mutation.error) ? <SignInAgain error={mutation.error} what="Creating a token" /> : <FormError error={expiryError ? null : error} />}
             <DialogActions>
               <DialogClose asChild>
                 <Button type="button">Cancel</Button>
