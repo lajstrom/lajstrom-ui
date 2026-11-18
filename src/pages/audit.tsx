@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { History } from "lucide-react";
+import { History, Ticket } from "lucide-react";
 
 import { auditQuery, reposQuery, usersQuery, type AuditParams } from "@/api/queries";
 import type { AuditEvent } from "@/api/types";
@@ -250,6 +250,13 @@ function AuditRow({ event: e, showRepo }: { event: AuditEvent; showRepo: boolean
         ) : (
           <span className="text-muted-foreground">—</span>
         )}
+        {typeof e.details?.changeReason === "string" ? (
+          // The reason the change was made with (rbac.md §13, A reason).
+          <span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground" title={e.details.changeReason}>
+            <Ticket className="size-3 shrink-0" />
+            <span className="truncate">{e.details.changeReason}</span>
+          </span>
+        ) : null}
       </TD>
       <TD>{e.digest ? <CopyText value={e.digest} display={shortDigest(e.digest, 8)} label="digest" /> : <span className="text-muted-foreground">—</span>}</TD>
       <TD className="font-mono text-xs text-muted-foreground">{e.ip ?? "—"}</TD>

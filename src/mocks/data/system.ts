@@ -22,6 +22,8 @@ export const serverInfo: Omit<ServerInfo, "caller"> = {
   // auth.login.tokenLifetime, 12 h: POST /api/v1/login answers a DPoP-bound token; and
   // auth.login.idleTimeout, 15 min as PCI DSS 8.2.8 asks: unused that long, it is refused.
   login: { tokenLifetime: 43_200, idleTimeout: 900 },
+  // auth.requireReason, off as by default: a change takes a reason and needs none (rbac.md §13).
+  requireReason: false,
 };
 
 // Capabilities follow the matrix of docs/architecture.md §5, vendors and tiers the table of

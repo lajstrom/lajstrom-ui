@@ -11,6 +11,7 @@ import { bootstrapOpen, exchangeBootstrapToken } from "./bootstrap";
 import * as ci from "./ci";
 import * as db from "./db";
 import { getCredential, getPersona, setPersona } from "./persona";
+import { changeReason, withReason } from "./reason";
 import * as hooks from "./webhooks";
 
 function fail(status: number, code: ApiErrorBody["error"]["code"], message: string) {
@@ -86,6 +87,20 @@ async function body(request: Request): Promise<unknown> {
   } catch {
     return null;
   }
+}
+
+/** A change of the control plane with its reason (src/mocks/reason.ts), asked after the role and
+ * before anything is written: the body, read unless read is null, goes to make without its
+ * changeReason; a reason the server refuses is its 400. own: a change of the person's own
+ * credentials, which needs none. */
+async function changeWith(
+  request: Request,
+  make: (body: unknown) => Response,
+  { own = false, read = body }: { own?: boolean; read?: ((request: Request) => Promise<unknown>) | null } = {},
+): Promise<Response> {
+  const r = changeReason(request, read ? await read(request) : undefined, own);
+  if ("status" in r) return refusal(r);
+  return withReason(r.reason, () => make(r.body));
 }
 
 /** A user's own tokens, or anyone's for the admin (docs/api.md, Tokens: who may). */
@@ -167,10 +182,12 @@ const webhookList: Resolver = async ({ params }) => {
 const webhookCreate: Resolver = async ({ params, request }) => {
   const mask = webhookScope(params);
   if (mask instanceof Response) return mask;
-  const created = hooks.createWebhook(mask, await body(request), `user:${getPersona()}`);
-  if ("status" in created) return refusal(created);
-  const location = mask ? `/api/v1/repos/${mask}/webhooks/${created.id}` : `/api/v1/webhooks/${created.id}`;
-  return HttpResponse.json(created, { status: 201, headers: { Location: location } });
+  return changeWith(request, (b) => {
+    const created = hooks.createWebhook(mask, b, `user:${getPersona()}`);
+    if ("status" in created) return refusal(created);
+    const location = mask ? `/api/v1/repos/${mask}/webhooks/${created.id}` : `/api/v1/webhooks/${created.id}`;
+    return HttpResponse.json(created, { status: 201, headers: { Location: location } });
+  });
 };
 
 const webhookGet: Resolver = async ({ params }) => {
@@ -181,22 +198,36 @@ const webhookGet: Resolver = async ({ params }) => {
 const webhookUpdate: Resolver = async ({ params, request }) => {
   const w = webhookOf(params);
   if (w instanceof Response) return w;
-  const updated = hooks.updateWebhook(w, await body(request), `user:${getPersona()}`);
-  return "status" in updated ? refusal(updated) : HttpResponse.json(updated);
+  return changeWith(request, (b) => {
+    const updated = hooks.updateWebhook(w, b, `user:${getPersona()}`);
+    return "status" in updated ? refusal(updated) : HttpResponse.json(updated);
+  });
 };
 
-const webhookDelete: Resolver = async ({ params }) => {
+const webhookDelete: Resolver = async ({ params, request }) => {
   const w = webhookOf(params);
   if (w instanceof Response) return w;
-  hooks.deleteWebhook(w, `user:${getPersona()}`);
-  return new HttpResponse(null, { status: 204 });
+  return changeWith(
+    request,
+    () => {
+      hooks.deleteWebhook(w, `user:${getPersona()}`);
+      return new HttpResponse(null, { status: 204 });
+    },
+    { read: null },
+  );
 };
 
-const webhookSecret: Resolver = async ({ params }) => {
+const webhookSecret: Resolver = async ({ params, request }) => {
   const w = webhookOf(params);
   if (w instanceof Response) return w;
-  const secret = hooks.rotateSecret(w, `user:${getPersona()}`);
-  return "status" in secret ? refusal(secret) : HttpResponse.json(secret);
+  return changeWith(
+    request,
+    () => {
+      const secret = hooks.rotateSecret(w, `user:${getPersona()}`);
+      return "status" in secret ? refusal(secret) : HttpResponse.json(secret);
+    },
+    { read: null },
+  );
 };
 
 const webhookTest: Resolver = async ({ params }) => {
@@ -498,9 +529,11 @@ export const handlers = [
   post("*/api/v1/users", async ({ request }) => {
     const denied = adminOnly();
     if (denied) return denied;
-    const created = db.createUser(await body(request), `user:${getPersona()}`);
-    if ("status" in created) return refusal(created);
-    return HttpResponse.json(created, { status: 201, headers: { Location: `/api/v1/users/${created.name}` } });
+    return changeWith(request, (b) => {
+      const created = db.createUser(b, `user:${getPersona()}`);
+      if ("status" in created) return refusal(created);
+      return HttpResponse.json(created, { status: 201, headers: { Location: `/api/v1/users/${created.name}` } });
+    });
   }),
 
   get("*/api/v1/users/:user", async ({ params }) => {
@@ -511,15 +544,23 @@ export const handlers = [
   patch("*/api/v1/users/:user", async ({ params, request }) => {
     const user = adminOnly() ?? liveUser(params);
     if (user instanceof Response) return user;
-    const updated = db.updateUser(user, await body(request), `user:${getPersona()}`);
-    return "status" in updated ? refusal(updated) : HttpResponse.json(db.userView(updated));
+    return changeWith(request, (b) => {
+      const updated = db.updateUser(user, b, `user:${getPersona()}`);
+      return "status" in updated ? refusal(updated) : HttpResponse.json(db.userView(updated));
+    });
   }),
 
-  del("*/api/v1/users/:user", async ({ params }) => {
+  del("*/api/v1/users/:user", async ({ params, request }) => {
     const user = adminOnly() ?? liveUser(params);
     if (user instanceof Response) return user;
-    const refused = db.deleteUser(user, `user:${getPersona()}`);
-    return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
+    return changeWith(
+      request,
+      () => {
+        const refused = db.deleteUser(user, `user:${getPersona()}`);
+        return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
+      },
+      { read: null },
+    );
   }),
 
   post("*/api/v1/users/:user/password", async ({ params, request }) => {
@@ -527,35 +568,61 @@ export const handlers = [
     // With currentPassword, the user's own change: the one route of users that is not the admin
     // role's, whose credential is the current password (rbac.md §1, A user's own password).
     if (typeof b === "object" && b !== null && "currentPassword" in b) {
-      const refused = db.changeOwnPassword(decode(params.user), b);
-      return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
+      return changeWith(
+        request,
+        (own) => {
+          const refused = db.changeOwnPassword(decode(params.user), own);
+          return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
+        },
+        { own: true, read: async () => b },
+      );
     }
     const user = adminOnly() ?? liveUser(params);
     if (user instanceof Response) return user;
-    const refused = db.setPassword(user, b, `user:${getPersona()}`);
-    return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
+    return changeWith(
+      request,
+      (req) => {
+        const refused = db.setPassword(user, req, `user:${getPersona()}`);
+        return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
+      },
+      { read: async () => b },
+    );
   }),
 
-  post("*/api/v1/users/:user/unlock", async ({ params }) => {
+  post("*/api/v1/users/:user/unlock", async ({ params, request }) => {
     const user = adminOnly() ?? liveUser(params);
     if (user instanceof Response) return user;
-    db.unlockUser(user, `user:${getPersona()}`);
-    return new HttpResponse(null, { status: 204 });
+    return changeWith(
+      request,
+      () => {
+        db.unlockUser(user, `user:${getPersona()}`);
+        return new HttpResponse(null, { status: 204 });
+      },
+      { read: null },
+    );
   }),
 
   post("*/api/v1/bindings", async ({ request }) => {
     const denied = adminOnly();
     if (denied) return denied;
-    const created = db.createBinding(await body(request), `user:${getPersona()}`);
-    if ("status" in created) return refusal(created);
-    return HttpResponse.json(created, { status: 201, headers: { Location: `/api/v1/bindings/${created.id}` } });
+    return changeWith(request, (b) => {
+      const created = db.createBinding(b, `user:${getPersona()}`);
+      if ("status" in created) return refusal(created);
+      return HttpResponse.json(created, { status: 201, headers: { Location: `/api/v1/bindings/${created.id}` } });
+    });
   }),
 
-  del("*/api/v1/bindings/:id", async ({ params }) => {
+  del("*/api/v1/bindings/:id", async ({ params, request }) => {
     const denied = adminOnly();
     if (denied) return denied;
-    const refused = db.deleteBinding(decode(params.id), `user:${getPersona()}`);
-    return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
+    return changeWith(
+      request,
+      () => {
+        const refused = db.deleteBinding(decode(params.id), `user:${getPersona()}`);
+        return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
+      },
+      { read: null },
+    );
   }),
 
   get("*/api/v1/ci/policies", async () => {
@@ -565,9 +632,11 @@ export const handlers = [
   post("*/api/v1/ci/policies", async ({ request }) => {
     const admin = ciAdmin();
     if (admin instanceof Response) return admin;
-    const made = ci.createCIPolicy(await body(request), admin.by, admin.cred);
-    if ("status" in made) return ciRefusal(made);
-    return ciPolicy(made, 201, { Location: `/api/v1/ci/policies/${made.policy.name}` });
+    return changeWith(request, (b) => {
+      const made = ci.createCIPolicy(b, admin.by, admin.cred);
+      if ("status" in made) return ciRefusal(made);
+      return ciPolicy(made, 201, { Location: `/api/v1/ci/policies/${made.policy.name}` });
+    });
   }),
 
   get("*/api/v1/ci/policies/:name", async ({ params, request }) => {
@@ -582,30 +651,52 @@ export const handlers = [
     const admin = ciAdmin();
     if (admin instanceof Response) return admin;
     const ifMatch = request.headers.get("If-Match");
-    const changed = ci.replaceCIPolicy(decode(params.name), await body(request), ifMatch, admin.by, admin.cred);
-    return "status" in changed ? ciRefusal(changed) : ciPolicy(changed);
+    return changeWith(request, (b) => {
+      const changed = ci.replaceCIPolicy(decode(params.name), b, ifMatch, admin.by, admin.cred);
+      return "status" in changed ? ciRefusal(changed) : ciPolicy(changed);
+    });
   }),
 
   del("*/api/v1/ci/policies/:name", async ({ params, request }) => {
     const admin = ciAdmin();
     if (admin instanceof Response) return admin;
-    const refused = ci.deleteCIPolicy(decode(params.name), request.headers.get("If-Match"), admin.by);
-    return refused ? ciRefusal(refused) : new HttpResponse(null, { status: 204 });
+    return changeWith(
+      request,
+      () => {
+        const refused = ci.deleteCIPolicy(decode(params.name), request.headers.get("If-Match"), admin.by);
+        return refused ? ciRefusal(refused) : new HttpResponse(null, { status: 204 });
+      },
+      { read: null },
+    );
   }),
 
   post("*/api/v1/ci/policies/:name/renew", async ({ params, request }) => {
     const admin = ciAdmin();
     if (admin instanceof Response) return admin;
     const ifMatch = request.headers.get("If-Match");
-    const renewed = ci.renewCIPolicy(decode(params.name), await optionalBody(request), ifMatch, admin.by, admin.cred);
-    return "status" in renewed ? ciRefusal(renewed) : ciPolicy(renewed);
+    return changeWith(
+      request,
+      (b) => {
+        // A body of nothing but the reason is a renewal without one.
+        const rest = typeof b === "object" && b !== null && !Object.keys(b).length ? null : b;
+        const renewed = ci.renewCIPolicy(decode(params.name), rest, ifMatch, admin.by, admin.cred);
+        return "status" in renewed ? ciRefusal(renewed) : ciPolicy(renewed);
+      },
+      { read: optionalBody },
+    );
   }),
 
   post("*/api/v1/ci/policies/:name/approve", async ({ params, request }) => {
     const admin = ciAdmin();
     if (admin instanceof Response) return admin;
-    const approved = ci.approveCIPolicy(decode(params.name), request.headers.get("If-Match"), admin.by, admin.cred);
-    return "status" in approved ? ciRefusal(approved) : ciPolicy(approved);
+    return changeWith(
+      request,
+      () => {
+        const approved = ci.approveCIPolicy(decode(params.name), request.headers.get("If-Match"), admin.by, admin.cred);
+        return "status" in approved ? ciRefusal(approved) : ciPolicy(approved);
+      },
+      { read: null },
+    );
   }),
 
   get("*/api/v1/tokens", async () => {
@@ -626,23 +717,29 @@ export const handlers = [
     const denied = adminOr403();
     if (denied) return denied;
     if (!byPassword(request)) return fail(403, "FORBIDDEN", "a deploy token over a mask is created with the admin's password, not with a token");
-    const b = await body(request);
-    if (typeof b !== "object" || b === null || Array.isArray(b)) return fail(400, "INVALID", "the body must be a JSON object");
-    const { repoMask, ...rest } = b as Record<string, unknown>;
-    const bad = db.maskRefusal(repoMask);
-    if (bad) return refusal(bad);
-    const created = createToken({ repoMask: repoMask as string }, rest);
-    if ("status" in created) return refusal(created);
-    return HttpResponse.json(created, { status: 201, headers: { Location: `/api/v1/deploy-tokens/${created.id}` } });
+    return changeWith(request, (b) => {
+      if (typeof b !== "object" || b === null || Array.isArray(b)) return fail(400, "INVALID", "the body must be a JSON object");
+      const { repoMask, ...rest } = b as Record<string, unknown>;
+      const bad = db.maskRefusal(repoMask);
+      if (bad) return refusal(bad);
+      const created = createToken({ repoMask: repoMask as string }, rest);
+      if ("status" in created) return refusal(created);
+      return HttpResponse.json(created, { status: 201, headers: { Location: `/api/v1/deploy-tokens/${created.id}` } });
+    });
   }),
 
-  del("*/api/v1/deploy-tokens/:id", async ({ params }) => {
+  del("*/api/v1/deploy-tokens/:id", async ({ params, request }) => {
     if (getPersona() === "anonymous") return unauthorized("credentials are needed");
     const denied = adminOr403();
     if (denied) return denied;
-    return revokeToken("mask", Number(decode(params.id)))
-      ? new HttpResponse(null, { status: 204 })
-      : fail(404, "NOT_FOUND", `no deploy token over a mask has the id ${decode(params.id)}`);
+    return changeWith(
+      request,
+      () =>
+        revokeToken("mask", Number(decode(params.id)))
+          ? new HttpResponse(null, { status: 204 })
+          : fail(404, "NOT_FOUND", `no deploy token over a mask has the id ${decode(params.id)}`),
+      { read: null },
+    );
   }),
 
   get("*/api/v1/users/:user/tokens", async ({ params }) => {
@@ -658,46 +755,68 @@ export const handlers = [
     if (!user) return fail(404, "NOT_FOUND", `user ${decode(params.user)} not found`);
     const denied = ownOr403(user);
     if (denied) return denied;
-    const created = createToken({ user }, await body(request));
-    if ("status" in created) return refusal(created);
-    return HttpResponse.json(created, { status: 201, headers: { Location: `/api/v1/users/${user}/tokens/${created.id}` } });
+    return changeWith(
+      request,
+      (b) => {
+        const created = createToken({ user }, b);
+        if ("status" in created) return refusal(created);
+        return HttpResponse.json(created, { status: 201, headers: { Location: `/api/v1/users/${user}/tokens/${created.id}` } });
+      },
+      // A person's own tokens take a reason and never need one; another user's are a change of
+      // the control plane (rbac.md §13).
+      { own: getPersona() === user },
+    );
   }),
 
-  del("*/api/v1/users/:user/tokens/:id", async ({ params }) => {
+  del("*/api/v1/users/:user/tokens/:id", async ({ params, request }) => {
     const user = db.userByRef(decode(params.user))?.name;
     if (!user) return fail(404, "NOT_FOUND", `user ${decode(params.user)} not found`);
     const denied = ownOr403(user);
     if (denied) return denied;
-    return revokeToken({ user }, Number(decode(params.id)))
-      ? new HttpResponse(null, { status: 204 })
-      : fail(404, "NOT_FOUND", `user ${user} has no token ${decode(params.id)}`);
+    return changeWith(
+      request,
+      () =>
+        revokeToken({ user }, Number(decode(params.id)))
+          ? new HttpResponse(null, { status: 204 })
+          : fail(404, "NOT_FOUND", `user ${user} has no token ${decode(params.id)}`),
+      { own: getPersona() === user, read: null },
+    );
   }),
 
   post("*/api/v1/repos/:format/:repo/deploy-tokens", async ({ params, request }) => {
     const repo = repoOr404(params);
     if (repo instanceof Response) return repo;
     if (!repo.permissions.includes("manage")) return fail(403, "FORBIDDEN", "deploy tokens need manage on the repo");
-    const created = createToken({ repo: repo.prefix }, await body(request));
-    if ("status" in created) return refusal(created);
-    return HttpResponse.json(created, { status: 201, headers: { Location: `/api/v1/repos/${repo.prefix}/deploy-tokens/${created.id}` } });
+    return changeWith(request, (b) => {
+      const created = createToken({ repo: repo.prefix }, b);
+      if ("status" in created) return refusal(created);
+      return HttpResponse.json(created, { status: 201, headers: { Location: `/api/v1/repos/${repo.prefix}/deploy-tokens/${created.id}` } });
+    });
   }),
 
-  del("*/api/v1/repos/:format/:repo/deploy-tokens/:id", async ({ params }) => {
+  del("*/api/v1/repos/:format/:repo/deploy-tokens/:id", async ({ params, request }) => {
     const repo = repoOr404(params);
     if (repo instanceof Response) return repo;
     if (!repo.permissions.includes("manage")) return fail(403, "FORBIDDEN", "deploy tokens need manage on the repo");
-    return revokeToken({ repo: repo.prefix }, Number(decode(params.id)))
-      ? new HttpResponse(null, { status: 204 })
-      : fail(404, "NOT_FOUND", `${repo.prefix} has no deploy token ${decode(params.id)}`);
+    return changeWith(
+      request,
+      () =>
+        revokeToken({ repo: repo.prefix }, Number(decode(params.id)))
+          ? new HttpResponse(null, { status: 204 })
+          : fail(404, "NOT_FOUND", `${repo.prefix} has no deploy token ${decode(params.id)}`),
+      { read: null },
+    );
   }),
 
   post("*/api/v1/repos", async ({ request }) => {
     const me = getPersona();
     if (me === "anonymous") return unauthorized("credentials are needed");
     if (!db.isAdmin(me)) return fail(403, "FORBIDDEN", "creating a repo needs the admin role");
-    const created = db.createRepo(await body(request), `user:${me}`);
-    if ("status" in created) return refusal(created);
-    return HttpResponse.json(repoJson(created), { status: 201, headers: { Location: `/api/v1/repos/${created.prefix}` } });
+    return changeWith(request, (b) => {
+      const created = db.createRepo(b, `user:${me}`);
+      if ("status" in created) return refusal(created);
+      return HttpResponse.json(repoJson(created), { status: 201, headers: { Location: `/api/v1/repos/${created.prefix}` } });
+    });
   }),
 
   post("*/api/v1/repos/:format/:repo/reindex", async ({ params, request }) => {
@@ -719,15 +838,23 @@ export const handlers = [
     const me = getPersona();
     const repo = repoFor(params, "manage");
     if (repo instanceof Response) return repo;
-    const updated = db.updateRepo(repo, await body(request), `user:${me}`);
-    return "status" in updated ? refusal(updated) : HttpResponse.json(repoJson(updated));
+    return changeWith(request, (b) => {
+      const updated = db.updateRepo(repo, b, `user:${me}`);
+      return "status" in updated ? refusal(updated) : HttpResponse.json(repoJson(updated));
+    });
   }),
 
   del("*/api/v1/repos/:format/:repo", async ({ params, request }) => {
     const repo = repoFor(params, "manage");
     if (repo instanceof Response) return repo;
-    const refused = db.deleteRepo(repo, new URL(request.url).searchParams.get("force") === "true", `user:${getPersona()}`);
-    return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
+    return changeWith(
+      request,
+      () => {
+        const refused = db.deleteRepo(repo, new URL(request.url).searchParams.get("force") === "true", `user:${getPersona()}`);
+        return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
+      },
+      { read: null },
+    );
   }),
 
   // Webhooks: a repo's, for manage on it, and those of every mask, for the admin role.

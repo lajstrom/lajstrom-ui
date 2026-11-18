@@ -69,7 +69,7 @@ export function ownChangeRefused(err: unknown): string | null {
  * is sent (docs/spec/rbac.md §1, A user's own password). The user's tokens stay. Here rather than
  * with the other changes, since the sign-in page, in the main chunk, makes it. */
 export function changeOwnPassword(user: string, currentPassword: string, password: string): Promise<void> {
-  return apiSend("POST", apiPath("users", user, "password"), { body: { currentPassword, password }, authorization: "" });
+  return apiSend("POST", apiPath("users", user, "password"), { body: { currentPassword, password }, authorization: "", reason: "body", own: true });
 }
 
 /** Changes the password of user with its current one, then signs in with the new one: the sign-in

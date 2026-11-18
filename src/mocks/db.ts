@@ -50,6 +50,7 @@ import { passwords } from "./data/system";
 import { ago, ahead, before, HOST } from "./data/time";
 import { getPersona, type Persona } from "./persona";
 import { durationSeconds, groupRefusal, isPackageName, mergeGroup, mergeUpstream, prefetchImages, prefetchNames, upstreamRefusal } from "./proxy";
+import { currentReason, tokenReason } from "./reason";
 import { keep, persist } from "./state";
 import { upstreams } from "./data/system";
 import type { PrefetchResult, RepoGroup, Upstream } from "@/api/types";
@@ -1320,9 +1321,9 @@ function auditLog(): (MockEvent & { id: number })[] {
   }
   for (const t of tokens) {
     const by = t.kind === "pat" ? `user:${t.user}` : t.repo?.startsWith("apt/") ? "user:bob" : "user:admin";
-    events.push({ at: t.createdAt, principal: by, action: "token.create", repo: t.repo ?? "", subject: t.kind === "pat" ? `user:${t.user}` : `token:${t.id}`, digest: null, ip: ipOf[by] ?? "10.8.0.10", details: { token: t.id, kind: t.kind, name: t.name, scopes: t.scopes } });
+    events.push({ at: t.createdAt, principal: by, action: "token.create", repo: t.repo ?? "", subject: t.kind === "pat" ? `user:${t.user}` : `token:${t.id}`, digest: null, ip: ipOf[by] ?? "10.8.0.10", details: { token: t.id, kind: t.kind, name: t.name, scopes: t.scopes, ...tokenReason(t.id, "create") } });
     if (t.revokedAt) {
-      events.push({ at: t.revokedAt, principal: `user:${t.user}`, action: "token.revoke", repo: "", subject: `user:${t.user}`, digest: null, ip: ipOf[`user:${t.user}`] ?? "10.8.0.10", details: { token: t.id, name: t.name } });
+      events.push({ at: t.revokedAt, principal: `user:${t.user}`, action: "token.revoke", repo: "", subject: `user:${t.user}`, digest: null, ip: ipOf[`user:${t.user}`] ?? "10.8.0.10", details: { token: t.id, name: t.name, ...tokenReason(t.id, "revoke") } });
     }
   }
   events.push(
@@ -1413,9 +1414,16 @@ const demoEvents: MockEvent[] = [];
 const DEMO_IP = "192.0.2.10";
 
 function changed(event?: MockEvent): void {
-  if (event) demoEvents.push(event);
+  // A change's rows keep its reason (src/mocks/reason.ts).
+  const reason = currentReason();
+  if (event) demoEvents.push(reason === null ? event : { ...event, details: { ...event.details, changeReason: reason } });
   auditCache = null;
   persist();
+}
+
+/** A token made or revoked (src/mocks/auth.ts): its rows are made of the tokens. */
+export function tokensChanged(): void {
+  changed();
 }
 
 /** The audit row of a change that another part of the mock makes, such as a webhook's

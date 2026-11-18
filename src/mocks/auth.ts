@@ -11,9 +11,10 @@ import type { CreatedToken, LoginToken, Token, TokenRequest, TokenScope } from "
 import { sha256Hex } from "@/lib/sha256";
 
 import { config, serverInfo, tokens, users } from "./data/system";
-import { authenticated, checkPassword, MUST_CHANGE, passwordRefusedMessage } from "./db";
+import { authenticated, checkPassword, MUST_CHANGE, passwordRefusedMessage, tokensChanged } from "./db";
 import { spendProof, verifyProof } from "./dpop";
 import type { Credential, SignIn } from "./persona";
+import { noteTokenReason } from "./reason";
 import { keep, persist } from "./state";
 
 /** Why a request's DPoP credentials are refused: the challenge of RFC 9449 §7.1, with the reason
@@ -273,7 +274,8 @@ export function createToken(owner: Owner, body: unknown): CreatedToken | Refusal
   };
   tokens.push(token);
   secrets.set(secret, token.id);
-  persist();
+  noteTokenReason(token.id, "create");
+  tokensChanged();
   return { ...token, secret };
 }
 
@@ -294,7 +296,8 @@ export function revokeToken(owner: Exclude<Owner, { repoMask: string }> | "mask"
   if (!t) return false;
   if (t.revokedAt === null) {
     t.revokedAt = new Date().toISOString();
-    persist();
+    noteTokenReason(t.id, "revoke");
+    tokensChanged();
   }
   return true;
 }

@@ -77,6 +77,7 @@ function isPending(v: unknown): v is PendingChange {
     typeof c.request.path === "string" &&
     c.request.path.startsWith("/api/v1/") &&
     (c.request.ifMatch === undefined || typeof c.request.ifMatch === "string") &&
+    (c.request.reason === undefined || c.request.reason === "body" || c.request.reason === "query") &&
     typeof c.what === "string" &&
     typeof c.user === "string" &&
     typeof c.token === "string" &&
