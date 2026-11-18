@@ -35,6 +35,8 @@ function signIn(user: string): void {
   setSession({ token: t.secret, user, tokenId: t.id, expiresAt: null });
 }
 
+/** The admin's password, which a token's creation takes (rbac.md §12). */
+const admin = { user: "admin", password: "admin" };
 const latest = (action: string) => apiGet<AuditList>(apiPath("audit"), { action }).then((r) => r.events[0]!);
 const uidOf = (name: string) => apiGet<User>(apiPath("users", name)).then((u) => u.uid);
 
@@ -59,7 +61,7 @@ describe("a reason with each change of the control plane", () => {
   it("is kept with a token's creation and its revocation", async () => {
     signIn("admin");
     keepReason("CHG-1003");
-    const t = await createUserToken("carol", { name: "reason test", scopes: ["read"] });
+    const t = await createUserToken("carol", { name: "reason test", scopes: ["read"] }, admin);
     await revokeUserToken("carol", t.id);
     const rows = await apiGet<AuditList>(apiPath("audit"), { subject: "user:carol" }).then((r) => r.events);
     const created = rows.find((e) => e.action === "token.create" && e.details?.token === t.id);
@@ -101,12 +103,12 @@ describe("a reason with each change of the control plane", () => {
     it("never needs one for a person's own tokens, and does for another user's", async () => {
       serverInfo.requireReason = true;
       signIn("carol");
-      const own = await createUserToken("carol", { name: "own, no reason", scopes: ["read"] });
+      const own = await createUserToken("carol", { name: "own, no reason", scopes: ["read"] }, { user: "carol", password: "carol" });
       await revokeUserToken("carol", own.id);
       signIn("admin");
-      await expect(createUserToken("carol", { name: "by the admin", scopes: ["read"] })).rejects.toMatchObject({ status: 400 });
+      await expect(createUserToken("carol", { name: "by the admin", scopes: ["read"] }, admin)).rejects.toMatchObject({ status: 400 });
       keepReason("CHG-1004");
-      const theirs = await createUserToken("carol", { name: "by the admin", scopes: ["read"] });
+      const theirs = await createUserToken("carol", { name: "by the admin", scopes: ["read"] }, admin);
       expect(theirs.name).toBe("by the admin");
       await revokeUserToken("carol", theirs.id);
     });

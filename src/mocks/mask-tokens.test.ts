@@ -39,7 +39,7 @@ const list = (repoMask = "") => apiGet<{ tokens: Token[] }>(apiPath("deploy-toke
 describe("deploy tokens over a mask", () => {
   it("are created with the admin's password, listed by the mask as written, and revoked", async () => {
     signIn("admin");
-    const created = await createMaskToken({ repoMask: "pypi/*", name: "wheel mirror", scopes: ["read"] }, "admin", "admin");
+    const created = await createMaskToken({ repoMask: "pypi/*", name: "wheel mirror", scopes: ["read"] }, { user: "admin", password: "admin" });
     expect(created).toMatchObject({ kind: "deploy", repoMask: "pypi/*", name: "wheel mirror", scopes: ["read"] });
     // Without an expiry, it expires at auth.deployTokens.maxTTL, 180 days in the mock.
     expect(Date.parse(created.expiresAt!) - Date.now()).toBeGreaterThan(179 * 86_400_000);
@@ -65,12 +65,12 @@ describe("deploy tokens over a mask", () => {
     // The session's personal access token, as Basic: the admin's, still not a password.
     const session = createToken({ user: "admin" }, { name: `mask test pat ${Math.random()}`, expiresIn: "1h" });
     if ("status" in session) throw new Error(session.message);
-    await expect(createMaskToken({ repoMask: "*/payments", name: "x", scopes: ["read"] }, "admin", session.secret)).rejects.toMatchObject({
+    await expect(createMaskToken({ repoMask: "*/payments", name: "x", scopes: ["read"] }, { user: "admin", password: session.secret })).rejects.toMatchObject({
       status: 403,
       message: expect.stringContaining("admin's password"),
     });
 
-    await expect(createMaskToken({ repoMask: "*/payments", name: "x", scopes: ["read"] }, "alice", "alice")).rejects.toMatchObject({ status: 403 });
+    await expect(createMaskToken({ repoMask: "*/payments", name: "x", scopes: ["read"] }, { user: "alice", password: "alice" })).rejects.toMatchObject({ status: 403 });
     signIn("alice");
     await expect(list()).rejects.toMatchObject({ status: 403 });
   });
@@ -78,13 +78,13 @@ describe("deploy tokens over a mask", () => {
   it("refuses a mask that is not one, and a name taken over the same mask", async () => {
     signIn("admin");
     for (const repoMask of ["payments", "npmx/*", "*/Bad_Name", "a/b/c"]) {
-      await expect(createMaskToken({ repoMask, name: "x", scopes: ["read"] }, "admin", "admin")).rejects.toMatchObject({ status: 400 });
+      await expect(createMaskToken({ repoMask, name: "x", scopes: ["read"] }, { user: "admin", password: "admin" })).rejects.toMatchObject({ status: 400 });
     }
     // Every format of the server, npm and rpm too, and oci, which needs no plugin.
     for (const repoMask of ["npm/*", "rpm/el9", "oci/*"]) {
-      await expect(createMaskToken({ repoMask, name: `over ${repoMask}`, scopes: ["read"] }, "admin", "admin")).resolves.toMatchObject({ repoMask });
+      await expect(createMaskToken({ repoMask, name: `over ${repoMask}`, scopes: ["read"] }, { user: "admin", password: "admin" })).resolves.toMatchObject({ repoMask });
     }
-    await createMaskToken({ repoMask: "raw/*", name: "twice", scopes: ["write"] }, "admin", "admin");
-    await expect(createMaskToken({ repoMask: "raw/*", name: "twice", scopes: ["write"] }, "admin", "admin")).rejects.toMatchObject({ status: 409 });
+    await createMaskToken({ repoMask: "raw/*", name: "twice", scopes: ["write"] }, { user: "admin", password: "admin" });
+    await expect(createMaskToken({ repoMask: "raw/*", name: "twice", scopes: ["write"] }, { user: "admin", password: "admin" })).rejects.toMatchObject({ status: 409 });
   });
 });

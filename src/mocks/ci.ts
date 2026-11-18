@@ -15,7 +15,7 @@ import { sha256Hex } from "@/lib/sha256";
 
 import { ciConfig, ciPolicySeeds, type CIPolicyRow, type CIPolicySpec } from "./data/ci";
 import { apiPrincipal, audited, type Refusal } from "./db";
-import type { Credential } from "./persona";
+import { secondFactor, type Credential } from "./persona";
 import { keep, persist } from "./state";
 
 /** A refusal; a 412 has the policy's ETag now. */
@@ -237,19 +237,6 @@ function expiresAt(v: unknown): number | undefined | CIRefusal {
 // --- The steps of a policy that writes (internal/auth/ci/write.go) ----------------------------
 
 /** Methods of authentication of RFC 8176 by the kind of factor (auth.SecondFactor). */
-const FACTORS: Record<string, string[]> = {
-  knowledge: ["pwd", "pin", "kba"],
-  possession: ["hwk", "swk", "otp", "sms", "tel", "sc", "pop"],
-  inherence: ["fpt", "face", "iris", "retina", "vbm"],
-};
-
-/** Whether an amr shows a second factor: mfa, or methods of two kinds, with auth.oidc.mfa empty
- * (the demo's). */
-function secondFactor(amr: string[]): boolean {
-  if (amr.includes("mfa")) return true;
-  return Object.values(FACTORS).filter((methods) => methods.some((m) => amr.includes(m))).length >= 2;
-}
-
 /** A duration as Go's time.Duration prints it, to the second: 1h2m3s, 12m0s, 45s. */
 function goDuration(ms: number): string {
   const s = Math.round(ms / 1000);

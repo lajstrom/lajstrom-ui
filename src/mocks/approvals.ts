@@ -12,7 +12,6 @@ import type { Approval, ApprovalList, CreatedApproval } from "@/api/types";
 import { checkToken, makeToken, nameTaken, newSecret, type TokenDraft } from "./auth";
 import { approvalSeeds, type ApprovalRow } from "./data/approvals";
 import { apiPrincipal, audited, checkBinding, isAdmin, makeBinding, maskRefusal, userByRef, type BindingChange, type Refusal } from "./db";
-import type { Credential } from "./persona";
 import { currentReason, withReason } from "./reason";
 import { keep, persist } from "./state";
 
@@ -156,15 +155,6 @@ export function getApproval(idText: string): Approval | Refusal {
 function pending(r: ApprovalRow): Refusal | null {
   if (r.state !== "pending") return conflict(`request ${r.id} is ${r.state}: it was decided`);
   return null;
-}
-
-/** The credential of an approval: the admin's password, or a web UI's fresh sign-in through OIDC
- * in its place (auth.Approvals.MayApprove). The demo has no OIDC login, so its sign-ins are a
- * password's; a server asks a stale sign-in for more (401), the mock refuses it. */
-export function mayApprove(cred: Credential, now = Date.now()): Refusal | null {
-  if (cred.kind === "password") return null;
-  if (cred.kind === "sign-in" && cred.signIn && now - cred.signIn.at <= 600_000 && cred.signIn.at - now <= 60_000) return null;
-  return forbidden("a request is approved with the admin's password or a web UI's fresh sign-in through OIDC, not with a token");
 }
 
 /** POST /api/v1/approvals/{id}/approve by the admin by, the credential checked before: another

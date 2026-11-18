@@ -98,7 +98,7 @@ describe("requests for a second admin", () => {
 
   it("of a deploy token over a mask that publishes answer its secret, which works once approved", async () => {
     signIn("admin");
-    const made = await createMaskToken({ repoMask: "npm/*", name: "approvals test", scopes: ["write"] }, "admin", "admin");
+    const made = await createMaskToken({ repoMask: "npm/*", name: "approvals test", scopes: ["write"] }, { user: "admin", password: "admin" });
     if (!isApproval(made)) throw new Error("the token was made, not asked for");
     expect(made).toMatchObject({ kind: "deploy-token", change: { repoMask: "npm/*", name: "approvals test", scopes: ["write"] } });
     const secret = made.secret!;
@@ -106,7 +106,7 @@ describe("requests for a second admin", () => {
     const overNpm = () => apiGet<{ tokens: Token[] }>(apiPath("deploy-tokens"), { repoMask: "npm/*" }).then((r) => r.tokens.find((t) => t.name === "approvals test"));
     expect(await overNpm()).toBeUndefined();
     // One that only reads is made at once.
-    const reads = await createMaskToken({ repoMask: "npm/*", name: "approvals test reads", scopes: ["read"] }, "admin", "admin");
+    const reads = await createMaskToken({ repoMask: "npm/*", name: "approvals test reads", scopes: ["read"] }, { user: "admin", password: "admin" });
     expect(isApproval(reads)).toBe(false);
     signIn("oscar");
     const approved = await approveRequest(made.id, asOscar);

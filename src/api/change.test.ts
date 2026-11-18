@@ -140,7 +140,7 @@ describe("realistic", () => {
     const before = client.getQueryData<Token[]>(list("bob"))!;
 
     const done = new MutationObserver(client, {
-      mutationFn: (req: TokenRequest) => createUserToken("bob", req),
+      mutationFn: (req: TokenRequest) => createUserToken("bob", req, { user: "bob", password: "bob" }),
       ...realistic(list("bob")),
     }).mutate({ name: "realistic", expiresIn: "30d" });
     await vi.waitFor(() => expect(client.isMutating()).toBe(1));
@@ -156,7 +156,7 @@ describe("realistic", () => {
     const before = client.getQueryData<Token[]>(list("bob"))!;
 
     const done = new MutationObserver(client, {
-      mutationFn: (req: TokenRequest) => createUserToken("bob", req),
+      mutationFn: (req: TokenRequest) => createUserToken("bob", req, { user: "bob", password: "bob" }),
       ...realistic(list("bob")),
     }).mutate({ name: "", expiresIn: "30d" });
     await expect(done).rejects.toMatchObject({ status: 400 });

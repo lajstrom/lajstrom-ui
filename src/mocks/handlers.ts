@@ -6,7 +6,7 @@ import { delay, http, HttpResponse, type PathParams } from "msw";
 import type { ApiErrorBody } from "@/api/types";
 import type { User } from "@/api/types";
 
-import { authenticate, byPassword, createToken, login, revokeToken, tokenView, type DpopRefusal, type Refusal } from "./auth";
+import { authenticate, createToken, login, passwordOrFreshSignIn, revokeToken, tokenView, type DpopRefusal, type Refusal } from "./auth";
 import * as access from "./access";
 import * as approvals from "./approvals";
 import { bootstrapOpen, exchangeBootstrapToken } from "./bootstrap";
@@ -140,7 +140,10 @@ function repoOr404(params: PathParams): db.MockRepo | Response {
 }
 
 function adminOr403(): Response | null {
-  return db.isAdmin() ? null : fail(403, "FORBIDDEN", "this needs the admin role (system resource, rbac.md §2)");
+  if (db.isAdmin()) return null;
+  // An admin binding that the admin mode leaves out says what the role needs (rbac.md §12).
+  if (db.hasAdminBinding() && db.adminLeftOut()) return fail(403, "FORBIDDEN", db.adminModeRefusal());
+  return fail(403, "FORBIDDEN", "this needs the admin role (system resource, rbac.md §2)");
 }
 
 /** The admin role, for users and bindings: 401 without credentials, 403 without the role. */
@@ -734,7 +737,7 @@ export const handlers = [
   post("*/api/v1/approvals/:id/approve", async ({ params, request }) => {
     const denied = adminOnly();
     if (denied) return denied;
-    const cred = approvals.mayApprove(getCredential());
+    const cred = passwordOrFreshSignIn(getCredential(), "a request is approved with the admin's password or a web UI's fresh sign-in through OIDC, not with a token");
     if (cred) return refusal(cred);
     return changeWith(
       request,
@@ -793,7 +796,8 @@ export const handlers = [
     if (getPersona() === "anonymous") return unauthorized("credentials are needed");
     const denied = adminOr403();
     if (denied) return denied;
-    if (!byPassword(request)) return fail(403, "FORBIDDEN", "a deploy token over a mask is created with the admin's password, not with a token");
+    const cred = passwordOrFreshSignIn(getCredential(), "a deploy token over a mask is created with the admin's password or a web UI's fresh sign-in through OIDC, not with a token");
+    if (cred) return refusal(cred);
     return changeWith(request, (b) => {
       if (typeof b !== "object" || b === null || Array.isArray(b)) return fail(400, "INVALID", "the body must be a JSON object");
       const { repoMask, ...rest } = b as Record<string, unknown>;
@@ -836,6 +840,9 @@ export const handlers = [
     if (!user) return fail(404, "NOT_FOUND", `user ${decode(params.user)} not found`);
     const denied = ownOr403(user);
     if (denied) return denied;
+    // A password creates one, or a web UI's fresh sign-in through OIDC in its place (rbac.md §12).
+    const cred = passwordOrFreshSignIn(getCredential(), "a personal access token is created with a password or a web UI's fresh sign-in through OIDC, not with a token");
+    if (cred) return refusal(cred);
     return changeWith(
       request,
       (b) => {

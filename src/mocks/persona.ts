@@ -18,6 +18,19 @@ export type SignIn = { at: number; amr: string[] };
  * login when it has one. */
 export type Credential = { kind: "none" } | { kind: "password" } | { kind: "token" } | { kind: "sign-in"; signIn?: SignIn };
 
+const FACTORS: Record<string, string[]> = {
+  knowledge: ["pwd", "pin", "kba"],
+  possession: ["hwk", "swk", "otp", "sms", "tel", "sc", "pop"],
+  inherence: ["fpt", "face", "iris", "retina", "vbm"],
+};
+
+/** Whether an amr shows a second factor: mfa, or methods of two kinds, with auth.oidc.mfa empty
+ * (the demo's). */
+export function secondFactor(amr: string[]): boolean {
+  if (amr.includes("mfa")) return true;
+  return Object.values(FACTORS).filter((methods) => methods.some((m) => amr.includes(m))).length >= 2;
+}
+
 let current: Persona = "anonymous";
 let credential: Credential = { kind: "none" };
 

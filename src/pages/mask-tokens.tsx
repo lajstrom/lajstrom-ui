@@ -61,7 +61,10 @@ export function MaskTokens() {
               kind="deploy"
               mask
               login="deploy"
-              create={(req, over) => createMaskToken({ ...req, repoMask: over!.repoMask, scopes: req.scopes ?? [] }, who.data!.name!, over!.password)}
+              byPassword
+              create={(req, over) =>
+                createMaskToken({ ...req, repoMask: over.repoMask!, scopes: req.scopes ?? [] }, over.password === undefined ? undefined : { user: who.data!.name!, password: over.password })
+              }
               list={all}
             />
           </div>
