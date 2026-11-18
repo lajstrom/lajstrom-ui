@@ -5,7 +5,7 @@ import { apiPath, apiSend, basicAuth, type ChangeRequest } from "./client";
 import { normalizeRepo, webhooksPath, type WebhookScope } from "./queries";
 import { getSession } from "./session";
 import type { BatchDeleteRequest, BatchDeleteResult, CreatedToken, MaskTokenRequest, PrefetchRequest, PrefetchResult, TokenRequest } from "./types";
-import type { Approval, Binding, BindingRequest, CreatedApproval, User, UserPatch, UserRequest } from "./types";
+import type { AccessReviewRequest, Approval, AuditEvent, Binding, BindingRequest, CreatedApproval, User, UserPatch, UserRequest } from "./types";
 import type { CreateRepoRequest, ReindexRequest, ReindexRun, Repo, RepoPatch } from "./types";
 import type { CIPolicy, CreatedWebhook, Delivery, Webhook, WebhookRequest, WebhookSecret } from "./types";
 
@@ -214,4 +214,10 @@ export function approveRequest(id: number, password?: { user: string; password: 
 /** Rejects a request, or withdraws one's own: any credential of the admin role. */
 export function rejectRequest(id: number): Promise<Approval> {
   return apiSend<Approval>("POST", apiPath("approvals", id, "reject"), { reason: "query" });
+}
+
+/** Records that a person reviewed an access report, by its sha256 (docs/spec/rbac.md §14): the
+ * audit row access.review. It takes no reason: a review changes no access. */
+export function recordAccessReview(req: AccessReviewRequest): Promise<AuditEvent> {
+  return apiSend<AuditEvent>("POST", apiPath("access-reviews"), { body: req });
 }

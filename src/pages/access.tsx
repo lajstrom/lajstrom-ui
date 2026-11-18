@@ -19,13 +19,14 @@ import { errorText } from "@/lib/errors";
 import { maskMatches } from "@/lib/masks";
 import { roleActions, roleTone } from "@/lib/roles";
 
+import { AccessReview } from "./access-review";
 import { Approvals } from "./approvals";
 import { CIPolicies } from "./ci-policies";
 import { MaskTokens } from "./mask-tokens";
 import { deleteBindingKey, disableKey, useDeleteBinding, useDisableUser, type DisableChange } from "./user-changes";
 import { CreateBindingDialog, CreateUserDialog } from "./user-dialogs";
 
-type Tab = "users" | "tokens" | "masks" | "bindings" | "ci" | "approvals";
+type Tab = "users" | "tokens" | "masks" | "bindings" | "ci" | "approvals" | "review";
 
 const userId = (c: DisableChange) => c.user.uid;
 const bindingId = (b: Binding) => b.id;
@@ -71,6 +72,8 @@ export function AccessPage() {
           { value: "bindings", label: "Bindings" },
           { value: "ci", label: "CI trust policies" },
           ...(requests ? [{ value: "approvals" as const, label: count && count !== "0" ? `Requests (${count})` : "Requests" }] : []),
+          // The access report of a server that has it, like the requests (rbac.md §14).
+          ...(requests ? [{ value: "review" as const, label: "Review" }] : []),
         ]}
       />
       {tab === "users" ? (
@@ -83,6 +86,8 @@ export function AccessPage() {
         <CIPolicies />
       ) : tab === "approvals" ? (
         <Approvals />
+      ) : tab === "review" ? (
+        <AccessReview />
       ) : (
         <BindingsTable />
       )}
