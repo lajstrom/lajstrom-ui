@@ -1,7 +1,7 @@
 // Generated from public/openapi.yaml by scripts/gen-api-types.ts. Do not edit: npm run gen:api.
 
 /** The commit of lajstrom/lajstrom whose /api/v1 these types describe. */
-export const serverApiCommit = "6dd853e9b6a0ec272c59c0e43a8f55aa810352ad";
+export const serverApiCommit = "96bb3936817bfdd284fb8f63e60bb16312abc930";
 
 /**
  * components.schemas of the server's openapi.yaml with the UI's proposal; what the proposal adds
