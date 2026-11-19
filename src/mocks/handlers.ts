@@ -14,6 +14,7 @@ import * as ci from "./ci";
 import * as db from "./db";
 import { getCredential, getPersona, setPersona } from "./persona";
 import { changeReason, withReason } from "./reason";
+import { unmetQuery } from "./requirements";
 import * as hooks from "./webhooks";
 
 function fail(status: number, code: ApiErrorBody["error"]["code"], message: string) {
@@ -368,7 +369,10 @@ export const handlers = [
   get("*/api/v1/repos/:format/:repo/packages/:name/versions", async ({ params, request }) => {
     const repo = repoOr404(params);
     if (repo instanceof Response) return repo;
-    const versions = db.listVersions(repo, decode(params.name));
+    // ?unmet=&signedBy=: what a requirement would refuse (policy.md §11).
+    const unmet = unmetQuery(new URL(request.url));
+    if (unmet && "status" in unmet) return refusal(unmet);
+    const versions = db.listVersions(repo, decode(params.name), unmet ?? undefined);
     if (!versions) return fail(404, "NOT_FOUND", `package ${decode(params.name)} not found in ${repo.prefix}`);
     const sp = new URL(request.url).searchParams;
     const { page, next } = db.paginate(versions, num(sp.get("limit"), 100), sp.get("cursor"));

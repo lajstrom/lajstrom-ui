@@ -35,6 +35,11 @@ export type WhoAmI = Schemas["Whoami"];
 /** repos.policy, with the keys the server reads; an absent key takes its default. */
 export type RepoPolicy = Schemas["Policy"];
 
+/** One required attachment of a repo (docs/spec/policy.md §11): a version is served only once
+ * its manifest has an attachment verified of the predicate type, or of one that continues it
+ * after a "/", signed by one of the names. */
+export type Requirement = Schemas["Requirement"];
+
 /** The repo's OpenPGP signing key for apt; retired keys are still served for a while. */
 export type SigningKey = Schemas["SigningKey"];
 

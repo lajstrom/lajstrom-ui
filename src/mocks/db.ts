@@ -51,6 +51,7 @@ import { ago, ahead, before, HOST } from "./data/time";
 import { getCredential, getPersona, secondFactor, type Persona } from "./persona";
 import { durationSeconds, groupRefusal, isPackageName, mergeGroup, mergeUpstream, prefetchImages, prefetchNames, upstreamRefusal } from "./proxy";
 import { currentReason, tokenReason } from "./reason";
+import { checkRequirements, meets, requirementsShape, SIGNATURE_TYPE, type Label } from "./requirements";
 import { keep, persist } from "./state";
 import { upstreams } from "./data/system";
 import type { PrefetchResult, RepoGroup, Upstream } from "@/api/types";
@@ -954,9 +955,13 @@ function versionHead(rows: Row[]) {
   return { version: rows[0]!.version, publishedAt: rows[0]!.createdAt, lastModified: rows.at(-1)!.createdAt, pointers: pointersOf(rows[0]!) };
 }
 
-export function listVersions(repo: Repo, name: string): VersionSummary[] | null {
-  const list = manifestsOf(repo, name);
-  if (!list) return null;
+/** The versions of a package, newest first; with unmet, those of their variants that the
+ * requirement {predicateType, signedBy} would refuse, whatever the repo's policy says (?unmet=,
+ * policy.md §11). */
+export function listVersions(repo: Repo, name: string, unmet?: { predicateType: string; signedBy: string[] }): VersionSummary[] | null {
+  const all = manifestsOf(repo, name);
+  if (!all) return null;
+  const list = unmet ? all.filter((v) => !meets(labelsOf(v), unmet.predicateType, unmet.signedBy)) : all;
   return byVersion(list).map((rows) => ({
     ...versionHead(rows),
     ...yankOf(repo, name, rows[0]!.version),
@@ -1060,9 +1065,28 @@ function attachmentCounts(v: Row): AttachmentCounts {
   return counts;
 }
 
+/** How the index labels a referrer: keyless and notation signatures are unsupported, the SBOMs
+ * unsigned, the provenance verified, signed by the demo's trusted key (src/mocks/requirements.ts). */
+function verificationOf(kind: Attachment["kind"]): Attachment["verification"] {
+  return kind === "signature" ? "unsupported" : kind === "provenance" ? "verified" : "unsigned";
+}
+
+/** A variant's attachments as a requirement reads them (policy.md §11), a signature's predicate
+ * type its own. */
+function labelsOf(v: Row): Label[] {
+  return v.referrerList.map((r) => {
+    const kind = referrerKind(r);
+    const verification = verificationOf(kind);
+    return {
+      predicateType: kind === "signature" ? SIGNATURE_TYPE : (r.annotations["in-toto.io/predicate-type"] ?? ""),
+      verification,
+      ...(verification === "verified" ? { signedBy: "release-key" } : {}),
+    };
+  });
+}
+
 /** GET …/versions/{version}/attachments: the referrers of its variants as the index labels
- * them (docs/api.md, Attachments of a version). Keyless and notation signatures are
- * unsupported, the SBOMs unsigned, the provenance signed by the demo's trusted key. */
+ * them (docs/api.md, Attachments of a version). */
 export function listAttachments(repo: Repo, name: string, version: string, variant: string | null): AttachmentList | null {
   const rows = manifestsOf(repo, name)?.filter((m) => m.version === version && (variant === null || m.variant === variant));
   if (!rows?.length) return null;
@@ -1070,7 +1094,7 @@ export function listAttachments(repo: Repo, name: string, version: string, varia
     v.referrerList.map((r) => {
       const predicateType = r.annotations["in-toto.io/predicate-type"] ?? "";
       const kind = referrerKind(r);
-      const verification: Attachment["verification"] = kind === "signature" ? "unsupported" : kind === "provenance" ? "verified" : "unsigned";
+      const verification = verificationOf(kind);
       return {
         variant: v.variant,
         subject: v.digest,
@@ -1635,9 +1659,20 @@ function checkPolicy(policy: unknown, format: string, patch: boolean): Refusal |
       }
       if (vp !== undefined && !(vp === null && patch) && vp !== "release" && vp !== "snapshot") return invalid("policy.maven.versionPolicy: release or snapshot");
     } else if (k === "maven") return invalid("policy.maven: a maven repo only");
-    else return invalid(`policy.${k} is not a policy key`);
+    else if (k === "requireAttachments") {
+      const refused = requirementsShape(v);
+      if (refused) return refused;
+    } else return invalid(`policy.${k} is not a policy key`);
   }
   return null;
+}
+
+/** The requirements of a policy as a change leaves it, against the repo (policy.md §11), when it
+ * has them. */
+function requirementsRefusal(policy: unknown, repo: { kind: string; format: string }): Refusal | null {
+  if (!isObject(policy) || !Array.isArray(policy.requireAttachments)) return null;
+  const encrypted = isObject(policy.encryption) && policy.encryption.mode === "at-rest";
+  return checkRequirements(policy.requireAttachments as { predicateType?: unknown; signedBy?: unknown }[], { ...repo, encrypted });
 }
 
 /** An RFC 7396 merge patch of a policy: null removes a key, maven merges key by key. */
@@ -1697,7 +1732,7 @@ export function createRepo(body: unknown, by: string): MockRepo | Refusal {
     return invalid(`registry: one of ${registries.map((r) => r.name).join(", ")}`);
   }
   if (b.anonymousRead !== undefined && typeof b.anonymousRead !== "boolean") return invalid("anonymousRead: true or false");
-  const policyError = checkPolicy(b.policy, format, false);
+  const policyError = checkPolicy(b.policy, format, false) ?? requirementsRefusal(b.policy, { kind: String(kind), format });
   if (policyError) return policyError;
   if (kind === "proxy") {
     if (b.upstream === undefined || b.upstream === null) return invalid("upstream: a proxy repo needs one, by the name the configuration gives it");
@@ -1790,6 +1825,11 @@ export function updateRepo(repo: MockRepo, body: unknown, by: string): MockRepo 
     if (!admin && JSON.stringify(merged.members) !== JSON.stringify(seed.group.members)) return forbidden(`group.members: changing the members of ${repo.prefix} needs the admin role`);
     if (!admin && pathsKey(merged.paths) !== pathsKey(seed.group.paths)) return forbidden(`group.paths: changing the routes of ${repo.prefix} needs the admin role`);
     group = merged;
+  }
+
+  if (b.policy !== undefined) {
+    const refused = requirementsRefusal(mergePolicy(seed.policy, (b.policy as Record<string, unknown> | null) ?? null), { kind, format: seed.format });
+    if (refused) return refused;
   }
 
   const before = { anonymousRead: seed.anonymousRead, policy: seed.policy, upstream: seed.upstream, group: seed.group };

@@ -52,6 +52,11 @@ separate repository:
   tab follows until its report.
 - **A package**: versions grouped with their variants (architectures, wheel tags), npm's
   dist-tags on the versions they name, install snippets, what the metadata layer says.
+- **Required attachments** of a hosted repo, on its Settings tab: the attachments a version must
+  have, each verified of a predicate type (an SBOM, a provenance, a signature …) and signed by one
+  of the server's trusted names, before the repo serves it (`policy.requireAttachments`). A
+  package's page says how many of its versions each leaves out and lists them (`?unmet=`); a
+  version it leaves out is marked withheld, on its own page too.
 - **A version**: files with digests and download URLs, install and `oras`/`cosign` snippets,
   signatures, SBOMs and attestations (OCI referrers), the metadata layer, the manifest
   annotations and the raw OCI manifest.
