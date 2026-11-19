@@ -1,7 +1,7 @@
 // Generated from public/openapi.yaml by scripts/gen-api-types.ts. Do not edit: npm run gen:api.
 
 /** The commit of lajstrom/lajstrom whose /api/v1 these types describe. */
-export const serverApiCommit = "1ddd24017dbd2153ae3aa866525f586cc50101b4";
+export const serverApiCommit = "6dd853e9b6a0ec272c59c0e43a8f55aa810352ad";
 
 /**
  * components.schemas of the server's openapi.yaml with the UI's proposal; what the proposal adds
@@ -170,6 +170,23 @@ export type Schemas = {
        */
       versionPolicy?: "release" | "snapshot";
     };
+    /**
+     * A hosted repo of a format other than oci, not encrypted at rest, only (#1287): a version is
+     * served only once its manifest has, for each requirement, an attachment verified of its
+     * predicate type, or of one that continues it after a "/", signed by one of its names. Every
+     * version of the repo, those pushed before too; no allow rule lets one through.
+     */
+    requireAttachments?: Schemas["Requirement"][];
+  };
+  /**
+   * One required attachment of a repo. A signature counts as the predicate type
+   * https://sigstore.dev/cosign/sign/v1. A name the server's trust lacks, lajstrom, a name trusted
+   * for no predicate type the requirement matches, and the predicate type of verdicts are 400.
+   */
+  Requirement: {
+    predicateType: string;
+    /** Names of attachments.trust or attachments.keyless.identities; any one suffices. */
+    signedBy: string[];
   };
   /**
    * An RFC 7396 merge patch of the policy: a member sets its key, null removes it, maven merges key
@@ -188,6 +205,8 @@ export type Schemas = {
       maxSessionFiles?: number | null;
       versionPolicy?: "release" | "snapshot" | null;
     } | null;
+    /** Replaces the list whole; null removes it. */
+    requireAttachments?: Schemas["Requirement"][] | null;
   };
   RepoList: {
     repos: Schemas["Repo"][];
@@ -606,6 +625,10 @@ export type Schemas = {
   UserRequest: {
     name: string;
     password?: Schemas["Password"];
+    /**
+     * Binds the user to the admin role on *\/* in the same transaction. 400 with auth.approval
+     * second-admin: bind it with POST /api/v1/bindings, which waits for a second admin.
+     */
     admin?: boolean;
     kind?: "local" | "service";
     /**

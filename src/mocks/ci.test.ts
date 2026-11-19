@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { signInWithPassword, signOut } from "@/api/auth";
 import { apiGet, apiGetTagged, apiPath, sendChange, type ChangeRequest } from "@/api/client";
-import { ciPolicyChanges, createUser, type CIPolicyBody } from "@/api/mutations";
+import { ciPolicyChanges, type CIPolicyBody } from "@/api/mutations";
 import { getSession, setSession } from "@/api/session";
 import { needsStepUp } from "@/api/step-up";
 import type { AuditList, CIPolicy, CIPolicyList, WhoAmI } from "@/api/types";
@@ -41,7 +41,7 @@ function withToken(user: string) {
 /** Signs in as a web UI does, and gives the token the sign-in of an OIDC login: authenticated
  * at the IdP minutesAgo, with the methods of amr. */
 async function withSignIn(user: string, minutesAgo = 0, amr = ["pwd", "otp"]) {
-  await signInWithPassword(user, user === "frank" ? "correct horse" : user);
+  await signInWithPassword(user, user);
   recordSignIn(getSession()!.tokenId!, { at: Date.now() - minutesAgo * 60_000, amr });
 }
 
@@ -258,10 +258,9 @@ describe("a policy that writes", () => {
       status: 403,
       message: "policy billing-deploy: the admin who made the change that waits does not approve it: another admin does",
     });
-    await createUser({ name: "frank", password: "correct horse", admin: true });
-
-    await withSignIn("frank");
-    const frank = await apiGet<WhoAmI>(apiPath("whoami"));
+    // oscar, the demo's second admin.
+    await withSignIn("oscar");
+    const oscar = await apiGet<WhoAmI>(apiPath("whoami"));
     await expect(send({ ...ciPolicyChanges.approve("billing-deploy", made.etag!), ifMatch: undefined })).rejects.toMatchObject({
       status: 400,
       message: "If-Match: an approval names the revision it approves: send the ETag of the policy as you read it",
@@ -271,17 +270,17 @@ describe("a policy that writes", () => {
     // Changed meanwhile: an approval names what it approves.
     await withSignIn("admin");
     const changed = await send(ciPolicyChanges.replace("billing-deploy", { ...writer("billing-deploy"), claims: { project_id: ["77"], ref_path: ["refs/tags/*"] } }, made.etag));
-    await withSignIn("frank");
+    await withSignIn("oscar");
     await expect(send(ciPolicyChanges.approve("billing-deploy", made.etag!))).rejects.toMatchObject({ status: 412 });
     const approved = await send(ciPolicyChanges.approve("billing-deploy", changed.etag!));
-    expect(approved.data).toMatchObject({ state: "active", approvedBy: frank.principal, claims: { ref_path: ["refs/tags/*"] } });
+    expect(approved.data).toMatchObject({ state: "active", approvedBy: oscar.principal, claims: { ref_path: ["refs/tags/*"] } });
     await expect(send(ciPolicyChanges.approve("billing-deploy", approved.etag!))).rejects.toMatchObject({ status: 409, message: "policy billing-deploy waits for no approval" });
 
     // A renewal waits beside it; the policy keeps its expiry until another admin approves it.
     await expect(send(ciPolicyChanges.renew("billing-pending", undefined, null))).rejects.toMatchObject({ status: 404 });
     const asked = new Date(Date.now() + 90 * 86_400_000).toISOString();
     const renewed = await send(ciPolicyChanges.renew("billing-deploy", asked, approved.etag));
-    expect(renewed.data).toMatchObject({ state: "active", expiresAt: approved.data.expiresAt, updatedBy: frank.principal });
+    expect(renewed.data).toMatchObject({ state: "active", expiresAt: approved.data.expiresAt, updatedBy: oscar.principal });
     expect(days(renewed.data.renewal?.expiresAt)).toBeCloseTo(90, 1);
     await withSignIn("admin");
     const done = await send(ciPolicyChanges.approve("billing-deploy", renewed.etag!));

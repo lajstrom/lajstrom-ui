@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 
 import { apiGet, apiPath } from "@/api/client";
 import { isApproval } from "@/api/approvals";
-import { approveRequest, createBinding, createMaskToken, rejectRequest, updateUser } from "@/api/mutations";
+import { approveRequest, createBinding, createMaskToken, createUser, rejectRequest, updateUser } from "@/api/mutations";
 import { keepReason } from "@/api/reason";
 import { setSession } from "@/api/session";
 import type { Approval, ApprovalList, AuditList, Binding, CreatedApproval, ServerInfo, Token, User } from "@/api/types";
@@ -83,6 +83,15 @@ describe("requests for a second admin", () => {
     expect(made).toMatchObject({ principalName: "oscar", details: { changeReason: "CHG-3001: carol runs the registry on call", approval: { id: a.id } } });
     expect((await rows("approval.approve"))[0]).toMatchObject({ principalName: "oscar", details: { changeReason: "CHG-3001 checked by oscar" } });
     await expect(approveRequest(a.id, asOscar)).rejects.toMatchObject({ status: 409, message: `request ${a.id} is approved: it was decided` });
+  });
+
+  it("are the one way to an admin binding: a user is not made an admin with its creation", async () => {
+    signIn("admin");
+    await expect(createUser({ name: "second", password: "a long password", admin: true })).rejects.toMatchObject({
+      status: 400,
+      message: "admin: under auth.approval second-admin, a user is bound with POST /api/v1/bindings, which waits for a second admin, not made an admin here",
+    });
+    expect((await apiGet<{ users: User[] }>(apiPath("users"))).users.map((u) => u.name)).not.toContain("second");
   });
 
   it("are rejected by any admin, the requester withdrawing its own", async () => {

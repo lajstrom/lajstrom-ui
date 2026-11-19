@@ -35,6 +35,7 @@ export function CreateUserDialog() {
   const info = useQuery(infoQuery);
   const create = useCreateUser();
   const ready = name.trim() !== "" && password !== "";
+  const secondAdmin = info.data?.approval === "second-admin";
 
   const reset = () => {
     setName("");
@@ -44,7 +45,7 @@ export function CreateUserDialog() {
   };
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (ready) create.mutate({ name: name.trim(), password, ...(admin ? { admin: true } : {}) });
+    if (ready) create.mutate({ name: name.trim(), password, ...(admin && !secondAdmin ? { admin: true } : {}) });
   };
 
   return (
@@ -92,13 +93,22 @@ export function CreateUserDialog() {
           >
             <Input id={ids.password} type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </Field>
-          <label htmlFor={ids.admin} className="flex items-start gap-2 text-sm">
-            <input id={ids.admin} type="checkbox" className="mt-0.5 size-4 accent-primary" checked={admin} onChange={(e) => setAdmin(e.target.checked)} />
-            <span>
-              Admin: bind the user to the admin role on <span className="font-mono">*/*</span> in the same step. Every repo, plus users, bindings,
-              registries and the audit log.
-            </span>
-          </label>
+          {secondAdmin ? (
+            // With auth.approval second-admin the server makes no admin here: the binding waits
+            // for a second admin (docs/spec/rbac.md §13).
+            <p className="flex items-start gap-2 text-xs text-muted-foreground">
+              <Hourglass className="mt-0.5 size-3.5 shrink-0" />
+              To make the user an admin, bind it to the admin role on its page once it is made: the binding waits for another admin (auth.approval).
+            </p>
+          ) : (
+            <label htmlFor={ids.admin} className="flex items-start gap-2 text-sm">
+              <input id={ids.admin} type="checkbox" className="mt-0.5 size-4 accent-primary" checked={admin} onChange={(e) => setAdmin(e.target.checked)} />
+              <span>
+                Admin: bind the user to the admin role on <span className="font-mono">*/*</span> in the same step. Every repo, plus users, bindings,
+                registries and the audit log.
+              </span>
+            </label>
+          )}
           <FormError error={errorText(create.error)} />
           <DialogActions>
             <DialogClose asChild>
