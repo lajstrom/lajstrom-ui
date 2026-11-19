@@ -249,9 +249,10 @@ function RequestRow({ request: a, names, mine, admin, onApprove, onReject }: Req
   );
 }
 
-/** The queries a decision changes: the requests, and what an approval makes. */
+/** The queries a decision changes: the requests, how many wait (info), and what an approval
+ * makes. */
 function useDecision<T>(run: (v: T) => Promise<Approval>) {
-  return useMutation({ mutationFn: run, ...realistic(approvalsKey, bindingsQuery.queryKey, ["deploy-tokens"]) });
+  return useMutation({ mutationFn: run, ...realistic(approvalsKey, infoQuery.queryKey, bindingsQuery.queryKey, ["deploy-tokens"]) });
 }
 
 /**

@@ -1353,6 +1353,7 @@ const ipOf: Record<string, string> = {
   "user:alice": "10.8.0.21",
   "user:bob": "10.8.0.34",
   "user:carol": "10.8.0.47",
+  "user:erin": "10.8.0.31",
 };
 
 const clientOf: Record<string, string> = {
@@ -1432,6 +1433,24 @@ function auditLog(): (MockEvent & { id: number })[] {
       details: { client: "curl/8.5.0" },
       state: "failed",
       error: "the registry refused the blob: 413 Request Entity Too Large",
+    },
+  );
+  // erin's OIDC logins with auth.oidc.refresh.interval (rbac.md §8, Asking the IdP again): the
+  // first, which kept a refresh token; the group its ID token added at a refresh; and an older
+  // login, of another laptop, that the IdP refused, revoked by serve.
+  const idp = { issuer: "https://sso.example.com", subject: "00u8f3kq2w" };
+  events.push(
+    { at: ago(12), principal: "user:erin", action: "user.login", repo: "", subject: "user:erin", digest: null, ip: ipOf["user:erin"]!, details: { ...idp, groups: ["platform"], refresh: true, source: "oidc" } },
+    { at: ago(6, 4), principal: "anonymous", action: "user.groups", repo: "", subject: "user:erin", digest: null, ip: "", details: { ...idp, groups: ["platform", "payments-oncall"], previous: ["platform"], token: 31, source: "refresh" } },
+    {
+      at: ago(3, 2),
+      principal: "anonymous",
+      action: "token.revoke",
+      repo: "",
+      subject: "user:erin",
+      digest: null,
+      ip: "",
+      details: { id: 29, kind: "pat", name: `oidc ${ago(9, 5)} 7c1e`, reason: "refused", refreshedAt: ago(3, 2, 15), source: "refresh" },
     },
   );
   events.push(...ciAuditSeeds());

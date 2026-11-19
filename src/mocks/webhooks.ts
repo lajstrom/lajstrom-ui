@@ -27,6 +27,10 @@ const TYPES: WebhookEvent[] = [
   "ci.policy.approved",
   "ci.policy.expired",
   "ci.policy.deleted",
+  "approval.requested",
+  "approval.approved",
+  "approval.rejected",
+  "approval.expired",
 ];
 
 /** webhooks.allowedHosts of the demo's configuration: reached over http and at any address. */
@@ -92,6 +96,17 @@ const webhooks: Webhook[] = [
     createdAt: ago(60),
     updatedAt: before(2, 1),
   },
+  {
+    id: 5,
+    mask: "*/*",
+    url: "https://chat.example.com/hooks/T0001/B0007/admins",
+    events: ["approval.approved", "approval.expired", "approval.rejected", "approval.requested"],
+    active: true,
+    description: "tell the admins of the requests for a second admin",
+    createdBy: admin,
+    createdAt: ago(20),
+    updatedAt: ago(20),
+  },
 ];
 
 /** How a seeded delivery ended, or where it is: delivered with the receiver's status; failed
@@ -154,6 +169,19 @@ function seedRows(): SeedRow[] {
   ] as [number, Outcome][]) {
     rows.push({ webhook: 4, minutes, type: "version.published", outcome });
   }
+  // */*: each step of the seeded requests for a second admin (src/mocks/data/approvals.ts); the
+  // deploy token's over */payments reached */payments too, whose mask covers its.
+  for (const [minutes, type] of [
+    [12 * 1440, "approval.requested"],
+    [6 * 1440 + 120, "approval.requested"],
+    [5 * 1440 + 1200, "approval.rejected"],
+    [5 * 1440, "approval.expired"],
+    [1440 + 180, "approval.requested"],
+    [180, "approval.requested"],
+  ] as [number, string][]) {
+    rows.push({ webhook: 5, minutes, type, outcome: { state: "delivered", status: 200 } });
+  }
+  rows.push({ webhook: 2, minutes: 180, type: "approval.requested", outcome: { state: "delivered", status: 200 } });
   return rows;
 }
 

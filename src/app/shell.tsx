@@ -5,6 +5,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 
 import { lifetimeText, signInModes, signOut } from "@/api/auth";
 import { callerQuery, infoQuery } from "@/api/queries";
+import type { ServerInfo } from "@/api/types";
 import { RelativeTime } from "@/components/common";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,7 @@ import { CommandPalette } from "./command-palette";
 import { config, logoSrc } from "./config";
 import { demoMode, exitDemo, resetDemo } from "./demo";
 import { IdleGuard } from "./idle-guard";
-import { useIdle } from "./idle";
+import { useIdle, usePollsAllowed } from "./idle";
 import { openReasonDialog, useKeptReason } from "./reason";
 import { useSession } from "./session";
 import { SkewBar } from "./skew-bar";
@@ -45,10 +46,11 @@ function Logo() {
   );
 }
 
-type Page = { to: string; icon: React.ReactNode; label: string };
+/** A page of the header; waiting is how many requests for a second admin wait for the admin. */
+type Page = { to: string; icon: React.ReactNode; label: string; waiting?: number };
 
 /** The pages of the header: everyone's, then the admin's. */
-function pagesFor(admin: boolean): Page[] {
+function pagesFor(admin: boolean, waiting: number): Page[] {
   const pages: Page[] = [
     { to: "/", icon: <Boxes />, label: "Repositories" },
     { to: "/api-docs", icon: <Braces />, label: "API" },
@@ -58,9 +60,34 @@ function pagesFor(admin: boolean): Page[] {
     ...pages,
     { to: "/registries", icon: <Server />, label: "Registries" },
     { to: "/audit", icon: <History />, label: "Audit" },
-    { to: "/access", icon: <Users />, label: "Access" },
+    { to: "/access", icon: <Users />, label: "Access", waiting },
     { to: "/webhooks", icon: <Webhook />, label: "Webhooks" },
   ];
+}
+
+/** How many requests for a second admin the admin could approve (info.pendingApprovals; rbac.md
+ * §13, Telling the second admin). Under second-admin, info is asked again each minute while
+ * someone is there, so that the timer is no use of an idle sign-in (src/api/idle.ts). */
+function useWaiting(admin: boolean): number {
+  const polls = usePollsAllowed();
+  const info = useQuery({
+    ...infoQuery,
+    select: (i: ServerInfo) => i.pendingApprovals ?? 0,
+    enabled: admin,
+    staleTime: 60_000,
+    refetchInterval: (q) => (polls && q.state.data?.approval === "second-admin" ? 60_000 : false),
+  });
+  return admin ? (info.data ?? 0) : 0;
+}
+
+/** The count of the requests that wait, by Access. */
+function Waiting({ n }: { n: number }) {
+  return (
+    <span className="rounded-full bg-primary px-1.5 text-[11px] leading-4 font-semibold text-primary-foreground tabular-nums">
+      <span className="sr-only">requests waiting: </span>
+      {n}
+    </span>
+  );
 }
 
 function useActivePage(): (to: string) => boolean {
@@ -80,6 +107,7 @@ function NavLink({ page, active }: { page: Page; active: boolean }) {
     >
       {page.icon}
       {page.label}
+      {page.waiting ? <Waiting n={page.waiting} /> : null}
     </Link>
   );
 }
@@ -92,14 +120,15 @@ function PagesMenu({ pages, className }: { pages: Page[]; className?: string }) 
     <Menu>
       <Tooltip content="Pages">
         <MenuTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label="Pages" className={className}>
+          <Button variant="ghost" size="icon" aria-label="Pages" className={cn("relative", className)}>
             <MenuIcon />
+            {pages.some((p) => p.waiting) ? <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-primary" /> : null}
           </Button>
         </MenuTrigger>
       </Tooltip>
       <MenuContent align="start" className="min-w-44">
         {pages.map((p) => (
-          <MenuItem key={p.to} icon={p.icon} onSelect={() => void navigate({ to: p.to })} hint={active(p.to) ? <Check className="size-3.5" /> : null}>
+          <MenuItem key={p.to} icon={p.icon} onSelect={() => void navigate({ to: p.to })} hint={active(p.to) ? <Check className="size-3.5" /> : p.waiting ? <Waiting n={p.waiting} /> : null}>
             {p.label}
           </MenuItem>
         ))}
@@ -264,7 +293,8 @@ export function AppShell() {
   const signedOutDemo = demo.active && !session;
   const walled = signedOutDemo && location.pathname !== "/sign-in" && location.pathname !== "/first-admin";
   const admin = who.data?.admin === true;
-  const pages = pagesFor(admin);
+  const waiting = useWaiting(admin);
+  const pages = pagesFor(admin, waiting);
   // The links fit next to the search and the menus, with their labels, from md; the admin's six
   // from xl. Below that they are in a menu.
   const wide = admin ? { nav: "hidden xl:flex", menu: "xl:hidden" } : { nav: "hidden md:flex", menu: "md:hidden" };

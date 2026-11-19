@@ -179,4 +179,15 @@ describe("requests for a second admin", () => {
     signIn("bob");
     await expect(requests()).rejects.toMatchObject({ status: 403 });
   });
+
+  it("that wait for an admin are counted in its info: those of the others, and to an admin only", async () => {
+    for (const name of ["admin", "oscar"]) {
+      signIn(name);
+      const me = `user:${await uidOf(name)}`;
+      const theirs = (await requests("pending")).filter((r) => r.requestedBy !== me);
+      expect((await apiGet<ServerInfo>(apiPath("info"))).pendingApprovals).toBe(theirs.length);
+    }
+    signIn("alice");
+    expect(await apiGet<ServerInfo>(apiPath("info"))).not.toHaveProperty("pendingApprovals");
+  });
 });

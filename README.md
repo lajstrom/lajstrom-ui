@@ -80,7 +80,9 @@ separate repository:
   deploy token's secret is shown once with its request and works once it is approved. Another
   admin approves a request with the admin's password, or a fresh sign-in through single sign-on
   (signing in again when it is older than 10 minutes), which makes the change; any admin rejects
-  one, its requester withdrawing it; one waits 7 days at most. The tab lists them by state.
+  one, its requester withdrawing it; one waits 7 days at most. The tab lists them by state. The
+  header shows by Access how many wait for you, those you could approve, asked again each minute
+  while you are there; a webhook of `*/*` takes the `approval.*` events, for the admins' chat.
 - **Access review**, a tab of Access: the server's access report of who has what, for everyone,
   people or systems, with the flags a reviewer looks for (`admin`, `allRepos`, `noExpiry`,
   `unused` after the days asked, `beyondMaxTTL`, `inactive` …) and a filter by flag. The report
@@ -474,7 +476,7 @@ versions. Against an older server some screens say that the server has no endpoi
 
 | UI | Built for the server's API at | Works with |
 | --- | --- | --- |
-| `main` | lajstrom/lajstrom@96bb393 (v0.0.1-1218-g96bb393) | the server at that commit; its `main`, checked every night |
+| `main` | lajstrom/lajstrom@0ad8fa7 (v0.0.1-1232-g0ad8fa7) | the server at that commit; its `main`, checked every night |
 
 ## Layout
 

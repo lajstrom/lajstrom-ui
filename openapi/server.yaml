@@ -1,4 +1,4 @@
-# Vendored from lajstrom/lajstrom@96bb3936817bfdd284fb8f63e60bb16312abc930 (v0.0.1-1218-g96bb393), internal/api/openapi.yaml. Do not edit:
+# Vendored from lajstrom/lajstrom@0ad8fa7937f239856e887cb49aa73b277f207671 (v0.0.1-1232-g0ad8fa7), internal/api/openapi.yaml. Do not edit:
 # npm run update:openapi -- <ref> replaces it and regenerates public/openapi.yaml and src/api/openapi.gen.ts.
 openapi: 3.1.0
 info:
@@ -4195,6 +4195,13 @@ components:
             over a mask with write are answered 202 with a request for a second admin
             (docs/spec/rbac.md §13). A server before it answers none.
         caller: {$ref: "#/components/schemas/Caller"}
+        pendingApprovals:
+          type: integer
+          minimum: 0
+          description: >-
+            While caller.admin is true, the number of requests for a second admin that are
+            pending, not expired, and not made by the caller: those it could approve
+            (docs/spec/rbac.md §13). Absent for every other caller, and from a server before it.
     FormatInfo:
       description: "A format plugin the server serves, and the artifact type of its manifests."
       type: object
@@ -4231,7 +4238,8 @@ components:
             type: string
             enum: [version.published, version.deleted, repo.created, repo.deleted, policy.rule.created, policy.rule.deleted,
               policy.verdict.created, policy.verdict.deleted, ci.policy.created, ci.policy.updated, ci.policy.renewed,
-              ci.policy.approved, ci.policy.expired, ci.policy.deleted]
+              ci.policy.approved, ci.policy.expired, ci.policy.deleted, approval.requested, approval.approved, approval.rejected,
+              approval.expired]
         active: {type: boolean}
         description: {type: string}
         createdBy: {type: string, description: The principal that created it.}
@@ -4266,7 +4274,8 @@ components:
             type: string
             enum: [version.published, version.deleted, repo.created, repo.deleted, policy.rule.created, policy.rule.deleted,
               policy.verdict.created, policy.verdict.deleted, ci.policy.created, ci.policy.updated, ci.policy.renewed,
-              ci.policy.approved, ci.policy.expired, ci.policy.deleted]
+              ci.policy.approved, ci.policy.expired, ci.policy.deleted, approval.requested, approval.approved, approval.rejected,
+              approval.expired]
         active: {type: boolean}
         description: {type: string, maxLength: 256}
         changeReason: {$ref: "#/components/schemas/ChangeReason"}

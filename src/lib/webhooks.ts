@@ -19,6 +19,10 @@ export const webhookEvents: { type: WebhookEvent; when: string }[] = [
   { type: "ci.policy.approved", when: "a CI trust policy, or its renewal, approved by a second admin" },
   { type: "ci.policy.expired", when: "a CI trust policy expired" },
   { type: "ci.policy.deleted", when: "a CI trust policy deleted" },
+  { type: "approval.requested", when: "a change asked of a second admin" },
+  { type: "approval.approved", when: "a request approved by a second admin, which made its change" },
+  { type: "approval.rejected", when: "a request rejected, or withdrawn by the admin who made it" },
+  { type: "approval.expired", when: "a request still pending 7 days after it was made" },
 ];
 
 /** Whether a mask names one repo, as opposed to a wildcard (rbac.md §3). */
