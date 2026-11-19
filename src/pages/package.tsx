@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { AlertTriangle, Info, Package as PackageIcon, Trash2 } from "lucide-react";
+import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
+import { AlertTriangle, FileCheck2, Info, Package as PackageIcon, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { infoQuery, packageQuery, repoQuery, versionQuery, versionsQuery } from "@/api/queries";
+import { requirementText } from "@/api/requirements";
 import type { Repo } from "@/api/types";
 import { ErrorState, FormatMark, PageHeader, Principal, RelativeTime, SignedBadge } from "@/components/common";
 import { PointerBadges } from "@/components/pointers";
@@ -21,6 +22,7 @@ import { formatSpec, snippetContext, type FormatSpec } from "@/lib/formats";
 import { variantShort } from "@/lib/variants";
 
 import { MetadataRows } from "./metadata";
+import { useWithheld, type Withheld } from "./requirements";
 import { derivePackage, groupVersions, latestByPointer, packageCrumbs, type PackageInfo, type VersionGroup } from "./package-model";
 import { VersionPage } from "./version";
 import { deletes } from "./version-changes";
@@ -60,6 +62,14 @@ function PackagePage({ format, repoName, name }: { format: string; repoName: str
   const [deleting, setDeleting] = useState(false);
   const selected = groups.filter((g) => ticked.has(g.version));
   const selectable = repo.data !== undefined && deletes(repo.data);
+  // The required attachments of the repo, and the versions each leaves out; ?unmet=<n> shows
+  // those of the n-th (policy.md §11).
+  const withheld = useWithheld(repo.data, name);
+  const search = useSearch({ strict: false }) as { unmet?: string };
+  const navigate = useNavigate();
+  const lacking = withheld[Number(search.unmet) - 1];
+  const shown = lacking?.versions ? groups.filter((g) => lacking.versions!.has(g.version)) : groups;
+  const showLacking = (n: number | undefined) => void navigate({ to: ".", search: (p: { unmet?: string }) => ({ ...p, unmet: n ? String(n) : undefined }), replace: true });
 
   if (failed) {
     return (
@@ -114,9 +124,16 @@ function PackagePage({ format, repoName, name }: { format: string; repoName: str
               ) : null
             }
             description={
-              versions.data
-                ? `${pluralize(groups.length, "version")}${spec.variantLabel ? `, ${pluralize(groups.reduce((n, g) => n + g.variants.length, 0), "manifest")} (one per ${spec.variantLabel.toLowerCase()})` : ""} · tags are immutable`
-                : null
+              lacking ? (
+                <>
+                  {pluralize(shown.length, "version")} of {groups.length} lacking {requirementText(lacking.requirement)}, withheld while the repo requires it ·{" "}
+                  <button type="button" className="cursor-pointer text-primary hover:underline" onClick={() => showLacking(undefined)}>
+                    every version
+                  </button>
+                </>
+              ) : versions.data ? (
+                `${pluralize(groups.length, "version")}${spec.variantLabel ? `, ${pluralize(groups.reduce((n, g) => n + g.variants.length, 0), "manifest")} (one per ${spec.variantLabel.toLowerCase()})` : ""} · tags are immutable`
+              ) : null
             }
           />
           {versions.isError ? (
@@ -133,7 +150,8 @@ function PackagePage({ format, repoName, name }: { format: string; repoName: str
               repo={repoName}
               name={name}
               spec={spec}
-              groups={groups}
+              groups={shown}
+              withheld={withheld}
               ticked={selectable ? ticked : undefined}
               onTick={(versions, on) =>
                 setTicked((prev) => {
@@ -161,6 +179,7 @@ function PackagePage({ format, repoName, name }: { format: string; repoName: str
         ) : null}
 
         <aside className="min-w-0 space-y-4">
+          {withheld.length ? <RequiredCard withheld={withheld} total={groups.length} shown={Number(search.unmet) || undefined} onShow={showLacking} /> : null}
           {repo.data && p ? <InstallCard repo={repo.data} pkg={p} spec={spec} /> : <Skeleton className="h-40" />}
           {p ? <AboutCard pkg={p} spec={spec} format={format} /> : null}
           {p ? <PackageFacts pkg={p} format={format} repoName={repoName} spec={spec} /> : null}
@@ -176,6 +195,7 @@ function VersionsTable({
   name,
   spec,
   groups,
+  withheld,
   ticked,
   onTick,
 }: {
@@ -184,6 +204,8 @@ function VersionsTable({
   name: string;
   spec: FormatSpec;
   groups: VersionGroup[];
+  /** What the repo's required attachments leave out, for a version's badge. */
+  withheld: Withheld[];
   /** The versions ticked for a batch delete; no boxes without it. */
   ticked?: ReadonlySet<string>;
   onTick: (versions: string[], on: boolean) => void;
@@ -254,6 +276,7 @@ function VersionsTable({
                 </Link>
                 {i === 0 && !tagged ? <Badge tone="primary">{isRaw ? "current" : "latest"}</Badge> : null}
                 <PointerBadges pointers={g.pointers} />
+                <WithheldBadge withheld={withheld} version={g.version} />
                 {g.yanked ? (
                   <Tooltip content={g.yanked.reason ? `Yanked: ${g.yanked.reason}` : "Yanked: installers skip it unless pinned (PEP 592)"}>
                     <Badge tone="warning">yanked</Badge>
@@ -392,6 +415,48 @@ function PackageFacts({ pkg, format, repoName, spec }: { pkg: PackageInfo; forma
             </Link>
           </Property>
         </Properties>
+      </CardBody>
+    </Card>
+  );
+}
+
+/** A version that a required attachment leaves out: the repo does not serve it. */
+function WithheldBadge({ withheld, version }: { withheld: Withheld[]; version: string }) {
+  const lacks = withheld.filter((w) => w.versions?.has(version)).map((w) => requirementText(w.requirement));
+  if (!lacks.length) return null;
+  return (
+    <Tooltip content={`Not served: it lacks ${lacks.join(", and ")}, which the repo requires. It is served once the attachment is pushed and verified.`}>
+      <Badge tone="danger">withheld</Badge>
+    </Tooltip>
+  );
+}
+
+/** The repo's required attachments, how many versions of the package each leaves out, and the way
+ * to them (?unmet=). */
+function RequiredCard({ withheld, total, shown, onShow }: { withheld: Withheld[]; total: number; shown: number | undefined; onShow: (n: number | undefined) => void }) {
+  return (
+    <Card>
+      <CardHeader icon={<FileCheck2 />} title="Required attachments" description="The repo serves a version only once it has each of these, verified." />
+      <CardBody className="space-y-2.5 text-sm">
+        {withheld.map((w, i) => (
+          <div key={i} className="space-y-0.5">
+            <p>{requirementText(w.requirement)}</p>
+            <p className="text-xs text-muted-foreground">
+              {w.versions === undefined ? (
+                "…"
+              ) : w.versions.size === 0 ? (
+                `Every version of ${pluralize(total, "version")} has it.`
+              ) : (
+                <>
+                  {pluralize(w.versions.size, "version")} of {total} {w.versions.size === 1 ? "lacks" : "lack"} it ·{" "}
+                  <button type="button" className="cursor-pointer text-primary hover:underline" onClick={() => onShow(shown === i + 1 ? undefined : i + 1)}>
+                    {shown === i + 1 ? "every version" : "show them"}
+                  </button>
+                </>
+              )}
+            </p>
+          </div>
+        ))}
       </CardBody>
     </Card>
   );

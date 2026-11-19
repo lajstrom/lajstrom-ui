@@ -9,6 +9,7 @@ import { Globe, Save, ShieldCheck, Trash2 } from "lucide-react";
 import { useId, useState, type FormEvent } from "react";
 
 import { useChanges } from "@/api/change";
+import { mayRequire } from "@/api/requirements";
 import { callerQuery, infoQuery, reposQuery } from "@/api/queries";
 import type { Repo, RepoPolicy } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ import { formatSpec } from "@/lib/formats";
 
 import { settingKey, settingOf, useDeleteRepo, useRepoUpdate, useSetting, type RepoSetting } from "./repo-changes";
 import { FieldError, MembersFields, UpstreamFields } from "./repo-fields";
+import { RequirementsCard } from "./repo-requirements";
 import { defaultMaxFileSize, fieldOf, groupForm, groupPatch, policyPatch, repoFields, sizeBytes, sizeParts, upstreamForm, upstreamPatch, type SizeUnit } from "./repo-form";
 
 export function RepoSettings({ repo }: { repo: Repo }) {
@@ -35,6 +37,10 @@ export function RepoSettings({ repo }: { repo: Repo }) {
       {repo.kind !== "group" ? (
         // Keyed by the policy, so that the form shows the server's once it changes or goes back.
         <PolicyCard key={JSON.stringify(repo.policy ?? null)} repo={repo} change={changes.get("policy")} />
+      ) : null}
+      {mayRequire(repo) ? (
+        // Keyed by the requirements, so that the form shows the server's once a change is saved.
+        <RequirementsCard key={JSON.stringify(repo.policy?.requireAttachments ?? null)} repo={repo} />
       ) : null}
       {repo.upstream ? <UpstreamSettings key={JSON.stringify(repo.upstream)} repo={repo} /> : null}
       {repo.group ? <GroupSettings key={JSON.stringify(repo.group)} repo={repo} /> : null}

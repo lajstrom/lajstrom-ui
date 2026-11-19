@@ -36,11 +36,11 @@ export function normalizeRepo(r: RepoAnswer): Repo {
 
 /** Every page of one of the server's lists, following `next`: users and bindings, which an
  * admin reads whole. */
-async function allPages<T>(path: string, key: string, signal: AbortSignal): Promise<T[]> {
+export async function allPages<T>(path: string, key: string, signal: AbortSignal, query: Record<string, string | string[]> = {}): Promise<T[]> {
   const items: T[] = [];
   let cursor: string | undefined;
   for (let pages = 0; pages < 100; pages++) {
-    const page = await apiGet<Record<string, unknown> & { next?: string }>(path, { cursor }, signal);
+    const page = await apiGet<Record<string, unknown> & { next?: string }>(path, { ...query, cursor }, signal);
     items.push(...((page[key] as T[] | undefined) ?? []));
     cursor = page.next;
     if (!cursor) break;

@@ -6,6 +6,7 @@ import {
   Braces,
   Download,
   FileText,
+  FileX2,
   Fingerprint,
   Link2,
   ShieldCheck,
@@ -14,6 +15,7 @@ import {
 
 import { ApiError, isUnavailable } from "@/api/client";
 import { attachmentsQuery, infoQuery, manifestQuery, packageQuery, repoQuery, versionQuery, versionsQuery } from "@/api/queries";
+import { requirementText } from "@/api/requirements";
 import type { Attachment, ManifestEntry, Repo, VariantDetail, VersionDetail } from "@/api/types";
 import { ErrorState, FormatMark, PageHeader, Principal, RelativeTime } from "@/components/common";
 import { PointerBadges } from "@/components/pointers";
@@ -35,6 +37,7 @@ import { ociSnippets, referrerKinds } from "@/lib/formats/common";
 
 import { MetadataRows } from "./metadata";
 import { latestByPointer, packageCrumbs } from "./package-model";
+import { useWithheld } from "./requirements";
 import { VersionActions } from "./version-dialogs";
 
 type Props = { format: string; repoName: string; name: string; version: string };
@@ -75,6 +78,9 @@ export function VersionPage({ format, repoName, name, version }: Props) {
   // npm's dist-tag latest is a badge of its own among the pointers.
   const isLatest = latest === version && !d?.pointers.some((p) => p.name === "latest");
   const isRaw = format === "raw";
+  // The required attachments of the repo this variant lacks: the repo does not serve it (policy.md §11).
+  const withheld = useWithheld(repo.data, name);
+  const lacks = variant ? withheld.filter((w) => w.digests?.has(variant.digest)).map((w) => requirementText(w.requirement)) : [];
 
   const crumbs = packageCrumbs(format, repoName, name, version);
   if (detail.isError) {
@@ -145,6 +151,17 @@ export function VersionPage({ format, repoName, name, version }: Props) {
         }
         actions={repo.data && d ? <VersionActions repo={repo.data} name={name} detail={d} versions={versions.data?.length} /> : null}
       />
+
+      {lacks.length ? (
+        <div role="status" className="mb-4 flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm">
+          <FileX2 className="mt-0.5 size-4 shrink-0 text-danger" />
+          <span>
+            <span className="font-medium">Not served.</span> This {d && d.variants.length > 1 ? spec.variantLabel?.toLowerCase() : "version"} lacks {lacks.join(", and ")}, which the
+            repo requires (policy.requireAttachments): the indexes leave it out and its downloads are refused. It is served once the attachment is
+            pushed and verified.
+          </span>
+        </div>
+      ) : null}
 
       {d && d.variants.length > 1 ? (
         <div className="mb-4 flex flex-wrap items-center gap-2">
