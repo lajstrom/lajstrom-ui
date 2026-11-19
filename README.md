@@ -68,7 +68,8 @@ separate repository:
   (`auth.localPasswords: false`), the UI sets none.
 - **Requests for a second admin**, a tab of Access: with the server's `auth.approval:
   second-admin`, an admin binding, a binding on `*/*` and a deploy token over a mask that
-  publishes are requests in place of the change, which the dialogs say before they are sent. A
+  publishes are requests in place of the change, which the dialogs say before they are sent; a
+  new user is then made an admin by such a binding, not by its creation. A
   deploy token's secret is shown once with its request and works once it is approved. Another
   admin approves a request with the admin's password, or a fresh sign-in through single sign-on
   (signing in again when it is older than 10 minutes), which makes the change; any admin rejects
@@ -466,7 +467,7 @@ versions. Against an older server some screens say that the server has no endpoi
 
 | UI | Built for the server's API at | Works with |
 | --- | --- | --- |
-| `main` | lajstrom/lajstrom@1ddd240 (v0.0.1-1176-g1ddd240) | the server at that commit; its `main`, checked every night |
+| `main` | lajstrom/lajstrom@6dd853e (v0.0.1-1198-g6dd853e) | the server at that commit; its `main`, checked every night |
 
 ## Layout
 

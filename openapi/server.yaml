@@ -1,4 +1,4 @@
-# Vendored from lajstrom/lajstrom@1ddd24017dbd2153ae3aa866525f586cc50101b4 (v0.0.1-1176-g1ddd240), internal/api/openapi.yaml. Do not edit:
+# Vendored from lajstrom/lajstrom@6dd853e9b6a0ec272c59c0e43a8f55aa810352ad (v0.0.1-1198-g6dd853e), internal/api/openapi.yaml. Do not edit:
 # npm run update:openapi -- <ref> replaces it and regenerates public/openapi.yaml and src/api/openapi.gen.ts.
 openapi: 3.1.0
 info:
@@ -299,6 +299,24 @@ paths:
           schema:
             type: array
             items: {type: string, enum: [signature, sbom, scan, provenance, attestation, other]}
+          style: form
+          explode: true
+        - name: unmet
+          in: query
+          description: >-
+            With signedBy, keeps the variants that the requirement {predicateType: unmet, signedBy}
+            would refuse (#1287): those without an attachment verified of this predicate type, or of
+            one that continues it after a "/", signed by one of the names; a name the server's trust
+            does not have meets nothing. Whatever the repo's policy says. Once; with without, a
+            variant meets both.
+          schema: {type: string, format: uri, maxLength: 256}
+        - name: signedBy
+          in: query
+          description: A name of the requirement of unmet, once per name; required with unmet, refused without it.
+          schema:
+            type: array
+            maxItems: 16
+            items: {type: string}
           style: form
           explode: true
       responses:
@@ -1361,7 +1379,10 @@ paths:
       summary: Create a local user or a service account (admin).
       description: >-
         While auth.localPasswords is false no password is set, so a local user is 400, naming the
-        setting (docs/spec/rbac.md §1, Local passwords); a service account is made as before.
+        setting (docs/spec/rbac.md §1, Local passwords); a service account is made as before. With
+        auth.approval second-admin, admin true is 400, naming the setting, and nothing is made: the
+        admin role is bound with POST /api/v1/bindings, which waits for a second admin
+        (docs/spec/rbac.md §13).
       requestBody:
         required: true
         content:
@@ -2588,6 +2609,32 @@ components:
                 Which versions a deploy may add: release versions, or the builds of SNAPSHOT
                 versions, each deploy one more build under its own tag. The other kind is 400; a
                 change applies to the deploys after it.
+        requireAttachments:
+          type: array
+          minItems: 1
+          maxItems: 16
+          description: >-
+            A hosted repo of a format other than oci, not encrypted at rest, only (#1287): a version
+            is served only once its manifest has, for each requirement, an attachment verified of
+            its predicate type, or of one that continues it after a "/", signed by one of its names.
+            Every version of the repo, those pushed before too; no allow rule lets one through.
+          items: {$ref: "#/components/schemas/Requirement"}
+    Requirement:
+      type: object
+      description: >-
+        One required attachment of a repo. A signature counts as the predicate type
+        https://sigstore.dev/cosign/sign/v1. A name the server's trust lacks, lajstrom, a name trusted
+        for no predicate type the requirement matches, and the predicate type of verdicts are 400.
+      additionalProperties: false
+      required: [predicateType, signedBy]
+      properties:
+        predicateType: {type: string, format: uri, maxLength: 256, examples: ["https://spdx.dev/Document"]}
+        signedBy:
+          type: array
+          minItems: 1
+          maxItems: 16
+          description: Names of attachments.trust or attachments.keyless.identities; any one suffices.
+          items: {type: string}
     PolicyPatch:
       type: object
       description: >-
@@ -2611,6 +2658,12 @@ components:
             sessionTimeout: {type: [string, "null"]}
             maxSessionFiles: {type: [integer, "null"], minimum: 1, maximum: 999}
             versionPolicy: {type: [string, "null"], enum: [release, snapshot, null]}
+        requireAttachments:
+          type: [array, "null"]
+          minItems: 1
+          maxItems: 16
+          description: Replaces the list whole; null removes it.
+          items: {$ref: "#/components/schemas/Requirement"}
     RepoList:
       type: object
       required: [repos]
@@ -3062,7 +3115,11 @@ components:
       properties:
         name: {type: string}
         password: {$ref: "#/components/schemas/Password"}
-        admin: {type: boolean}
+        admin:
+          type: boolean
+          description: >-
+            Binds the user to the admin role on */* in the same transaction. 400 with auth.approval
+            second-admin: bind it with POST /api/v1/bindings, which waits for a second admin.
         kind: {type: string, enum: [local, service], default: local}
         owner: {type: string, description: "A service account's owner: user:<name> or user:<uid> of a user that is not a service account, or group:<name>."}
         changeReason: {$ref: "#/components/schemas/ChangeReason"}

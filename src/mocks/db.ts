@@ -453,6 +453,10 @@ export function createUser(body: unknown, by: string): User | Refusal {
   if (refused) return refused;
   const b = body as Record<string, unknown>;
   if (b.admin !== undefined && b.admin !== null && typeof b.admin !== "boolean") return invalid("admin: must not be a JSON " + typeof b.admin);
+  // With auth.approval second-admin the admin role is a binding, which waits (rbac.md §13).
+  if (b.admin === true && serverInfo.approval === "second-admin") {
+    return invalid("admin: under auth.approval second-admin, a user is bound with POST /api/v1/bindings, which waits for a second admin, not made an admin here");
+  }
   const name = str(b.name);
   const bad = nameRefusal(name) ?? passwordRefusal(str(b.password));
   if (bad) return bad;
