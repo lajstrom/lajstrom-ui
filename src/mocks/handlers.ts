@@ -295,7 +295,10 @@ const num = (v: string | null, fallback: number) => {
 
 export const handlers = [
   get("*/api/v1/info", async () => {
-    return HttpResponse.json({ ...db.serverInfo, caller: db.caller() });
+    // An admin is told how many requests it could approve, whatever auth.approval says (rbac.md
+    // §13, Telling the second admin).
+    const caller = db.caller();
+    return HttpResponse.json({ ...db.serverInfo, caller, ...(caller.admin ? { pendingApprovals: approvals.pendingFor(`user:${caller.name}`) } : {}) });
   }),
 
   // The sign-in of a web UI, with a DPoP proof (docs/api.md, Sign in): its Authorization is

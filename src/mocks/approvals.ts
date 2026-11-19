@@ -119,6 +119,13 @@ export function requestMaskToken(repoMask: string, rest: unknown, by: string): C
 }
 
 /** GET /api/v1/approvals: a page, newest first, of a state or of every one. */
+/** The requests pending, not expired, and not made by the admin by (user:<name>): those it
+ * could approve, info's pendingApprovals (Index.CountPendingApprovals). */
+export function pendingFor(by: string): number {
+  expire();
+  return rows.filter((r) => r.state === "pending" && r.requestedBy !== by).length;
+}
+
 export function listApprovals(state: string | null, cursor: string | null, limit: number): ApprovalList | Refusal {
   expire();
   if (state !== null && !["pending", "approved", "rejected", "expired"].includes(state)) {

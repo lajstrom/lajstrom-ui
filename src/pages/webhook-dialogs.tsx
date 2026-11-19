@@ -107,7 +107,9 @@ function WebhookFields({ draft, set, mask, create }: FieldsProps) {
           </label>
         ))}
         <p className="text-xs text-muted-foreground">
-          None checked: every type, those added later too. The <span className="font-mono">ci.policy</span> events reach only a webhook whose mask has a *.
+          None checked: every type, those added later too. The <span className="font-mono">ci.policy</span> and{" "}
+          <span className="font-mono">approval</span> events reach only a webhook whose mask has a * and covers theirs: a request for an admin
+          binding or one on */* only a webhook of */*.
         </p>
       </fieldset>
       <Field label="Description" htmlFor={ids.description} hint="Optional, at most 256 bytes: what the receiver does with the events.">

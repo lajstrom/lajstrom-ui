@@ -1,7 +1,7 @@
 // Generated from public/openapi.yaml by scripts/gen-api-types.ts. Do not edit: npm run gen:api.
 
 /** The commit of lajstrom/lajstrom whose /api/v1 these types describe. */
-export const serverApiCommit = "96bb3936817bfdd284fb8f63e60bb16312abc930";
+export const serverApiCommit = "0ad8fa7937f239856e887cb49aa73b277f207671";
 
 /**
  * components.schemas of the server's openapi.yaml with the UI's proposal; what the proposal adds
@@ -1516,6 +1516,12 @@ export type Schemas = {
      */
     approval?: "none" | "second-admin";
     caller: Schemas["Caller"];
+    /**
+     * While caller.admin is true, the number of requests for a second admin that are pending, not
+     * expired, and not made by the caller: those it could approve (docs/spec/rbac.md §13). Absent
+     * for every other caller, and from a server before it.
+     */
+    pendingApprovals?: number;
   };
   /** A format plugin the server serves, and the artifact type of its manifests. */
   FormatInfo: {
@@ -1545,7 +1551,7 @@ export type Schemas = {
     mask: string;
     url: string;
     /** The types it gets; empty, every type. */
-    events: ("version.published" | "version.deleted" | "repo.created" | "repo.deleted" | "policy.rule.created" | "policy.rule.deleted" | "policy.verdict.created" | "policy.verdict.deleted" | "ci.policy.created" | "ci.policy.updated" | "ci.policy.renewed" | "ci.policy.approved" | "ci.policy.expired" | "ci.policy.deleted")[];
+    events: ("version.published" | "version.deleted" | "repo.created" | "repo.deleted" | "policy.rule.created" | "policy.rule.deleted" | "policy.verdict.created" | "policy.verdict.deleted" | "ci.policy.created" | "ci.policy.updated" | "ci.policy.renewed" | "ci.policy.approved" | "ci.policy.expired" | "ci.policy.deleted" | "approval.requested" | "approval.approved" | "approval.rejected" | "approval.expired")[];
     active: boolean;
     description: string;
     /** The principal that created it. */
@@ -1567,7 +1573,7 @@ export type Schemas = {
   WebhookRequest: {
     mask?: string;
     url?: string;
-    events?: ("version.published" | "version.deleted" | "repo.created" | "repo.deleted" | "policy.rule.created" | "policy.rule.deleted" | "policy.verdict.created" | "policy.verdict.deleted" | "ci.policy.created" | "ci.policy.updated" | "ci.policy.renewed" | "ci.policy.approved" | "ci.policy.expired" | "ci.policy.deleted")[];
+    events?: ("version.published" | "version.deleted" | "repo.created" | "repo.deleted" | "policy.rule.created" | "policy.rule.deleted" | "policy.verdict.created" | "policy.verdict.deleted" | "ci.policy.created" | "ci.policy.updated" | "ci.policy.renewed" | "ci.policy.approved" | "ci.policy.expired" | "ci.policy.deleted" | "approval.requested" | "approval.approved" | "approval.rejected" | "approval.expired")[];
     active?: boolean;
     description?: string;
     changeReason?: Schemas["ChangeReason"];

@@ -150,8 +150,25 @@ describe("the webhooks of every mask", () => {
     const all = await list(null);
     expect(all.map((w) => w.mask)).toEqual(expect.arrayContaining(["oci/*", "*/*", "apt/ubuntu-internal", "raw/assets"]));
     expect(all.map((w) => w.id)).toEqual([...all.map((w) => w.id)].sort((a, b) => a - b));
-    // bob's webhook of his repo is the admin's to read too, by its route.
+    // The webhook of bob's repo is the admin's to read too, by its route.
     expect((await one(null, 3)).mask).toBe("apt/ubuntu-internal");
+  });
+
+  it("take the events of the requests for a second admin, which the admins' webhook of */* has had", async () => {
+    signIn("admin");
+    // Kept sorted, as the server does.
+    const events = ["approval.approved", "approval.expired", "approval.rejected", "approval.requested"] as const;
+    expect(await createWebhook(null, { mask: "*/*", url: "https://chat.example.com/hooks/second", events: ["approval.requested", "approval.approved", "approval.rejected", "approval.expired"] })).toMatchObject({ events });
+    const seeded = (await list(null)).find((w) => w.description === "tell the admins of the requests for a second admin")!;
+    expect(seeded).toMatchObject({ mask: "*/*", events });
+    expect((await log(null, seeded.id)).deliveries.map((d) => d.eventType)).toEqual([
+      "approval.requested",
+      "approval.requested",
+      "approval.expired",
+      "approval.rejected",
+      "approval.requested",
+      "approval.requested",
+    ]);
   });
 
   it("refuses a mask that is not one, and a request without a mask", async () => {

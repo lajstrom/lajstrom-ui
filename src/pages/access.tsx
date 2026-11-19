@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { Info, UserX } from "lucide-react";
 
 import { useChanges } from "@/api/change";
-import { approvalsQuery, bindingsQuery, callerQuery, infoQuery, reposQuery, tokensQuery, usersQuery } from "@/api/queries";
+import { bindingsQuery, callerQuery, infoQuery, reposQuery, tokensQuery, usersQuery } from "@/api/queries";
 import type { Binding } from "@/api/types";
 import { ErrorState, PageHeader, Principal, RelativeTime } from "@/components/common";
 import { TokenStatus } from "@/components/tokens";
@@ -36,12 +36,11 @@ export function AccessPage() {
   const navigate = useNavigate();
   const tab = search.tab ?? "users";
   // The requests for a second admin, on a server that has them (info.approval), with how many
-  // wait (rbac.md §13).
+  // wait for this admin: those it could approve (rbac.md §13, Telling the second admin).
   const info = useQuery(infoQuery);
   const who = useQuery(callerQuery);
   const requests = info.data?.approval !== undefined && who.data?.admin === true;
-  const waiting = useQuery({ ...approvalsQuery("pending", undefined), enabled: requests });
-  const count = waiting.data ? `${waiting.data.approvals.length}${waiting.data.next ? "+" : ""}` : null;
+  const count = info.data?.pendingApprovals;
 
   return (
     <>
@@ -71,7 +70,7 @@ export function AccessPage() {
           { value: "masks", label: "Tokens over a mask" },
           { value: "bindings", label: "Bindings" },
           { value: "ci", label: "CI trust policies" },
-          ...(requests ? [{ value: "approvals" as const, label: count && count !== "0" ? `Requests (${count})` : "Requests" }] : []),
+          ...(requests ? [{ value: "approvals" as const, label: count ? `Requests (${count})` : "Requests" }] : []),
           // The access report of a server that has it, like the requests (rbac.md §14).
           ...(requests ? [{ value: "review" as const, label: "Review" }] : []),
         ]}

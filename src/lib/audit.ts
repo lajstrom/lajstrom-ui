@@ -23,6 +23,7 @@ export const auditActions = [
   "user.mustchange",
   "user.owner",
   "user.login",
+  "user.groups",
   "binding.create",
   "binding.delete",
   "approval.request",

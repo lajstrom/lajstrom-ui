@@ -20,7 +20,8 @@ function actionTone(action: string): BadgeProps["tone"] {
   if (action === "delete" || action === "proxy.reject" || action === "policy.refuse" || /\.(delete|revoke|disable|drop|prune)$/.test(action)) return "danger";
   if (
     ["token.", "binding.", "key.", "ci.policy.", "approval."].some((p) => action.startsWith(p)) ||
-    action === "login.block"
+    action === "login.block" ||
+    action === "user.groups"
   ) {
     return "warning";
   }
@@ -213,6 +214,13 @@ function AuditRow({ event: e, showRepo }: { event: AuditEvent; showRepo: boolean
             // A lock of the lockout, 10 wrong passwords in a row, rather than a throttle that
             // tripped (rbac.md §1, The lockout).
             <span className="text-xs text-muted-foreground">password locked</span>
+          ) : e.details?.source === "refresh" ? (
+            // serve's refresh of the OIDC logins with auth.oidc.refresh.interval: a login the IdP
+            // refused, or the groups its ID token changed (rbac.md §8, Asking the IdP again).
+            <span className="text-xs text-muted-foreground">{e.action === "token.revoke" ? "refused by the IdP" : "from the IdP"}</span>
+          ) : e.action === "user.login" && e.details?.refresh === false ? (
+            // A login the refresh does not reach: the IdP issued no refresh token.
+            <span className="text-xs text-muted-foreground">no refresh token</span>
           ) : null}
           {e.state !== "ok" ? (
             <Tooltip content={stateHelp[e.state] + (e.error ? `: ${e.error}` : "")}>
