@@ -1,4 +1,4 @@
-# Generated from openapi/server.yaml, lajstrom/lajstrom@6dd853e9b6a0ec272c59c0e43a8f55aa810352ad, and openapi/proposed.yaml.
+# Generated from openapi/server.yaml, lajstrom/lajstrom@96bb3936817bfdd284fb8f63e60bb16312abc930, and openapi/proposed.yaml.
 # Do not edit: npm run gen:api.
 openapi: 3.1.0
 info:
@@ -1941,7 +1941,11 @@ paths:
         passwords, else 400; the change clears mustChange and is a user.password audit row by the
         user. Either new password follows the rules of auth.passwords (minLength,
         requireLettersAndDigits), else 400 naming the rule. While auth.localPasswords is false no
-        password is set: 400, naming the setting."
+        password is set: 400, naming the setting. With auth.approval second-admin, {\"password\"}
+        for a user who holds admin, by an admin binding of its own or of a group whose membership
+        has not lapsed, enabled or disabled, is 400 naming the setting, whoever asks, the user
+        itself included: such a user changes its own password with currentPassword, or lajstrom
+        admin user set-password sets it (docs/spec/rbac.md §13, Another admin's password)."
       security:
         - {}
         - basic: []
@@ -2114,6 +2118,14 @@ paths:
         - bindings
       operationId: createBinding
       summary: Create a binding (admin).
+      description: With auth.approval second-admin, a binding of the role admin, or on */*, waits for a
+        second admin, and its request is made with the admin's password as the request's credential,
+        or a web UI's sign-in through OIDC in its place when it is fresh, its auth_time within the
+        last 10 minutes; one that is not is asked for more, 401 with
+        insufficient_user_authentication and max_age=600. Any other token, a service account's
+        included, is 403, checked once the body shows that the binding waits (docs/spec/rbac.md §13,
+        Who requests). A binding that does not wait is made with any credential that reaches the
+        admin role.
       requestBody:
         required: true
         content:
@@ -2474,9 +2486,9 @@ paths:
         minutes (401 with insufficient_user_authentication and max_age=600 for one that is not); any
         other token is 403, all before the request is looked up. Under auth.admin.requireMFA, the
         role needs the sign-in's second factor. The requester is 403. The approval checks again what
-        the request checked, and that the requester is an enabled user with the admin role: one that
-        fails is 409 naming it, and the request stays pending. No body, and no If-Match: a request
-        never changes."
+        the request checked, and that the requester is an enabled user, not a service account, with
+        the admin role: one that fails is 409 naming it, and the request stays pending. No body, and
+        no If-Match: a request never changes."
       parameters:
         - $ref: "#/components/parameters/changeReason"
       responses:

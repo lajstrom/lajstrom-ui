@@ -73,11 +73,16 @@ function UserView({ user, admin, self }: { user: User; admin: boolean; self: boo
   const unlock = useUnlockUser(user);
   const mustChange = useMustChange(user);
   // While the server takes no password (auth.localPasswords: false), none is set or asked for.
-  const passwords = signInModes(useQuery(infoQuery).data).password;
+  const info = useQuery(infoQuery);
+  const passwords = signInModes(info.data).password;
   const [dialog, setDialog] = useState<Dialog>(null);
 
   const principal = `user:${user.uid}`;
   const own = bindings.data?.filter((b) => b.principal === principal);
+  // Under second-admin the API sets no password for a user who holds admin, its own binding or a
+  // group's, whoever asks: an admin who knew it would approve its own requests (rbac.md §13).
+  const holdsAdmin = (bindings.data ?? []).some((b) => b.role === "admin" && (b.principal === principal || (user.groups ?? []).some((g) => b.principal === `group:${g}`)));
+  const noPasswordSet = info.data?.approval === "second-admin" && holdsAdmin;
   const viaGroups = bindings.data?.filter((b) => b.principal.startsWith("group:") && user.groups?.includes(b.principal.slice(6)));
   const isAdmin = [...(own ?? []), ...(viaGroups ?? [])].some((b) => b.role === "admin");
 
@@ -140,7 +145,18 @@ function UserView({ user, admin, self }: { user: User; admin: boolean; self: boo
                 </Button>
               </Tooltip>
             ) : null}
-            {admin && passwords ? (
+            {admin && passwords && noPasswordSet ? (
+              <Tooltip
+                content={`Under auth.approval second-admin the API sets no password for ${user.name}, who holds admin: ${self ? "change yours from the user menu" : "the user changes its own from the user menu"}, or the command line sets it (lajstrom admin user set-password).`}
+              >
+                <span>
+                  <Button disabled>
+                    <KeyRound />
+                    Set password
+                  </Button>
+                </span>
+              </Tooltip>
+            ) : admin && passwords ? (
               <Button onClick={() => setDialog("password")}>
                 <KeyRound />
                 Set password

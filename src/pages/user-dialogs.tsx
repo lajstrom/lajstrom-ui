@@ -5,7 +5,10 @@ import { useId, useMemo, useState, type FormEvent } from "react";
 import { bindingWaits } from "@/api/approvals";
 import { signInModes } from "@/api/auth";
 import { bindingsQuery, infoQuery, reposQuery, usersQuery } from "@/api/queries";
+import { needsStepUp } from "@/api/step-up";
 import type { User } from "@/api/types";
+import { useSession } from "@/app/session";
+import { SignInAgain } from "@/components/sign-in-again";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogActions, DialogClose, DialogContent } from "@/components/ui/dialog";
@@ -257,9 +260,11 @@ type CreateBindingDialogProps = {
 /** Binds a user or a group to a role on a mask of repos; the form suggests users, groups and
  * masks, and shows which repos the mask matches. Realistic: the server checks the principal. */
 export function CreateBindingDialog({ user }: CreateBindingDialogProps) {
-  const ids = { principal: useId(), principals: useId(), mask: useId(), masks: useId() };
+  const ids = { principal: useId(), principals: useId(), mask: useId(), masks: useId(), password: useId() };
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState("");
+  const [password, setPassword] = useState("");
+  const session = useSession();
   const [role, setRole] = useState<Role>("reader");
   const [mask, setMask] = useState("");
   const create = useCreateBinding();
@@ -282,11 +287,15 @@ export function CreateBindingDialog({ user }: CreateBindingDialogProps) {
   const repoMask = role === "admin" ? "*/*" : mask.trim();
   const valid = parseMask(repoMask) !== null;
   const matched = valid ? prefixes.filter((p) => maskMatches(repoMask, p)) : [];
-  const ready = principal.trim() !== "" && valid;
   const waits = info.data?.approval === "second-admin" && bindingWaits(role, repoMask);
+  // A binding that waits is asked for with the admin's password, or the session of a fresh
+  // sign-in through OIDC in its place (rbac.md §13, Who requests).
+  const asksPassword = waits && !session?.signIn;
+  const ready = principal.trim() !== "" && valid && (!asksPassword || password !== "");
 
   const reset = () => {
     setTyped("");
+    setPassword("");
     setRole("reader");
     setMask("");
     create.reset();
@@ -297,7 +306,10 @@ export function CreateBindingDialog({ user }: CreateBindingDialogProps) {
   };
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (ready) create.mutate({ principal: principal.trim(), role, repoMask }, { onSuccess: close });
+    if (!ready) return;
+    const req = { principal: principal.trim(), role, repoMask };
+    // The password is not kept once it is sent: a refused one is typed again.
+    create.mutate({ req, ...(asksPassword && session ? { password: { user: session.user, password } } : {}) }, { onSuccess: close, onSettled: () => setPassword("") });
   };
 
   return (
@@ -365,7 +377,12 @@ export function CreateBindingDialog({ user }: CreateBindingDialogProps) {
               you approves it.
             </p>
           ) : null}
-          <FormError error={errorText(create.error)} />
+          {asksPassword ? (
+            <Field label="Your password" htmlFor={ids.password} hint="The server takes a request for a second admin with your password, or a fresh sign-in through single sign-on, never with a token.">
+              <Input id={ids.password} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            </Field>
+          ) : null}
+          {needsStepUp(create.error) ? <SignInAgain error={create.error} what="A request for a second admin" /> : <FormError error={errorText(create.error)} />}
           <DialogActions>
             <Button type="button" disabled={create.isPending} onClick={close}>
               Cancel

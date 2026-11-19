@@ -6,9 +6,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 
 import { apiGet, apiPath } from "@/api/client";
 import { isApproval } from "@/api/approvals";
-import { approveRequest, createBinding, createMaskToken, createUser, rejectRequest, updateUser } from "@/api/mutations";
+import { approveRequest, createBinding, createMaskToken, createUser, rejectRequest, setUserPassword, updateUser } from "@/api/mutations";
 import { keepReason } from "@/api/reason";
-import { setSession } from "@/api/session";
+import { getSession, setSession } from "@/api/session";
 import type { Approval, ApprovalList, AuditList, Binding, CreatedApproval, ServerInfo, Token, User } from "@/api/types";
 import { sha256Hex } from "@/lib/sha256";
 
@@ -42,8 +42,10 @@ const bindingsOf = (principal: string) => apiGet<{ bindings: Binding[] }>(apiPat
 const rows = (action: string) => apiGet<AuditList>(apiPath("audit"), { action }).then((r) => r.events);
 const asOscar = { user: "oscar", password: "oscar" };
 
+/** Asks for a binding that waits, with the password of the one signed in, its name. */
 async function ask(req: Parameters<typeof createBinding>[0]): Promise<CreatedApproval> {
-  const made = await createBinding(req);
+  const me = getSession()!.user;
+  const made = await createBinding(req, { user: me, password: me });
   if (!isApproval(made)) throw new Error("the binding was made, not asked for");
   return made;
 }
@@ -60,7 +62,12 @@ describe("requests for a second admin", () => {
     expect((await bindingsOf("user:carol")).some((b) => b.role === "admin")).toBe(false);
     expect((await rows("approval.request"))[0]).toMatchObject({ principalName: "admin", subject: `approval:${a.id}`, details: { kind: "binding", changeReason: "CHG-3001: carol runs the registry on call" } });
     // The same change pending twice is 409; a binding elsewhere is made at once.
+    // The session's token makes no request; the password does.
     await expect(createBinding({ principal: "user:carol", role: "admin", repoMask: "*/*" })).rejects.toMatchObject({
+      status: 403,
+      message: "a request for a second admin is made with the admin's password or a web UI's fresh sign-in through OIDC, not with a token",
+    });
+    await expect(createBinding({ principal: "user:carol", role: "admin", repoMask: "*/*" }, { user: "admin", password: "admin" })).rejects.toMatchObject({
       status: 409,
       message: expect.stringMatching(/^the same change waits for a second admin already/),
     });
@@ -92,6 +99,17 @@ describe("requests for a second admin", () => {
       message: "admin: under auth.approval second-admin, a user is bound with POST /api/v1/bindings, which waits for a second admin, not made an admin here",
     });
     expect((await apiGet<{ users: User[] }>(apiPath("users"))).users.map((u) => u.name)).not.toContain("second");
+  });
+
+  it("leave no admin's password to another admin: the API sets none for a user who holds admin", async () => {
+    signIn("admin");
+    const oscar = await uidOf("oscar");
+    await expect(setUserPassword(oscar, "a password admin knows")).rejects.toMatchObject({
+      status: 400,
+      message: `password: under auth.approval second-admin, the API sets no new password for user ${oscar}, who holds admin: the user changes its own with currentPassword, or lajstrom admin user set-password sets it`,
+    });
+    // One who holds no admin gets one.
+    await setUserPassword(await uidOf("alice"), "alice's new one");
   });
 
   it("are rejected by any admin, the requester withdrawing its own", async () => {

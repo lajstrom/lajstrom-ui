@@ -59,9 +59,10 @@ export function deleteUser(user: string): Promise<void> {
 }
 
 /** Creates a binding; with auth.approval second-admin, one of the role admin or on *\/* is a
- * request for a second admin in its place (202). */
-export function createBinding(req: BindingRequest): Promise<Binding | CreatedApproval> {
-  return apiSend<Binding | CreatedApproval>("POST", apiPath("bindings"), { body: req, reason: "body" });
+ * request for a second admin in its place (202), made with the admin's password, or a fresh
+ * sign-in through OIDC in its place, never with another token (docs/spec/rbac.md §13). */
+export function createBinding(req: BindingRequest, password?: Password): Promise<Binding | CreatedApproval> {
+  return apiSend<Binding | CreatedApproval>("POST", apiPath("bindings"), { body: req, reason: "body", ...withPassword(password) });
 }
 
 export function deleteBinding(id: number): Promise<void> {

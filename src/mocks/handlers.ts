@@ -598,6 +598,15 @@ export const handlers = [
     return changeWith(
       request,
       (req) => {
+        // Under second-admin the API sets no new password for a user who holds admin, whoever asks
+        // (rbac.md §13, Another admin's password).
+        if (db.serverInfo.approval === "second-admin" && db.hasAdminBinding(user.name)) {
+          return fail(
+            400,
+            "INVALID",
+            `password: under auth.approval second-admin, the API sets no new password for user ${decode(params.user)}, who holds admin: the user changes its own with currentPassword, or lajstrom admin user set-password sets it`,
+          );
+        }
         const refused = db.setPassword(user, req, `user:${getPersona()}`);
         return refused ? refusal(refused) : new HttpResponse(null, { status: 204 });
       },
@@ -626,6 +635,10 @@ export const handlers = [
       // second admin in its place (rbac.md §13).
       const req = typeof b === "object" && b !== null ? (b as Record<string, unknown>) : {};
       if (db.serverInfo.approval === "second-admin" && approvals.bindingWaits(String(req.role), String(req.repoMask))) {
+        // Its request is made with the admin's password, or a fresh sign-in in its place, checked
+        // once the body shows that it waits (rbac.md §13, Who requests).
+        const cred = passwordOrFreshSignIn(getCredential(), "a request for a second admin is made with the admin's password or a web UI's fresh sign-in through OIDC, not with a token");
+        if (cred) return refusal(cred);
         return waiting(approvals.requestBinding(b, `user:${getPersona()}`));
       }
       const created = db.createBinding(b, `user:${getPersona()}`);

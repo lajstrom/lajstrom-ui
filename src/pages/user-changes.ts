@@ -4,13 +4,13 @@
 // a new one are realistic; a user's delete is confirmed, then realistic. Each change is a row of the audit log, which the notice of
 // a realistic one opens.
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 
 import { optimistic, realistic, update } from "@/api/change";
-import { isApproval } from "@/api/approvals";
-import { createBinding, createUser, deleteBinding, deleteUser, setUserPassword, unlockUser, updateUser } from "@/api/mutations";
-import { approvalsKey, bindingsQuery, tokensQuery, userQuery, usersQuery } from "@/api/queries";
+import { bindingWaits, isApproval } from "@/api/approvals";
+import { createBinding, createUser, deleteBinding, deleteUser, setUserPassword, unlockUser, updateUser, type Password } from "@/api/mutations";
+import { approvalsKey, bindingsQuery, infoQuery, tokensQuery, userQuery, usersQuery } from "@/api/queries";
 import type { Binding, BindingRequest, User, UserRequest } from "@/api/types";
 import { errorText } from "@/lib/errors";
 import { notify } from "@/lib/notices";
@@ -148,19 +148,23 @@ export function useDeleteUser(user: User) {
   });
 }
 
+/** A binding to make, and the admin's password for one that waits for a second admin. */
+export type BindingChange = { req: BindingRequest; password?: Password };
+
 /** Creates a binding; the dialog waits for the list to have it. With auth.approval
- * second-admin, one of the role admin or on *\/* is a request for a second admin instead
- * (docs/spec/rbac.md §13), which the requests show. */
+ * second-admin, one of the role admin or on *\/* is a request for a second admin instead,
+ * made with the admin's password or a fresh sign-in (docs/spec/rbac.md §13), which the requests
+ * show. */
 export function useCreateBinding() {
   const audit = useAuditLink();
   const navigate = useNavigate();
   const { onSuccess: refetch } = realistic(bindingsQuery.queryKey);
   const { onSuccess: refetchRequests } = realistic(approvalsKey);
   return useMutation({
-    mutationFn: (req: BindingRequest) => createBinding(req),
-    onSuccess: async (made, req, result, context) => {
+    mutationFn: (c: BindingChange) => createBinding(c.req, c.password),
+    onSuccess: async (made, { req }, result, context) => {
       if (isApproval(made)) {
-        await refetchRequests(made, req, result, context);
+        await refetchRequests(made, { req }, result, context);
         // The request names a user by its uid: the notice by its name, when the list has it.
         const ref = req.principal.startsWith("user:") ? req.principal.slice(5) : null;
         const known = context.client.getQueriesData<User | User[]>({ queryKey: usersQuery.queryKey }).flatMap(([, d]) => (d === undefined ? [] : Array.isArray(d) ? d : [d]));
@@ -173,7 +177,7 @@ export function useCreateBinding() {
         });
         return;
       }
-      await refetch(made, req, result, context);
+      await refetch(made, { req }, result, context);
       notify({ tone: "success", title: `Bound ${describeBinding(made)}`, action: audit("binding.create") });
     },
   });
@@ -181,9 +185,12 @@ export function useCreateBinding() {
 
 export const deleteBindingKey = ["binding-delete"];
 
-/** Deletes a binding, optimistic in the list; Undo creates it again (realistic). */
+/** Deletes a binding, optimistic in the list; Undo creates it again (realistic), but for one that
+ * would wait for a second admin, which takes a password and a new request. */
 export function useDeleteBinding() {
   const recreate = useCreateBinding();
+  const info = useQuery(infoQuery);
+  const waits = (b: Binding) => info.data?.approval === "second-admin" && bindingWaits(b.role, b.repoMask);
   return useMutation({
     mutationKey: deleteBindingKey,
     mutationFn: (b: Binding) => deleteBinding(b.id),
@@ -195,14 +202,16 @@ export function useDeleteBinding() {
       notify({
         tone: "success",
         title: `Deleted the binding ${describeBinding(b)}`,
-        action: {
-          label: "Undo",
-          run: () =>
-            recreate.mutate(
-              { principal: b.principal, role: b.role, repoMask: b.repoMask },
-              { onError: (err) => notify({ tone: "danger", title: `Bind ${describeBinding(b)} again: refused`, description: errorText(err) }) },
-            ),
-        },
+        action: waits(b)
+          ? undefined
+          : {
+              label: "Undo",
+              run: () =>
+                recreate.mutate(
+                  { req: { principal: b.principal, role: b.role, repoMask: b.repoMask } },
+                  { onError: (err) => notify({ tone: "danger", title: `Bind ${describeBinding(b)} again: refused`, description: errorText(err) }) },
+                ),
+            },
       });
     },
   });
